@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>单片机方案设计器 · 基于 MiniMax-M3</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%94%A7%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- 顶部 -->
+        <header class="header">
+            <h1>🔧 单片机方案设计器</h1>
+            <p class="subtitle">
+                基于 <span id="model-name-display">MiniMax-M3</span>
+                · Prompt <span id="prompt-version-display">v1.0</span>
+            </p>
+        </header>
+
+        <!-- 主输入区 -->
+        <section class="input-card">
+            <div class="form-row">
+                <div class="form-group flex-2">
+                    <label for="topic">📝 题目 <span class="required">*</span></label>
+                    <input
+                        type="text"
+                        id="topic"
+                        placeholder="如：智能台灯控制"
+                        maxlength="50"
+                        autocomplete="off">
+                </div>
+                <div class="form-group flex-1">
+                    <label>🎚️ 等级 <span class="required">*</span></label>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" name="level" value="A" checked>
+                            <span class="radio-text">
+                                <strong>A</strong>
+                                <small>复杂 · 云平台</small>
+                            </span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="level" value="B">
+                            <span class="radio-text">
+                                <strong>B</strong>
+                                <small>中等 · 无线通信</small>
+                            </span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="level" value="C">
+                            <span class="radio-text">
+                                <strong>C</strong>
+                                <small>简单 · 无通信</small>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="description">📌 补充描述（可选）</label>
+                <textarea
+                    id="description"
+                    rows="3"
+                    placeholder="如：需要 WiFi 控制、手机 APP 调光、按键切换场景"
+                    maxlength="500"></textarea>
+            </div>
+
+            <div class="action-row">
+                <button id="generate-btn" class="btn btn-primary">
+                    🚀 生成方案
+                </button>
+                <button id="settings-btn" class="btn btn-secondary">
+                    ⚙️ 设置
+                </button>
+            </div>
+        </section>
+
+        <!-- 预览区 -->
+        <section class="output-card" id="output-card" style="display:none;">
+            <div class="output-header">
+                <h2>📄 预览</h2>
+                <div class="output-actions">
+                    <button id="regenerate-btn" class="btn btn-text" title="重新生成">
+                        🔄 重新生成
+                    </button>
+                </div>
+            </div>
+
+            <div id="output-content" class="output-content"></div>
+
+            <div class="action-row">
+                <button id="copy-btn" class="btn btn-secondary">
+                    📋 复制 Markdown
+                </button>
+                <button id="docx-btn" class="btn btn-secondary">
+                    📄 下载 .docx
+                </button>
+            </div>
+        </section>
+
+        <!-- 状态提示 -->
+        <div id="toast" class="toast" style="display:none;"></div>
+
+        <!-- 设置弹窗 -->
+        <div id="settings-modal" class="modal" style="display:none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>⚙️ 设置</h2>
+                    <button class="modal-close" id="settings-close">×</button>
+                </div>
+
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="api-key">API Key <span class="required">*</span></label>
+                        <div class="input-with-action">
+                            <input
+                                type="password"
+                                id="api-key"
+                                placeholder="sk-..."
+                                autocomplete="off">
+                            <button class="btn-icon" id="toggle-key-visibility" title="显示/隐藏">👁️</button>
+                            <button class="btn-icon" id="clear-key" title="清空">🗑️</button>
+                        </div>
+                        <small class="hint">🔒 只存在你的浏览器本地，不上传任何服务器</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="base-url">Base URL</label>
+                        <input
+                            type="text"
+                            id="base-url"
+                            placeholder="https://api.minimaxi.com/v1">
+                        <small class="hint">MiniMax 国际用户填 https://api.minimax.io/v1</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="model-name">模型</label>
+                        <select id="model-name">
+                            <option value="MiniMax-M3">MiniMax-M3（推荐）</option>
+                            <option value="MiniMax-M2.7">MiniMax-M2.7</option>
+                            <option value="MiniMax-M2.7-highspeed">MiniMax-M2.7-highspeed</option>
+                            <option value="MiniMax-M2.5">MiniMax-M2.5</option>
+                            <option value="MiniMax-M2.5-highspeed">MiniMax-M2.5-highspeed</option>
+                            <option value="MiniMax-M2.1">MiniMax-M2.1</option>
+                            <option value="MiniMax-M2">MiniMax-M2</option>
+                        </select>
+                    </div>
+
+                    <hr>
+
+                    <div class="form-group">
+                        <label for="github-user">GitHub 用户名</label>
+                        <input
+                            type="text"
+                            id="github-user"
+                            placeholder="你的 GitHub 用户名"
+                            autocomplete="off">
+                        <small class="hint">
+                            用于拉取最新 Prompt 模板。仓库名默认 <code>mcu-plan-website</code>。
+                        </small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Prompt 模板 URL（自动拼）</label>
+                        <div class="readonly-input" id="prompt-url-preview">
+                            请先填 GitHub 用户名
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Prompt 版本</label>
+                        <div class="readonly-input" id="prompt-version-info">
+                            未加载
+                        </div>
+                        <button class="btn btn-text" id="refresh-prompt-btn">
+                            🔄 刷新 Prompt
+                        </button>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="settings-cancel">取消</button>
+                    <button class="btn btn-primary" id="settings-save">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 页脚 -->
+        <footer class="footer">
+            <p>
+                单片机方向办公工具 ·
+                <a href="https://github.com" target="_blank" rel="noopener">GitHub</a>
+                ·
+                API 余额去 <a href="https://platform.minimax.io" target="_blank" rel="noopener">platform.minimax.io</a> 充值
+            </p>
+        </footer>
+    </div>
+
+    <!-- Markdown 渲染（用于预览） -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+    <!-- .docx 生成 -->
+    <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
+    <!-- 文件保存 -->
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+
+    <!-- 应用脚本 -->
+    <script src="js/prompt-loader.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/docx-export.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
