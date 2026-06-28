@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>单片机方案设计器 · 基于 MiniMax-M3</title>
+    <title>单片机方案设计 · 基于 MiniMax-M3</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%94%A7%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="css/style.css">
 </head>
@@ -11,86 +11,160 @@
     <div class="app">
         <!-- 顶部 -->
         <header class="header">
-            <h1>🔧 单片机方案设计器</h1>
-            <p class="subtitle">
-                基于 <span id="model-name-display">MiniMax-M3</span>
-                · Prompt <span id="prompt-version-display">v1.0</span>
-            </p>
+            <h1>🔧 单片机方案设计</h1>
         </header>
 
-        <!-- 主输入区 -->
-        <section class="input-card">
-            <div class="form-row">
-                <div class="form-group flex-2">
-                    <label for="topic">📝 题目 <span class="required">*</span></label>
-                    <input
-                        type="text"
-                        id="topic"
-                        placeholder="如：智能台灯控制"
-                        maxlength="50"
-                        autocomplete="off">
-                </div>
-                <div class="form-group flex-1">
-                    <label>🎚️ 等级 <span class="required">*</span></label>
-                    <div class="radio-group">
-                        <label class="radio-label">
-                            <input type="radio" name="level" value="A" checked>
-                            <span class="radio-text">
-                                <strong>A</strong>
-                                <small>复杂 · 云平台</small>
-                            </span>
-                        </label>
-                        <label class="radio-label">
-                            <input type="radio" name="level" value="B">
-                            <span class="radio-text">
-                                <strong>B</strong>
-                                <small>中等 · 无线通信</small>
-                            </span>
-                        </label>
-                        <label class="radio-label">
-                            <input type="radio" name="level" value="C">
-                            <span class="radio-text">
-                                <strong>C</strong>
-                                <small>简单 · 无通信</small>
-                            </span>
-                        </label>
-                    </div>
-                </div>
+        <!-- Tab 切换（先预留，方案修改稍后做） -->
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="design">📝 方案设计</button>
+            <button class="tab-btn disabled" disabled title="稍后开放">✏️ 方案修改</button>
+        </div>
+
+        <!-- ============== 方案设计 ============== -->
+        <div id="design-panel" class="tab-panel active">
+
+            <!-- 题目 -->
+            <div class="form-card">
+                <label for="topic" class="form-label">
+                    题目 <span class="required">*</span>
+                </label>
+                <input
+                    type="text"
+                    id="topic"
+                    placeholder="如：智能台灯控制系统"
+                    maxlength="50"
+                    autocomplete="off"
+                    class="form-input">
             </div>
 
-            <div class="form-group">
-                <label for="description">📌 补充描述（可选）</label>
+            <!-- 描述 -->
+            <div class="form-card">
+                <label for="description" class="form-label">
+                    描述 <span class="optional">可选</span>
+                </label>
                 <textarea
                     id="description"
-                    rows="3"
-                    placeholder="如：需要 WiFi 控制、手机 APP 调光、按键切换场景"
-                    maxlength="500"></textarea>
-            </div>
+                    rows="6"
+                    placeholder="可选：用自然语言补充需求。
 
-            <div class="action-row">
-                <button id="generate-btn" class="btn btn-primary">
-                    🚀 生成方案
-                </button>
-                <button id="settings-btn" class="btn btn-secondary">
-                    ⚙️ 设置
-                </button>
-            </div>
-        </section>
+例：
+智能台灯。需要 2 个传感器（光敏电阻、人体红外），3 个执行器（LED 灯、蜂鸣器、舵机）。阈值 300 lux 触发开灯。"
+                    class="form-input form-textarea"></textarea>
 
-        <!-- 预览区 -->
-        <section class="output-card" id="output-card" style="display:none;">
-            <div class="output-header">
-                <h2>📄 预览</h2>
-                <div class="output-actions">
-                    <button id="regenerate-btn" class="btn btn-text" title="重新生成">
-                        🔄 重新生成
+                <div class="form-actions">
+                    <button type="button" class="btn-link" id="template-btn">
+                        📝 用模板
+                    </button>
+                    <button type="button" class="btn-link" id="clear-desc-btn">
+                        ✏️ 清空
                     </button>
                 </div>
             </div>
 
+            <!-- 等级选择 -->
+            <div class="form-card">
+                <label class="form-label">
+                    等级 <span class="required">*</span>
+                </label>
+                <div class="level-group">
+                    <label class="level-card">
+                        <input type="radio" name="level" value="A">
+                        <span class="level-content">
+                            <strong>A</strong>
+                            <small>复杂 · 云平台 · 10-15 功能</small>
+                        </span>
+                    </label>
+                    <label class="level-card active">
+                        <input type="radio" name="level" value="B" checked>
+                        <span class="level-content">
+                            <strong>B</strong>
+                            <small>中等 · 通信 · 5-10 功能</small>
+                        </span>
+                    </label>
+                    <label class="level-card">
+                        <input type="radio" name="level" value="C">
+                        <span class="level-content">
+                            <strong>C</strong>
+                            <small>简单 · 无通信 · 5个以下功能</small>
+                        </span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- 高级选项（折叠） -->
+            <details class="advanced">
+                <summary>⚙️ 高级选项</summary>
+                <div class="advanced-body">
+
+                    <!-- 主控芯片 -->
+                    <div class="advanced-row">
+                        <label class="advanced-label">主控芯片：</label>
+                        <select id="mcu-select" class="advanced-select">
+                            <option value="">AI 自动推荐</option>
+                            <option value="STM32F103C8T6" selected>STM32F103C8T6（默认）</option>
+                            <option value="STC89C52">STC89C52 (51)</option>
+                            <option value="Arduino Uno">Arduino Uno</option>
+                            <option value="ESP32">ESP32</option>
+                            <option value="ESP8266">ESP8266</option>
+                            <option value="__custom__">自定义...</option>
+                        </select>
+                        <input type="text" id="mcu-custom" class="advanced-input"
+                               placeholder="填型号" style="display:none;">
+                    </div>
+
+                    <!-- 显示器 -->
+                    <div class="advanced-row">
+                        <label class="advanced-label">显示器：</label>
+                        <select id="display-select" class="advanced-select">
+                            <option value="">AI 自动推荐</option>
+                            <option value="OLED">0.96 寸 OLED</option>
+                            <option value="LCD1602">LCD1602</option>
+                            <option value="不需要">不需要</option>
+                            <option value="__custom__">自定义...</option>
+                        </select>
+                        <input type="text" id="display-custom" class="advanced-input"
+                               placeholder="填型号" style="display:none;">
+                    </div>
+
+                    <!-- 电源 -->
+                    <div class="advanced-row">
+                        <label class="advanced-label">电源：</label>
+                        <select id="power-select" class="advanced-select">
+                            <option value="5V适配器">5V 适配器（推荐）</option>
+                            <option value="USB">USB</option>
+                            <option value="12V+AMS1117-5">12V + AMS1117-5</option>
+                            <option value="锂电池">锂电池</option>
+                            <option value="太阳能">太阳能板</option>
+                            <option value="__custom__">自定义...</option>
+                        </select>
+                        <input type="text" id="power-custom" class="advanced-input"
+                               placeholder="填电源类型" style="display:none;">
+                    </div>
+
+                    <div class="advanced-tip">
+                        💡 这里不填 = AI 自由决定；填了 = 强制用你选的型号
+                    </div>
+                </div>
+            </details>
+
+            <!-- 生成按钮 -->
+            <button id="generate-btn" class="btn btn-primary btn-large">
+                🚀 生成方案
+            </button>
+        </div>
+
+        <!-- 预览区 -->
+        <section class="output-card" id="output-card" style="display:none;">
+            <div class="output-header">
+                <h2>📄 生成的方案</h2>
+                <button id="regenerate-btn" class="btn btn-text" title="重新生成">
+                    🔄 重新生成
+                </button>
+            </div>
+
             <div id="output-content" class="output-content"></div>
 
-            <div class="action-row">
+            <div class="output-actions">
                 <button id="copy-btn" class="btn btn-secondary">
                     📋 复制 Markdown
                 </button>
@@ -103,102 +177,13 @@
         <!-- 状态提示 -->
         <div id="toast" class="toast" style="display:none;"></div>
 
-        <!-- 设置弹窗 -->
-        <div id="settings-modal" class="modal" style="display:none;">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>⚙️ 设置</h2>
-                    <button class="modal-close" id="settings-close">×</button>
-                </div>
-
-                <div class="modal-body">
-                    <div class="form-group">
-                        <label for="api-key">API Key <span class="required">*</span></label>
-                        <div class="input-with-action">
-                            <input
-                                type="password"
-                                id="api-key"
-                                placeholder="sk-..."
-                                autocomplete="off">
-                            <button class="btn-icon" id="toggle-key-visibility" title="显示/隐藏">👁️</button>
-                            <button class="btn-icon" id="clear-key" title="清空">🗑️</button>
-                        </div>
-                        <small class="hint">🔒 只存在你的浏览器本地，不上传任何服务器</small>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="base-url">Base URL</label>
-                        <input
-                            type="text"
-                            id="base-url"
-                            placeholder="https://api.minimaxi.com/v1">
-                        <small class="hint">MiniMax 国际用户填 https://api.minimax.io/v1</small>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="model-name">模型</label>
-                        <select id="model-name">
-                            <option value="MiniMax-M3">MiniMax-M3（推荐）</option>
-                            <option value="MiniMax-M2.7">MiniMax-M2.7</option>
-                            <option value="MiniMax-M2.7-highspeed">MiniMax-M2.7-highspeed</option>
-                            <option value="MiniMax-M2.5">MiniMax-M2.5</option>
-                            <option value="MiniMax-M2.5-highspeed">MiniMax-M2.5-highspeed</option>
-                            <option value="MiniMax-M2.1">MiniMax-M2.1</option>
-                            <option value="MiniMax-M2">MiniMax-M2</option>
-                        </select>
-                    </div>
-
-                    <hr>
-
-                    <div class="form-group">
-                        <label for="github-user">GitHub 用户名</label>
-                        <input
-                            type="text"
-                            id="github-user"
-                            placeholder="你的 GitHub 用户名"
-                            autocomplete="off">
-                        <small class="hint">
-                            用于拉取最新 Prompt 模板。仓库名默认 <code>mcu-plan-website</code>。
-                        </small>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Prompt 模板 URL（自动拼）</label>
-                        <div class="readonly-input" id="prompt-url-preview">
-                            请先填 GitHub 用户名
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Prompt 版本</label>
-                        <div class="readonly-input" id="prompt-version-info">
-                            未加载
-                        </div>
-                        <button class="btn btn-text" id="refresh-prompt-btn">
-                            🔄 刷新 Prompt
-                        </button>
-                    </div>
-                </div>
-
-                <div class="modal-footer">
-                    <button class="btn btn-secondary" id="settings-cancel">取消</button>
-                    <button class="btn btn-primary" id="settings-save">保存</button>
-                </div>
-            </div>
-        </div>
-
         <!-- 页脚 -->
         <footer class="footer">
-            <p>
-                单片机方向办公工具 ·
-                <a href="https://github.com" target="_blank" rel="noopener">GitHub</a>
-                ·
-                API 余额去 <a href="https://platform.minimax.io" target="_blank" rel="noopener">platform.minimax.io</a> 充值
-            </p>
+            <p>单片机方向办公工具</p>
         </footer>
     </div>
 
-    <!-- Markdown 渲染（用于预览） -->
+    <!-- Markdown 渲染 -->
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
     <!-- .docx 生成 -->
     <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
@@ -207,6 +192,7 @@
 
     <!-- 应用脚本 -->
     <script src="js/prompt-loader.js"></script>
+    <script src="js/device-library.js"></script>
     <script src="js/api.js"></script>
     <script src="js/docx-export.js"></script>
     <script src="js/app.js"></script>
