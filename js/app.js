@@ -100,8 +100,31 @@
 
     const state = {
         promptText: '',
+        // 设计 tab 的结果。taskbook tab 自己的 state 由 taskbook.js 单独管。
         lastResult: '',
     };
+
+    // ========== 跨区共享数据 ==========
+    // 同一个题目在 4 个区域间共享。
+    // - shared.topic              题目
+    // - shared.scheme             方案 markdown（区域 ①输出）
+    // - shared.taskbook           开题报告 markdown（区域 ②输出）—— 占位预留
+    // - shared.thesis             论文 markdown（区域 ③输出）—— 占位预留
+    // - shared.sourceMode         'topic' | 'taskbook'
+    const shared = window.__shared__ = window.__shared__ || {
+        topic: '',
+        scheme: '',
+        taskbook: '',
+        thesis: '',
+        ppt: '',
+        sourceMode: 'topic',
+        updatedAt: Date.now(),
+    };
+
+    function syncShared(patch) {
+        Object.assign(shared, patch, { updatedAt: Date.now() });
+    }
+    window.syncShared = syncShared;
 
     // ========== 工具 ==========
 
@@ -124,6 +147,12 @@
             button.innerHTML = button.dataset.originalText || button.innerHTML;
             button.disabled = false;
         }
+    }
+
+    // 为了避免同时出现 loading overlay + button spinner，提供个一体化包装
+    function setBusyUI(button, isLoading) {
+        setLoading(button, isLoading);
+        setLoadingOverlay(isLoading, { title: '正在生成方案...' });
     }
 
     function trim(s) { return (s || '').trim(); }
@@ -149,8 +178,23 @@
         // 先找到最后一个 "\n# " 位置
         const lastHashIdx = cleaned.lastIndexOf('\n# ');
         if (lastHashIdx < 0) {
-            // 完全没有 # 标题 → 删开头所有内容（保留正文）
-            return cleaned.replace(/^[\s\S]*?(?=\n[^\s])/, '').trim();
+            // Fallback 1：找 "1. 题目" / "2. 器件" / "3. 功能" 这种编号列表
+            // 注：中文后 \b 不生效，用 lookahead (?=\s|$) 代替
+            const numMatch = cleaned.match(/\n\s*\d+\.\s*(题目|器件|功能|方案)(?=\s|$)/m);
+            if (numMatch) {
+                let afterNum = cleaned.substring(numMatch.index + 1).trim();
+                // 截断讨论区（如果 AI 在最终方案后又写了思考）
+                const discuss = afterNum.match(/\n\s*\n\s*(Wait|Actually|Hmm|Let me|Finally|OK so|Looking|So the|Now let|Let me revise|Let me double|Let me finalize|Combine)\b/i);
+                if (discuss) afterNum = afterNum.substring(0, discuss.index).trim();
+                return afterNum;
+            }
+            // Fallback 2：找 "题目" / "器件" / "功能" 关键词开头
+            const kwMatch = cleaned.match(/\n\s*(题目|器件|功能)(?=[：:\s])/);
+            if (kwMatch) {
+                return cleaned.substring(kwMatch.index + 1).trim();
+            }
+            // Fallback 3：都找不到 → 返原文（保守不误删）
+            return cleaned.trim();
         }
 
         // 取出从最后一个 # 标题开始的内容
@@ -265,7 +309,7 @@
         const button = dom.outputCard.style.display === 'none' ||
             dom.outputCard.style.display === ''
             ? dom.generateBtn : dom.regenerateBtn;
-        setLoading(button, true);
+        setBusyUI(button, true);
 
         const advanced = getAdvancedSpec();
         const userMsg = buildUserMessage(topic, description, advanced, level);
@@ -287,7 +331,7 @@
             console.error(err);
             showToast(err.message || '生成失败', 'error');
         } finally {
-            setLoading(button, false);
+            setBusyUI(button, false);
         }
     }
 
@@ -323,6 +367,20 @@
         const html = marked.parse(cleaned);
         dom.outputContent.innerHTML = html;
         dom.outputCard.style.display = 'block';
+
+        // ❗ 不再自动保存到 shared.scheme
+        // 仅在本地 state 暂存，用户点「下一步」时才写入共享数据
+        state.lastScheme = cleaned;
+        state.lastTopic = trim(dom.topic.value) || shared.topic;
+
+        // 显示「下一步」提示条
+        const nextBar = document.getElementById('next-step-bar');
+        if (nextBar) {
+            nextBar.style.display = 'flex';
+            // 重置一下提示文案，让用户知道还未共享
+            const label = nextBar.querySelector('.next-step-label');
+            if (label) label.innerHTML = '✅ 方案已生成 · <strong>点下一步保存到共享数据</strong>';
+        }
 
         setTimeout(() => {
             dom.outputCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -369,6 +427,16 @@
         }
     }
 
+    // ========== Tab 按钮绑定 ==========
+
+    function bindTabButtons() {
+        document.querySelectorAll('.tab-btn:not(.disabled)').forEach(btn => {
+            btn.addEventListener('click', () => {
+                window.switchTab(btn.dataset.tab);
+            });
+        });
+    }
+
     // ========== 模板 / 清空 ==========
 
     function onUseTemplate() {
@@ -393,11 +461,52 @@
         state.promptText = EMBEDDED_PROMPT.replace('{device_library}', DeviceLibrary.getText());
     }
 
+    // ========== Loading 状态（全局进度+耗时） ==========
+    const loadingState = {
+        timer: null,
+        startTime: 0,
+        steps: [
+            { pct: 15, text: '准备请求...' },
+            { pct: 30, text: '发送题目到 AI...' },
+            { pct: 55, text: 'AI 思考中...（这一步要 10-30 秒）' },
+            { pct: 80, text: '生成中...' },
+            { pct: 95, text: '即将完成...' },
+        ],
+    };
+
+    function setLoadingOverlay(show, opts = {}) {
+        const overlay = document.getElementById('loading-overlay');
+        if (!overlay) return;
+        if (!show) {
+            overlay.style.display = 'none';
+            if (loadingState.timer) { clearInterval(loadingState.timer); loadingState.timer = null; }
+            return;
+        }
+        // 显示并启动计时
+        document.getElementById('loading-title').textContent = opts.title || '生成中...';
+        document.getElementById('loading-step').textContent = loadingState.steps[0].text;
+        document.getElementById('loading-progress-bar').style.width = loadingState.steps[0].pct + '%';
+        document.getElementById('loading-elapsed').textContent = '已耗时 0 秒';
+        overlay.style.display = 'flex';
+        loadingState.startTime = Date.now();
+        let stepIdx = 0;
+        loadingState.timer = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - loadingState.startTime) / 1000);
+            document.getElementById('loading-elapsed').textContent = `已耗时 ${elapsed} 秒`;
+            if (stepIdx < loadingState.steps.length - 1 && elapsed > (stepIdx + 1) * 4) {
+                stepIdx++;
+                document.getElementById('loading-step').textContent = loadingState.steps[stepIdx].text;
+                document.getElementById('loading-progress-bar').style.width = loadingState.steps[stepIdx].pct + '%';
+            }
+        }, 1000);
+    }
+
     // ========== 初始化 ==========
 
     async function init() {
         await loadPrompt();
 
+        bindTabButtons();
         bindSelectCustom();
         bindLevelCards();
 
@@ -408,13 +517,118 @@
         dom.templateBtn.addEventListener('click', onUseTemplate);
         dom.clearDescBtn.addEventListener('click', onClearDesc);
 
+        // 下一步按钮：点击时才把方案保存到 shared
+        const nextStepBtn = document.getElementById('next-step-btn');
+        if (nextStepBtn) {
+            nextStepBtn.addEventListener('click', () => {
+                if (!state.lastScheme) { showToast('请先生成方案', 'error'); return; }
+                // ✅ 点击时才保存到共享数据（未点不共享）
+                syncShared({
+                    scheme: state.lastScheme,
+                    topic: state.lastTopic || shared.topic,
+                    sourceMode: 'topic',
+                });
+                // 提示文案变成「已共享」
+                const nextBar = document.getElementById('next-step-bar');
+                if (nextBar) {
+                    const label = nextBar.querySelector('.next-step-label');
+                    if (label) label.innerHTML = '✅ 方案已共享 · 下游区域可读取';
+                }
+                showToast(`共享数据已保存。题目：${shared.topic || '未填'}（区域 ② 占位中）`, 'success');
+                if (window.switchTab) window.switchTab('taskbook');
+            });
+        }
+
         dom.topic.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 dom.description.focus();
             }
         });
+
+        // submode 切换
+        bindSubmodeButtons();
+
+        // 恢复上次输入
+        if (shared.topic && dom.topic && !dom.topic.value) {
+            dom.topic.value = shared.topic;
+        }
     }
+
+    function bindSubmodeButtons() {
+        const buttons = document.querySelectorAll('.submode-btn');
+        buttons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mode = btn.dataset.submode;
+                if (!mode) return;
+                // 切换按钮激活态
+                buttons.forEach(b => b.classList.toggle('active', b === btn));
+                // 切换 submode-panel
+                document.querySelectorAll('.submode-panel').forEach(p => p.classList.remove('active'));
+                const targetId = mode === 'topic' ? 'submode-topic' : 'submode-taskbook';
+                const target = document.getElementById(targetId);
+                if (target) target.classList.add('active');
+                syncShared({ sourceMode: mode });
+            });
+        });
+    }
+
+    // ========== 导出给 taskbook.js 使用 ==========
+
+    /**
+     * 把生成结果渲染到指定 tab 的输出区。
+     * @param {string} markdown - AI 返回的原始 markdown
+     * @param {string} [targetTab] - 'design'（默认）或 'taskbook'
+     *
+     * 行为：
+     * - 'design'：渲染到 design tab 的 #output-content
+     * - 'taskbook'：渲染到 taskbook tab 的 #tb-output-content，自动切到 taskbook tab
+     * - 两个 tab 的输出区都在各自 panel 内，CSS 的 .tab-panel { display:none }
+     *   已经自动处理隐藏/显示，无需 JS 手动藏对方输出
+     */
+    window.showOutput = function(markdown, targetTab) {
+        const cleaned = stripThinking(markdown);
+
+        if (targetTab === 'taskbook') {
+            // ❗ 不再自动切换 tab。tb-output-card 在 submode-taskbook 内，
+            // 只要该子模式是 active 的（属于 scheme-panel），输出区就可见。
+            // 如果自动切换会把用户跳到「区域 ② 开题报告」（同名陷阱）
+            const tbCard = document.getElementById('tb-output-card');
+            const tbContent = document.getElementById('tb-output-content');
+            if (!tbCard || !tbContent) return;
+            tbContent.innerHTML = marked.parse(cleaned);
+            tbCard.style.display = 'block';
+            setTimeout(() => tbCard.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+        } else {
+            // 默认 scheme-panel 的题目生成子模式
+            renderOutput(cleaned);
+        }
+    };
+
+    /**
+     * 切换 tab。所有输出区都在各自 panel 内，CSS 的 .tab-panel { display:none }
+     * 自动处理隐藏/显示，不需要手动藏对方 tab 的输出。
+     */
+    window.switchTab = function(tabName) {
+        document.querySelectorAll('.tab-btn:not(.disabled)').forEach(b => {
+            b.classList.toggle('active', b.dataset.tab === tabName);
+        });
+        document.querySelectorAll('.tab-panel').forEach(p => {
+            p.classList.toggle('active', p.id === `${tabName}-panel`);
+        });
+    };
+    window.showToast = showToast;
+    window.stripThinking = stripThinking;
+    window.setLoadingOverlay = setLoadingOverlay;
+    window.generateFromPrompt = async function(prompt) {
+        // 直接走 ApiClient（api.js 里 hardcode 了 KEY）
+        return await ApiClient.chat({
+            systemPrompt: '你是单片机方案设计助手，遵循用户提供的规则输出。',
+            userMessage: prompt
+        });
+    };
+
+    window.deviceLibraryText = ''; // 由 device-library.js 设置
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);

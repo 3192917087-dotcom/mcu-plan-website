@@ -117,3 +117,7 @@ var DeviceLibrary = {
         return '2.0';
     },
 };
+
+// 暴露出供 taskbook.js 使用
+window.DEVICE_LIBRARY_TEXT = DEVICE_LIBRARY;
+window.deviceLibraryText = DEVICE_LIBRARY;
