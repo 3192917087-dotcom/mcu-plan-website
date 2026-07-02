@@ -218,6 +218,10 @@ MIT
 
 ---
 
+## 🌐 立即访问
+
+最新部署版本：**https://3192917087-dotcom.github.io/mcu-plan-website/**
+
 ## 🙏 致谢
 
 由程帅志的 AI 秘书 📋 自动生成。
