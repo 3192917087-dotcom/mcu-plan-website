@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>单片机办公套件 · 基于 MiniMax-M3</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%94%AC%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="css/style.css?v=20260702h">
+    <link rel="stylesheet" href="css/style.css?v=20260703k">
 </head>
 <body>
     <div class="app">
@@ -82,6 +82,10 @@
                         maxlength="50"
                         autocomplete="off"
                         class="form-input">
+                    <div id="topic-suggest" class="topic-suggest hidden">
+                        <div class="topic-suggest-title">📚 22 级库类似项目（点击填到描述）：</div>
+                        <ul class="topic-suggest-list"></ul>
+                    </div>
                 </div>
 
                 <!-- 描述 -->
@@ -220,9 +224,10 @@
                         </button>
                     </div>
                 </section>
-            </div>
 
-            <!-- ===== 子模式 2: 开题生成方案 ===== -->
+                <!-- 22 级库方案输出区（submode-topic 内 · 在 AI 输出 section 之外，独立显示） -->
+                <div id="scheme-22ji-output" class="output-22ji-container hidden"></div>
+            </div>
             <div id="submode-taskbook" class="submode-panel">
 
                 <div class="form-card">
@@ -369,11 +374,11 @@
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 
     <!-- 应用脚本 -->
-    <script src="js/prompt-loader.js?v=20260702h"></script>
-    <script src="js/device-library.js?v=20260702h"></script>
-    <script src="js/api.js?v=20260702h"></script>
-    <script src="js/docx-export.js?v=20260702h"></script>
-    <script src="js/app.js?v=20260702h"></script>
-    <script src="js/taskbook.js?v=20260702h"></script>
+    <script src="js/prompt-loader.js?v=20260703k"></script>
+    <script src="js/device-library.js?v=20260703k"></script>
+    <script src="js/api.js?v=20260703k"></script>
+    <script src="js/docx-export.js?v=20260703k"></script>
+    <script src="js/app.js?v=20260703k"></script>
+    <script src="js/taskbook.js?v=20260703k"></script>
 </body>
 </html>

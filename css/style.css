@@ -843,3 +843,223 @@ input, textarea, select { font-family: inherit; }
     border-bottom: 1px solid var(--accent);
   }
 }
+
+/* ========== 22 级库提示 ========== */
+.topic-suggest {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #dbeafe;
+  border-left: 3px solid #2563eb;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.topic-suggest-title {
+  color: #555;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.topic-suggest-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.topic-suggest-list li {
+  padding: 4px 8px;
+  margin: 2px 0;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.15s;
+  color: #222;
+}
+.topic-suggest-list li:hover {
+  background: #2563eb;
+  color: #fff;
+}
+.topic-suggest-list li strong {
+  color: #2563eb;
+  font-family: monospace;
+  margin-right: 6px;
+}
+.topic-suggest-list li:hover strong {
+  color: #fff;
+}
+
+/* ========== 22 级库提示 ========== */
+.topic-suggest {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #dbeafe;
+  border-left: 3px solid #2563eb;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.topic-suggest-title {
+  color: #555;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.topic-suggest-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.topic-suggest-list li {
+  padding: 4px 8px;
+  margin: 2px 0;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.15s;
+  color: #222;
+}
+.topic-suggest-list li:hover {
+  background: #2563eb;
+  color: #fff;
+}
+.topic-suggest-list li strong {
+  color: #2563eb;
+  font-family: monospace;
+  margin-right: 6px;
+}
+.topic-suggest-list li:hover strong {
+  color: #fff;
+}
+
+/* ========== 22 级库输出区 ========== */
+.output-22ji-container {
+  margin-top: 20px;
+}
+.output-22ji-container .output-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid #10b981;
+  border-radius: 6px;
+  padding: 16px 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.output-22ji-container .output-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f3f4f6;
+}
+.output-22ji-container .output-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #111;
+}
+.output-22ji-container .output-source {
+  font-size: 12px;
+  color: #6b7280;
+  background: #f0f9ff;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.output-22ji-container .output-content pre {
+  background: #f9fafb;
+  padding: 12px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+}
+.output-22ji-container .output-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+/* ========== 22 级库 Modal ========== */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.modal-overlay.hidden {
+  display: none;
+}
+.modal-box {
+  background: #fff;
+  border-radius: 8px;
+  max-width: 600px;
+  width: 90%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.modal-header h2 {
+  margin: 0;
+  font-size: 16px;
+  color: #111;
+}
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #6b7280;
+  padding: 0;
+  width: 28px;
+  height: 28px;
+  line-height: 1;
+  border-radius: 4px;
+}
+.modal-close:hover {
+  background: #f3f4f6;
+  color: #111;
+}
+.modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+.modal-section {
+  margin-bottom: 16px;
+  line-height: 1.6;
+}
+.modal-section strong {
+  display: block;
+  color: #374151;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+.modal-section span {
+  color: #4b5563;
+  font-size: 14px;
+}
+.modal-section ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #4b5563;
+  font-size: 14px;
+}
+.modal-section ul li {
+  margin: 4px 0;
+}
+.modal-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 12px 20px;
+  border-top: 1px solid #e5e7eb;
+}

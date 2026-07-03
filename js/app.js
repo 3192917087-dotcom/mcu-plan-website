@@ -102,7 +102,206 @@
         promptText: '',
         // 设计 tab 的结果。taskbook tab 自己的 state 由 taskbook.js 单独管。
         lastResult: '',
+        // 22 级库 catalog。启动时 load22jiCatalog() 加载。
+        catalog22ji: [],
     };
+
+    // ========== 22 级库 catalog ==========
+
+    async function load22jiCatalog() {
+        try {
+            const r = await fetch('library/22ji-catalog.json');
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            state.catalog22ji = Array.isArray(data) ? data : [];
+            console.log('[22ji catalog] loaded ' + state.catalog22ji.length + ' projects');
+        } catch (err) {
+            console.warn('[22ji catalog] load failed:', err.message);
+            state.catalog22ji = [];
+        }
+    }
+
+    function match22ji(query) {
+        if (!query || !state.catalog22ji.length) return [];
+        const q = query.trim();
+        if (!q) return [];
+        const keywords = q.split(/[\s,,、，]+/).filter(function (k) { return k.length > 0; });
+        if (!keywords.length) return [];
+        const hits = state.catalog22ji
+            .map(function (p) {
+                const name = p.name || '';
+                const matchCount = keywords.filter(function (k) { return name.includes(k); }).length;
+                return { p: p, matchCount: matchCount };
+            })
+            .filter(function (x) { return x.matchCount > 0; })
+            .sort(function (a, b) { return b.matchCount - a.matchCount; })
+            .slice(0, 5)
+            .map(function (x) { return x.p; });
+        return hits;
+    }
+
+    function escapeHtml(s) {
+        const div = document.createElement('div');
+        div.textContent = s || '';
+        return div.innerHTML;
+    }
+
+    function renderTopicSuggest(query) {
+        const box = document.getElementById('topic-suggest');
+        if (!box) return;
+        const list = box.querySelector('.topic-suggest-list');
+        const title = box.querySelector('.topic-suggest-title');
+        const hits = match22ji(query);
+        if (!query || !query.trim()) {
+            box.classList.add('hidden');
+            return;
+        }
+        box.classList.remove('hidden');
+        if (!hits.length) {
+            title.textContent = '⚠️ 22 级库里没找到类似的（可按其他题目或参考出）';
+            list.innerHTML = '';
+            return;
+        }
+        const count = hits.length;
+        title.textContent = '📚 22 级库类似项目（' + count + ' 个 · 点击直接使用该项目方案）：';
+        const html = hits.map(function (p) {
+            return '<li data-id="' + p.id + '" data-name="' + p.name + '" data-content="' + p.contentFile + '"><strong>' + p.id + '</strong> - ' + p.name + '</li>';
+        }).join('');
+        list.innerHTML = html;
+        list.querySelectorAll('li').forEach(function (li) {
+            li.addEventListener('click', function () {
+                const id = li.dataset.id;
+                const name = li.dataset.name;
+                const contentFile = li.dataset.content;
+                load22jiScheme(id, name, contentFile);
+            });
+        });
+    }
+
+    function bindTopicSuggest() {
+        if (!dom.topic) return;
+        dom.topic.addEventListener('input', function (e) { renderTopicSuggest(e.target.value); });
+        dom.topic.addEventListener('focus', function (e) { renderTopicSuggest(e.target.value); });
+    }
+
+    async function load22jiScheme(id, name, contentFile) {
+        try {
+            const r = await fetch(contentFile);
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            show22jiModal(id, name, data);
+        } catch (err) {
+            showToast('加载 ' + id + ' 方案失败: ' + err.message, 'error');
+            console.error(err);
+        }
+    }
+
+    function show22jiModal(id, name, data) {
+        let modal = document.getElementById('scheme-22ji-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'scheme-22ji-modal';
+            modal.className = 'modal-overlay hidden';
+            modal.innerHTML = '<div class="modal-box">' +
+                '<div class="modal-header">' +
+                '<h2 id="m-title"></h2>' +
+                '<button class="modal-close" type="button">×</button>' +
+                '</div>' +
+                '<div class="modal-body">' +
+                '<div class="modal-section"><strong>器件：</strong><span id="m-devices"></span></div>' +
+                '<div class="modal-section"><strong>功能：</strong><ul id="m-functions"></ul></div>' +
+                '</div>' +
+                '<div class="modal-footer">' +
+                '<button class="btn btn-secondary" id="m-copy" type="button">📋 复制全文</button>' +
+                '<button class="btn btn-primary" id="m-use" type="button">✅ 使用此方案</button>' +
+                '</div>' +
+                '</div>';
+            document.body.appendChild(modal);
+            modal.querySelector('.modal-close').addEventListener('click', function () { modal.classList.add('hidden'); });
+            modal.addEventListener('click', function (e) { if (e.target === modal) modal.classList.add('hidden'); });
+        }
+        modal.querySelector('#m-title').textContent = id + ' - ' + name + '（22 级库原方案）';
+        modal.querySelector('#m-devices').textContent = data.devices || '(无)';
+        const ul = modal.querySelector('#m-functions');
+        const funcs = data.functions || [];
+        ul.innerHTML = funcs.map(function (f) { return '<li>' + escapeHtml(f) + '</li>'; }).join('');
+        modal.querySelector('#m-copy').onclick = function () {
+            const text = '# ' + (data.title || name) + '\n\n**器件**：' + (data.devices || '') + '\n\n**功能**：\n' + funcs.map(function (f) { return '- [ ] ' + f; }).join('\n');
+            navigator.clipboard.writeText(text).then(function () { showToast('已复制到剪贴板', 'success'); }).catch(function () { showToast('复制失败', 'error'); });
+        };
+        modal.querySelector('#m-use').onclick = function () {
+            use22jiScheme(id, name, data);
+            modal.classList.add('hidden');
+        };
+        modal.classList.remove('hidden');
+    }
+
+    function use22jiScheme(id, name, data) {
+        const funcs = data.functions || [];
+        const md = '# ' + (data.title || name) + '\n\n**器件**：' + (data.devices || '') + '\n\n**功能**：\n' + funcs.map(function (f) { return '- [ ] ' + f; }).join('\n');
+        const container = document.getElementById('scheme-22ji-output');
+        console.log('[use22jiScheme] id=' + id + ' container=' + (container ? 'FOUND' : 'NULL') + ' md.length=' + md.length);
+        if (!container) {
+            showToast('输出区不存在', 'error');
+            return;
+        }
+        // 检查父级链是否隐藏
+        let p = container.parentElement;
+        let hiddenChain = [];
+        while (p && p.tagName !== 'BODY') {
+            const cs = window.getComputedStyle(p);
+            if (cs.display === 'none') hiddenChain.push(p.id || p.className);
+            p = p.parentElement;
+        }
+        console.log('[use22jiScheme] 父级 hidden 链: ' + (hiddenChain.length ? hiddenChain.join(' -> ') : '(无)'));
+        container.classList.remove('hidden');
+        container.innerHTML = '<div class="output-card">' +
+            '<div class="output-header">' +
+            '<h3>✅ ' + id + ' - ' + name + '</h3>' +
+            '<span class="output-source">来源：22 级库原方案</span>' +
+            '</div>' +
+            '<div class="output-content">' +
+            '<pre>' + escapeHtml(md) + '</pre>' +
+            '</div>' +
+            '<div class="output-actions">' +
+            '<button class="btn btn-secondary" id="m22ji-download" type="button">📥 下载 .docx</button>' +
+            '<button class="btn btn-primary btn-next" id="m22ji-next" type="button">下一步：开题报告 <span class="next-step-arrow">→</span></button>' +
+            '</div>' +
+            '</div>';
+        state.lastResult = md;
+        state.lastScheme = md;
+        state.lastTopic = state.lastTopic || name;
+        const dlBtn = container.querySelector('#m22ji-download');
+        if (dlBtn && window.DocxExporter) {
+            dlBtn.addEventListener('click', async function () {
+                try {
+                    const filename = id + '-' + name + '.docx';
+                    await window.DocxExporter.exportToDocx(md, filename);
+                    showToast('已下载 ' + filename, 'success');
+                } catch (err) { showToast('下载失败: ' + err.message, 'error'); }
+            });
+        }
+
+        // 下一步按钮：保存到共享数据 + 跳到开题报告（与 AI 方案同级）
+        const nextBtn = container.querySelector('#m22ji-next');
+        if (nextBtn) {
+            nextBtn.addEventListener('click', function () {
+                if (!state.lastScheme) { showToast('请先选择 22 级库方案', 'error'); return; }
+                syncShared({
+                    scheme: state.lastScheme,
+                    topic: state.lastTopic || shared.topic || name,
+                    sourceMode: 'topic',
+                });
+                nextBtn.disabled = true;
+                nextBtn.textContent = '✓ 已共享 · 准备下游';
+                showToast('共享数据已保存 · 题目：' + (shared.topic || name), 'success');
+                if (window.switchTab) window.switchTab('taskbook');
+            });
+        }
+
+        showToast('已使用 22 级库方案: ' + id + ' - ' + name, 'success');
+    }
+
 
     // ========== 跨区共享数据 ==========
     // 同一个题目在 4 个区域间共享。
@@ -325,6 +524,12 @@
             });
 
             state.lastResult = result;
+            // 清掉之前的 22 级库方案输出（生成新方案后旧库方案消失）
+            const old22ji = document.getElementById('scheme-22ji-output');
+            if (old22ji) {
+                old22ji.innerHTML = '';
+                old22ji.classList.add('hidden');
+            }
             renderOutput(result);
             showToast('生成成功！', 'success');
         } catch (err) {
@@ -505,10 +710,12 @@
 
     async function init() {
         await loadPrompt();
+        await load22jiCatalog();
 
         bindTabButtons();
         bindSelectCustom();
         bindLevelCards();
+        bindTopicSuggest();
 
         dom.generateBtn.addEventListener('click', onGenerate);
         dom.regenerateBtn.addEventListener('click', onGenerate);
