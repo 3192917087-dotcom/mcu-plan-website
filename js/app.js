@@ -535,6 +535,8 @@
                     if (label) label.innerHTML = '✅ 方案已共享 · 下游区域可读取';
                 }
                 showToast(`共享数据已保存。题目：${shared.topic || '未填'}（区域 ② 占位中）`, 'success');
+                // ✅ 下一步按钮的设计意图：跳到"区域 ② 开题报告"继续处理
+                //（区域 ② 还只是占位中，等后面实装）
                 if (window.switchTab) window.switchTab('taskbook');
             });
         }
