@@ -1,227 +1,123 @@
-# 🔧 单片机方案设计器
+# 雄鸡助手 (v14.8)
 
-> 一个纯前端的网页工具：输入题目，AI 自动生成精简的单片机项目方案。
-> 基于 **MiniMax-M3** 大模型，支持 **GitHub Pages 免费部署**，**API Key 只存浏览器本地**。
+> 单片机毕设一站式生成 · 方案 → 开题报告 → 论文 → PPT
 
-![GitHub Pages](https://img.shields.io/badge/部署-GitHub%20Pages-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-![No Backend](https://img.shields.io/badge/backend-无-success)
+## 功能页面
 
----
-
-## ✨ 特性
-
-- ✅ **0 服务器**：纯静态网站，GitHub Pages 免费托管
-- ✅ **API Key 自管**：存在你自己的浏览器，不上传任何服务器
-- ✅ **Prompt 独立更新**：能力升级 = 改一个 `.md` 文件，网站代码不动
-- ✅ **生成 .docx**：浏览器内生成 Word 文档下载
-- ✅ **响应式**：手机能用
-- ✅ **ABC 三档**：简单 / 中等 / 复杂方案任选
-
----
-
-## 📋 准备工作（5 分钟）
-
-你需要：
-
-| # | 东西 | 怎么搞 | 时间 |
+| 页面 | 路径 | 状态 | 说明 |
 |---|---|---|---|
-| 1 | **GitHub 账号** | https://github.com/signup 用邮箱注册 | 3 min |
-| 2 | **MiniMax 账号 + API Key** | https://platform.minimax.io 注册 → API Keys → Create | 2 min |
-| 3 | **MiniMax 余额** | platform.minimax.io 充 ¥10（够用半年） | 1 min |
+| 🏠 主页 | `/index.html` | ✅ 可用 | 4 个功能卡片 dashboard |
+| 📝 方案生成 | `/topic/` | ✅ 可用 | 输入题目 → AI 生成方案（含 22 级库匹配 + 开题报告反推） |
+| 📋 开题报告 | `/taskbook/` | ✅ v14.8 稳定 | 基于方案 + 模板 → 生成开题报告 |
+| 📄 论文生成 | `/thesis/` | 🚧 待开发 | 基于方案生成论文 |
+| 🎨 PPT 生成 | `/ppt/` | 🚧 待开发 | 基于方案生成答辩 PPT |
 
-**不需要：** Git / Python / Node / VS Code / 服务器 / 域名
-
----
-
-## 🚀 部署教程（30 分钟首次，之后改 Prompt 1 分钟）
-
-### 第 1 步：在 GitHub 建仓库
-
-1. 登录 GitHub
-2. 右上角 `+` → **New repository**
-3. 填写：
-   - **Repository name**：`mcu-plan-website`
-   - **Description**（可选）：单片机方案设计器
-   - **Public** ✅（必须 Public，GitHub Pages 才能免费托管）
-   - **Add a README file** ✅ 勾上
-4. 点 **Create repository**
-
----
-
-### 第 2 步：上传代码
-
-1. 在新仓库页面，点 **Add file** → **Upload files**
-2. 把本仓库的**所有文件**拖进去：
-   ```
-   mcu-plan-website/
-   ├── index.html
-   ├── css/
-   │   └── style.css
-   ├── js/
-   │   ├── app.js
-   │   ├── api.js
-   │   ├── prompt-loader.js
-   │   └── docx-export.js
-   └── prompts/
-       └── mcu-plan-prompt.md
-   ```
-3. 点 **Commit changes**
-
----
-
-### 第 3 步：启用 GitHub Pages
-
-1. 仓库页面 → **Settings**（顶部）
-2. 左侧菜单 → **Pages**
-3. **Source**：选 **Deploy from a branch**
-4. **Branch**：选 `main` / `(root)`
-5. 点 **Save**
-6. 等待 1-2 分钟，刷新页面，会显示：
-   ```
-   Your site is live at https://你的用户名.github.io/mcu-plan-website/
-   ```
-
----
-
-### 第 4 步：填 API Key
-
-1. 打开你的网址（上面那个链接）
-2. 点 **⚙️ 设置**
-3. 填：
-   - **API Key**：你的 MiniMax key（`sk-...`）
-   - **Base URL**：`https://api.minimaxi.com/v1`（国内）/ `https://api.minimax.io/v1`（国际）
-   - **模型**：`MiniMax-M3`
-   - **GitHub 用户名**：你的 GitHub 用户名（用于拉取 Prompt）
-4. 点 **保存**
-
----
-
-### 第 5 步：测试
-
-1. 主界面输入：`智能台灯控制`
-2. 选等级：`A`
-3. 点 **🚀 生成方案**
-4. 等待 3-10 秒
-5. 看到结果 = 成功 🎉
-
----
-
-## 🔄 后期更新 Prompt（1 分钟）
-
-能力进化 = 改一个文件，网站自动更新：
-
-1. GitHub 仓库 → 打开 `prompts/mcu-plan-prompt.md`
-2. 点 ✏️ **Edit this file**
-3. 改内容
-4. 点 **Commit changes**
-5. 等 1 分钟，GitHub Pages 自动部署
-6. 打开网站 → ⚙️ 设置 → 点 **🔄 刷新 Prompt** → 拉到最新版
-
----
-
-## 🔒 安全说明
-
-| 项 | 状态 |
-|---|---|
-| API Key 存储 | 仅浏览器 `localStorage`，不上传任何服务器 |
-| 你的 prompt | 公开仓库可见（建议私有化方案见下） |
-| MiniMax 余额 | 按 token 计费，生成一个方案约 0.05 元 |
-
-**⚠️ 注意事项：**
-- 不要在**公用电脑**填 API Key（别人打开浏览器能看到）
-- 退出浏览器前记得关页面（建议加浏览器密码锁）
-
----
-
-## 🎨 自定义
-
-### 改 Prompt 模板
-
-编辑 `prompts/mcu-plan-prompt.md`，然后 commit。
-
-### 改网站样式
-
-编辑 `css/style.css`，然后 commit。
-
-### 改功能
-
-编辑 `js/app.js`，然后 commit。
-
----
-
-## 📂 文件结构
+## 目录结构
 
 ```
 mcu-plan-website/
-├── index.html              # 单页面入口
-├── css/
-│   └── style.css           # 样式
-├── js/
-│   ├── app.js              # 主逻辑
-│   ├── api.js              # MiniMax API 调用
-│   ├── prompt-loader.js    # 加载 GitHub 上的 Prompt
-│   └── docx-export.js      # .docx 生成
-├── prompts/
-│   └── mcu-plan-prompt.md  # Prompt 模板（核心 IP）
-├── .gitignore
-├── LICENSE
+├── index.html              # 主页（dashboard）
+├── topic/                  # 功能页 1：方案生成
+│   ├── index.html
+│   ├── app.js
+│   ├── style.css
+│   └── prompt.md
+├── taskbook/               # 功能页 2：开题报告
+│   ├── index.html
+│   ├── app.js
+│   ├── style.css
+│   └── prompt.md           # 内嵌 kaiti-report-generator skill v0.6
+├── thesis/                 # 功能页 3（占位）
+├── ppt/                    # 功能页 4（占位）
+├── shared/                 # 共享资源
+│   ├── design-tokens.css   # 设计系统
+│   ├── ui-kit.js           # Toast + 进度条 + 主题
+│   ├── api.js              # API 客户端（OpenAI 兼容）
+│   ├── device-library.js   # 器件库（59 器件 / 17 类）
+│   ├── markdown.js         # 轻量 markdown 渲染 + extractMetadata
+│   ├── storage.js          # localStorage 跨页数据流
+│   ├── docx-reader.js      # .docx/.txt 读取（mammoth）
+│   ├── docx-export.js      # .docx 导出（JSZip）
+│   ├── template-parser.js  # 模板骨架提取（mammoth + 启发式）
+│   └── vendor/
+│       ├── jszip.min.js          # 97 KB
+│       └── mammoth.browser.min.js # 641 KB
+├── library/                # 静态数据
+│   ├── 22ji-catalog.json   # 22 级项目库（56 个）
+│   └── 22ji-content/*.json # 22 级项目内容
+├── test-docs/              # 测试用开题报告 .txt
+├── docs/                   # 文档
+├── _archive_v13_*/         # v13 备份
+├── dev-server.js           # 本地预览服务器
 └── README.md
 ```
 
----
+## 数据流（v14.8）
 
-## ❓ 常见问题
+```
+topic 页（方案生成）
+   ↓ 点"下一步"按钮
+   ↓ Storage.Shared.setMeta(structuredMeta)
+   ↓ Storage.Shared.markComplete('topic')
+   ↓ window.location.href → taskbook/
 
-### Q1：网站打开是空白？
+taskbook 页（开题报告）
+   ↓ init() 时 read Storage.Shared.getMeta()
+   ↓ 自动填 题目 / 器件 / 功能
+   ↓ 用户可手动改 / 上传模板 .docx / 填参考文献
+   ↓ AI 跑 kaiti-report-generator v0.6 4 步适配
+   ↓ Storage.Shared.setKaiti(markdown)
+   ↓ Storage.Shared.markComplete('taskbook')
+   ↓ 用户可下载 .docx 或复制 Markdown
+```
 
-检查浏览器控制台（F12 → Console），看错误信息：
-- **404**：文件没上传完整
-- **CORS 错误**：base URL 填错了
-- **marked is not defined**：网络问题，CDN 没加载到
+## 开题报告模块（v14.8 · 2026-07-05）
 
-### Q2：生成时报 401？
+**5 项前提条件**（按顺序）：
+1. 📝 **题目**（必填）
+2. 🔧 **器件清单**（主控+电源必填，可自动从方案 meta 加载）
+3. ⚙️ **功能要求**（至少 1 条，可自动从方案 meta 加载）
+4. 📄 **学校模板**（可选，无则用 11 章通用框架）
+5. 📚 **参考文献**（可选，无则用占位符）
 
-API Key 无效，去 https://platform.minimax.io 检查或重新生成。
+**核心设计**：
+- 复用 kaiti-report-generator skill v0.6（背景章节铁律 / 4 步模板适配 / 8 模块生成公式）
+- 前端本地骨架提取（mammoth + 启发式），避免一次额外 API 调用
+- 自动从 topic 页的方案 meta 加载题目/器件/功能（无缝衔接）
+- 输出 Markdown + 一键下载 .docx
 
-### Q3：生成时报 402？
+## 启动
 
-余额不足，去 platform.minimax.io 充值。
+```bash
+node dev-server.js
+```
 
-### Q4：拉 Prompt 失败？
+访问 http://localhost:8765/
 
-- 仓库必须是 **Public**
-- GitHub 用户名填错了
-- 文件路径不对（默认 `prompts/mcu-plan-prompt.md`）
+## 设计原则
 
-### Q5：能不能改成私有部署？
+1. **可扩展**：每个功能页独立模块，新增功能页 = 复制目录 + 改 prompt
+2. **数据流优先**：跨页通过 `Storage.Shared` localStorage 桥接（不依赖 URL 参数）
+3. **避免重复 API 调用**：前端能做的（如骨架提取）前端做，AI 只跑语义/生成
+4. **视觉动态**：CSS + Web Animations API 实现流畅动画
 
-可以，把仓库设为 Private，然后用 Cloudflare Pages / Vercel 部署。
-但 GitHub Pages 免费版只能托管 Public 仓库。
+## 技术栈
 
----
+- 纯静态 HTML + ES Modules（无构建工具）
+- 原生 CSS + CSS Variables（暗色模式基础版）
+- OpenAI 兼容 API（默认 MiniMax-M3）
+- localStorage 跨页数据流
+- 第三方库本地化（JSZip / mammoth，避免 CDN）
 
-## 🛠️ 技术栈
+## 编码
 
-- **前端**：原生 HTML + CSS + JS（无构建工具）
-- **Markdown 渲染**：[marked](https://github.com/markedjs/marked)
-- **.docx 生成**：[docx](https://docx.js.org/)
-- **文件保存**：[FileSaver.js](https://github.com/eligrey/FileSaver.js)
-- **AI API**：MiniMax M3（OpenAI 兼容）
-- **部署**：GitHub Pages
+- 所有文件 **UTF-8 BOM**（根除 GBK 编码问题）
+- 中文 JS 字符串需显式 `[char]0xXXXX`（Windows ANSI 解析坑）
 
----
+## 历史版本
 
-## 📜 License
-
-MIT
-
----
-
-## 🌐 立即访问
-
-最新部署版本：**https://3192917087-dotcom.github.io/mcu-plan-website/**
-
-## 🙏 致谢
-
-由程帅志的 AI 秘书 📋 自动生成。
+- **v13**：4 大模块 state 隔离
+- **v14.0**：模块化重构 + 设计系统 + UI 组件库 + 库比对 + 开题反推
+- **v14.1**：开题报告模块上线（taskbook/）
+- **v14.2 ~ v14.7**：共享模块深度重构 + storage 修复 + extract mode + abort controller 统一
+- **v14.8**：v15-v20 UI 迭代后回滚到稳定功能版（卡片化设计 + 全部核心功能稳定）

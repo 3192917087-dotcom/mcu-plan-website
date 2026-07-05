@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="version" content="v14.0">
+<title>方案生成 · 雄鸡助手</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%90%93%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="../shared/design-tokens.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ========== 顶部导航 ========== -->
+<header class="app-header">
+  <div class="app-header-inner">
+    <div class="app-brand">
+      <span class="app-logo">🐓</span>
+      <div class="app-title-group">
+        <h1 class="app-title">雄鸡助手</h1>
+        <span class="app-subtitle">方案生成</span>
+      </div>
+    </div>
+    <nav class="app-nav">
+      <a href="../index.html" class="nav-link nav-btn-prominent">🏠 主页</a>
+      <button class="nav-btn nav-btn-prominent" id="theme-toggle" title="切换主题" aria-label="切换主题">
+        <span class="theme-icon">🌙</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- 顶部全局进度条 -->
+  <div class="workflow-progress">
+    <div class="workflow-step active" data-stage="topic">
+      <span class="step-num">1</span>
+      <span class="step-label">方案</span>
+      <span class="step-icon"></span>
+    </div>
+    <div class="workflow-divider"></div>
+    <div class="workflow-step" data-stage="taskbook">
+      <span class="step-num">2</span>
+      <span class="step-label">开题</span>
+    </div>
+    <div class="workflow-divider"></div>
+    <div class="workflow-step" data-stage="thesis">
+      <span class="step-num">3</span>
+      <span class="step-label">论文</span>
+    </div>
+    <div class="workflow-divider"></div>
+    <div class="workflow-step" data-stage="ppt">
+      <span class="step-num">4</span>
+      <span class="step-label">PPT</span>
+    </div>
+  </div>
+</header>
+
+<!-- ========== 主内容区 ========== -->
+<main class="app-main">
+
+  <!-- 输入区 -->
+  <section class="pane pane-input" aria-label="输入区">
+    <div class="pane-inner">
+
+      <!-- 导入开题报告 -->
+      <div class="card card-import" id="import-card">
+        <div class="card-header">
+          <label class="card-label" for="file-input">
+            <span class="label-icon">📁</span>
+            <span>导入开题报告</span>
+            <span class="optional-mark">可选</span>
+          </label>
+          <button type="button" class="btn-link" id="btn-clear-import" title="清除导入" style="display:none;">清除</button>
+        </div>
+        <div class="import-zone" id="import-zone">
+          <input type="file" id="file-input" accept=".docx,.txt" hidden>
+          <label for="file-input" class="import-label">
+            <span class="import-icon">📄</span>
+            <span class="import-text">
+              <strong>点击或拖入开题报告</strong>
+              <small>支持 .docx / .txt · AI 抽取题目、器件、功能</small>
+            </span>
+          </label>
+        </div>
+        <div class="import-preview hidden" id="import-preview">
+          <div class="preview-header">
+            <span class="preview-filename" id="preview-filename">file.docx</span>
+            <span class="preview-meta" id="preview-meta">12.3 KB</span>
+          </div>
+          <div class="preview-body">
+            <div class="preview-row">
+              <span class="preview-label">📝 题目</span>
+              <input type="text" id="preview-topic" class="preview-input" placeholder="（未抽取到题目）">
+            </div>
+            <div class="preview-row">
+              <span class="preview-label">🔧 器件</span>
+              <textarea id="preview-devices" class="preview-input preview-textarea" rows="3" placeholder="（未抽取到器件，逗号分隔）"></textarea>
+              <small class="preview-hint">多个器件用“、”或逗号分隔，可直接编辑</small>
+            </div>
+            <div class="preview-row">
+              <span class="preview-label">⚙️ 功能 <span id="preview-func-count">(0)</span></span>
+              <textarea id="preview-funcs" class="preview-input preview-textarea" rows="6" placeholder="（未抽取到功能，一行一条）"></textarea>
+              <small class="preview-hint">一行一条功能，可增删改</small>
+            </div>
+          </div>
+          <div class="preview-actions">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-direct-generate">
+              <span>✨</span><span>直接生成方案</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <label class="card-label" for="input-topic">
+            <span class="label-icon">💡</span>
+            <span>题目</span>
+            <span class="required-mark">*</span>
+          </label>
+        </div>
+        <input
+          type="text"
+          id="input-topic"
+          class="form-input"
+          placeholder="如：智能台灯控制系统"
+          maxlength="50"
+          autocomplete="off"
+        >
+        <div id="topic-suggest" class="topic-suggest hidden">
+          <div class="topic-suggest-title">📚 22 级库类似项目（点击填到题目 + 自动加载参考）：</div>
+          <ul class="topic-suggest-list" id="topic-suggest-list"></ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <label class="card-label" for="input-description">
+            <span class="label-icon">📝</span>
+            <span>描述</span>
+            <span class="optional-mark">可选</span>
+          </label>
+        </div>
+        <textarea
+          id="input-description"
+          class="form-input form-textarea"
+          rows="5"
+          maxlength="500"
+          placeholder="可选：用自然语言补充需求。&#10;例：需要 2 个传感器（光敏电阻、人体红外），3 个执行器（LED 灯、蜂鸣器、舵机）。&#10;阈值 300 lux 触发开灯。人离开后延时 30 秒关灯。"
+        ></textarea>
+        <div class="card-footer">
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-template">
+            <span>📋</span><span>用模板</span>
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-clear-desc" title="清空描述">
+            <span>🗑️</span><span>清空</span>
+          </button>
+          <span class="char-counter"><span id="char-count">0</span> / 500</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <label class="card-label">
+            <span class="label-icon">⚙️</span>
+            <span>等级</span>
+            <span class="required-mark">*</span>
+          </label>
+        </div>
+        <div class="level-group">
+          <label class="level-card" data-level="A">
+            <input type="radio" name="level" value="A">
+            <span class="level-content">
+              <strong class="level-name">A</strong>
+              <small class="level-desc">复杂 · 云平台</small>
+            </span>
+            <span class="level-tooltip">
+              <strong>A 级 · 复杂</strong>
+              <span>云平台 或 WiFi 通信 APP</span>
+              <span class="tooltip-meta">功能数量：10-15 条</span>
+            </span>
+          </label>
+          <label class="level-card active" data-level="B">
+            <input type="radio" name="level" value="B" checked>
+            <span class="level-content">
+              <strong class="level-name">B</strong>
+              <small class="level-desc">中等 · 通信</small>
+            </span>
+            <span class="level-tooltip">
+              <strong>B 级 · 中等</strong>
+              <span>无线通信（蓝牙/WiFi/2.4G）</span>
+              <span class="tooltip-meta">功能数量：7-10 条</span>
+            </span>
+          </label>
+          <label class="level-card" data-level="C">
+            <input type="radio" name="level" value="C">
+            <span class="level-content">
+              <strong class="level-name">C</strong>
+              <small class="level-desc">简单 · 无通信</small>
+            </span>
+            <span class="level-tooltip">
+              <strong>C 级 · 简单</strong>
+              <span>纯硬件 · 无通信要求</span>
+              <span class="tooltip-meta">功能数量：3 条以上</span>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <details class="advanced">
+        <summary>
+          <span>⚙️</span>
+          <span>高级选项</span>
+          <span class="advanced-hint">不填 = AI 自动推荐</span>
+        </summary>
+        <div class="advanced-body">
+          <div class="advanced-row">
+            <label class="advanced-label">主控芯片</label>
+            <select id="adv-mcu" class="advanced-select">
+              <option value="">AI 自动推荐</option>
+              <option value="STM32F103C8T6" selected>STM32F103C8T6（默认）</option>
+              <option value="STC89C52">STC89C52 (51)</option>
+              <option value="Arduino Uno">Arduino Uno</option>
+              <option value="ESP32">ESP32</option>
+              <option value="ESP8266">ESP8266</option>
+              <option value="__custom__">自定义...</option>
+            </select>
+            <input type="text" id="adv-mcu-custom" class="advanced-input" placeholder="填型号（如 STM32L431RBT6）" style="display:none;">
+          </div>
+          <div class="advanced-row">
+            <label class="advanced-label">显示器</label>
+            <select id="adv-display" class="advanced-select">
+              <option value="">AI 自动推荐</option>
+              <option value="OLED 0.96寸">OLED 0.96寸（默认）</option>
+              <option value="LCD1602">LCD1602</option>
+              <option value="TFT 1.8寸">TFT 1.8寸</option>
+              <option value="不需要">不需要</option>
+              <option value="__custom__">自定义...</option>
+            </select>
+            <input type="text" id="adv-display-custom" class="advanced-input" placeholder="填型号（如 LCD12864）" style="display:none;">
+          </div>
+          <div class="advanced-row">
+            <label class="advanced-label">电源</label>
+            <select id="adv-power" class="advanced-select">
+              <option value="5V适配器" selected>5V 适配器（默认）</option>
+              <option value="USB">USB</option>
+              <option value="12V+AMS1117-5">12V + AMS1117-5</option>
+              <option value="锂电池">锂电池</option>
+              <option value="太阳能">太阳能板</option>
+              <option value="__custom__">自定义...</option>
+            </select>
+            <input type="text" id="adv-power-custom" class="advanced-input" placeholder="填电源（如 24V/DC-DC）" style="display:none;">
+          </div>
+        </div>
+      </details>
+
+      <div class="generate-action">
+        <button type="button" class="btn btn-primary btn-lg btn-generate" id="btn-generate">
+          <span class="btn-icon">✨</span>
+          <span>生成方案</span>
+        </button>
+        <div class="shortcut-hint">💡 Ctrl + Enter 快捷生成</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 结果区 -->
+  <section class="pane pane-result" aria-label="结果区">
+    <div class="pane-inner">
+
+      <!-- 空状态 -->
+      <div class="result-empty fade-in" id="result-empty">
+        <div class="empty-emoji">💡</div>
+        <h2 class="empty-title">在左侧填入题目 → 点击「生成方案」</h2>
+        <p class="empty-desc">AI 会根据题目 + 描述 + 等级自动设计精简方案</p>
+
+        <div class="empty-divider"></div>
+
+        <div class="empty-stats">
+          <div class="stat-item">
+            <span class="stat-num">144</span>
+            <span class="stat-label">22级库参考项目</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-num">59</span>
+            <span class="stat-label">器件库型号</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-num">~8s</span>
+            <span class="stat-label">平均生成时间</span>
+          </div>
+        </div>
+
+        <div class="empty-hint">
+          <span>💬</span>
+          <span>提示：输入题目时会自动比对 22 级库，显示类似项目可一键填入</span>
+        </div>
+      </div>
+
+      <!-- 结果展示 -->
+      <div class="result-content hidden" id="result-content">
+        <div class="result-toolbar">
+          <div class="result-meta">
+            <span class="result-status" id="result-status">✓ 已生成</span>
+            <span class="result-time" id="result-time"></span>
+          </div>
+          <div class="result-actions">
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-reset" title="清空生成框">
+              <span>🔄</span><span>复位</span>
+            </button>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-copy">
+              <span>📋</span><span>复制</span>
+            </button>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-download">
+              <span>📄</span><span>下载 .docx</span>
+            </button>
+            <button type="button" class="btn btn-primary btn-sm" id="btn-next">
+              <span>下一步</span>
+              <span>→</span>
+            </button>
+          </div>
+        </div>
+        <article class="result-body" id="result-body">
+          <!-- markdown 渲染结果 -->
+        </article>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<!-- ========== 模板弹窗（用模板按钮触发） ========== -->
+<dialog class="template-dialog" id="template-dialog">
+  <form method="dialog" class="template-form">
+    <h3>📋 选择描述模板</h3>
+    <div class="template-list">
+      <button type="button" class="template-item" data-template="lamp">
+        <strong>💡 智能台灯</strong>
+        <small>需要 2 个传感器（光敏电阻、人体红外），3 个执行器（LED 灯、蜂鸣器、舵机）。阈值 300 lux 触发开灯。人离开后延时 30 秒关灯。</small>
+      </button>
+      <button type="button" class="template-item" data-template="home">
+        <strong>🏠 智能家居</strong>
+        <small>监测温湿度、烟雾、门窗状态。远程通过 WiFi 控制灯光、空调、窗帘。报警时推送通知到手机 APP。</small>
+      </button>
+      <button type="button" class="template-item" data-template="car">
+        <strong>🚗 避障小车</strong>
+        <small>超声波测距避障，红外循迹，蓝牙遥控。3 种模式：自动避障 / 循迹 / 遥控。</small>
+      </button>
+    </div>
+    <div class="template-footer">
+      <button type="button" class="btn btn-ghost btn-sm" id="template-close">取消</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- JSZip（本地，避免 CDN tracking warning） -->
+<script src="../shared/vendor/jszip.min.js"></script>
+<!-- mammoth.js（本地，读取 .docx 文本） -->
+<script src="../shared/vendor/mammoth.browser.min.js"></script>
+
+<!-- ES Modules -->
+<script type="module">
+import UIContainer from '../shared/ui-kit.js';
+import NavJump from '../shared/nav.js';
+import { initApp } from './app.js';
+
+NavJump.init('topic/');
+initApp();
+</script>
+
+</body>
+</html>

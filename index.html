@@ -1,384 +1,237 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>单片机办公套件 · 基于 MiniMax-M3</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%94%AC%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="css/style.css?v=20260703k">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="version" content="v14.8">
+<title>雄鸡助手 · 主页</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F90%93%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="shared/design-tokens.css">
+<style>
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard {
+  max-width: var(--container-max);
+  margin: 0 auto;
+  padding: var(--space-12) var(--space-6);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.dashboard-header {
+  text-align: center;
+  animation: fadeInUp var(--duration-slow) var(--ease-out);
+}
+
+.dashboard-emoji {
+  font-size: 72px;
+  margin-bottom: var(--space-4);
+  animation: pulse 3s var(--ease-in-out) infinite;
+}
+
+.dashboard-title {
+  font-size: var(--font-size-4xl);
+  font-weight: var(--font-weight-bold);
+  margin: 0 0 var(--space-3);
+  background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.dashboard-subtitle {
+  font-size: var(--font-size-lg);
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-5);
+}
+
+.feature-card {
+  position: relative;
+  padding: var(--space-6);
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  text-decoration: none;
+  color: var(--color-text);
+  transition: all var(--duration-base) var(--ease-out);
+  overflow: hidden;
+  animation: fadeInUp var(--duration-slow) var(--ease-out) backwards;
+}
+
+.feature-card:nth-child(1) { animation-delay: 0ms; }
+.feature-card:nth-child(2) { animation-delay: 80ms; }
+.feature-card:nth-child(3) { animation-delay: 160ms; }
+.feature-card:nth-child(4) { animation-delay: 240ms; }
+
+.feature-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.feature-card:hover {
+  border-color: var(--color-primary);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+}
+
+.feature-card:hover::before {
+  transform: scaleX(1);
+}
+
+.feature-card.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.feature-emoji {
+  font-size: 48px;
+  margin-bottom: var(--space-3);
+  display: block;
+}
+
+.feature-title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  margin: 0 0 var(--space-2);
+}
+
+.feature-desc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  line-height: var(--line-height-relaxed);
+  margin: 0 0 var(--space-3);
+}
+
+.feature-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  border-radius: var(--radius-full);
+  background: var(--color-success-light);
+  color: var(--color-success);
+}
+
+.feature-badge.dev {
+  background: var(--color-warning-light);
+  color: var(--color-warning);
+}
+
+.dashboard-footer {
+  text-align: center;
+  padding: var(--space-6);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.dashboard-nav {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dashboard-nav button {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-lg);
+  transition: all var(--duration-base) var(--ease-out);
+}
+
+.dashboard-nav button:hover {
+  border-color: var(--color-border-hover);
+  transform: scale(1.05);
+}
+</style>
 </head>
 <body>
-    <div class="app">
-        <!-- ========== Header ========== -->
-        <header class="header">
-            <div class="header-brand">
-                <div class="header-logo">🔬</div>
-                <div>
-                    <div class="header-title">单片机办公套件</div>
-                    <div class="header-subtitle">从方案到答辩 · 一站式设计平台</div>
-                </div>
-            </div>
-            <div class="header-meta">
-                <span class="header-version">v9.2</span>
-            </div>
-        </header>
 
-        <!-- ========== Top Tabs (4 Areas) ========== -->
-        <div class="tabs">
-            <button class="tab-btn active" data-tab="scheme" title="从题目或开题报告生成方案">
-                <span class="tab-num">①</span>
-                <span>方案设计</span>
-            </button>
-            <button class="tab-btn" data-tab="taskbook" title="从方案反推开题报告">
-                <span class="tab-num">②</span>
-                <span>开题报告</span>
-                <span class="tab-badge">开发中</span>
-            </button>
-            <button class="tab-btn" data-tab="thesis" title="从方案生成论文">
-                <span class="tab-num">③</span>
-                <span>论文生成</span>
-                <span class="tab-badge">开发中</span>
-            </button>
-            <button class="tab-btn" data-tab="ppt" title="从方案生成 PPT">
-                <span class="tab-num">④</span>
-                <span>PPT 制作</span>
-                <span class="tab-badge">开发中</span>
-            </button>
-        </div>
+<div class="dashboard-nav">
+  <button id="theme-toggle" title="切换主题">
+    <span class="theme-icon">🌙</span>
+  </button>
+</div>
 
-        <!-- ============== Area 1: 方案设计 ============== -->
-        <div id="scheme-panel" class="tab-panel active">
+<main class="dashboard">
+  <header class="dashboard-header">
+    <span class="dashboard-emoji">🐓</span>
+    <h1 class="dashboard-title">雄鸡助手</h1>
+    <p class="dashboard-subtitle">单片机项目方案 · 一站式生成</p>
+  </header>
 
-            <!-- ===== 子模式切换 ===== -->
-            <div class="submode-group">
-                <button class="submode-btn active" data-submode="topic">
-                    <div class="submode-emoji">📝</div>
-                    <div class="submode-text">
-                        <div class="submode-title">题目生成方案</div>
-                        <div class="submode-desc">输入题目 + 等级 + 描述,AI 生成精简方案</div>
-                    </div>
-                </button>
-                <button class="submode-btn" data-submode="taskbook">
-                    <div class="submode-emoji">📋</div>
-                    <div class="submode-text">
-                        <div class="submode-title">开题生成方案</div>
-                        <div class="submode-desc">上传开题报告/任务书,AI 读懂后生成方案</div>
-                    </div>
-                </button>
-            </div>
+  <div class="dashboard-grid">
+    <a href="topic/" class="feature-card">
+      <span class="feature-emoji">📋</span>
+      <h2 class="feature-title">方案生成</h2>
+      <p class="feature-desc">输入题目 + 描述 + 等级，AI 自动生成精简方案（三段式：题目 + 器件 + 功能）</p>
+      <span class="feature-badge">✓ 可用</span>
+    </a>
 
-            <!-- ===== 子模式 1: 题目生成方案 ===== -->
-            <div id="submode-topic" class="submode-panel active">
+    <a href="taskbook/" class="feature-card">
+      <span class="feature-emoji">📝</span>
+      <h2 class="feature-title">开题报告生成</h2>
+      <p class="feature-desc">输入题目 + 器件 + 功能，上传学校开题报告模板与参考文献，AI 按模板适配生成开题报告</p>
+      <span class="feature-badge">✓ 可用</span>
+    </a>
 
-                <!-- 题目 -->
-                <div class="form-card">
-                    <label for="topic" class="form-label">
-                        题目 <span class="required">*</span>
-                    </label>
-                    <input
-                        type="text"
-                        id="topic"
-                        placeholder="如：智能台灯控制系统"
-                        maxlength="50"
-                        autocomplete="off"
-                        class="form-input">
-                    <div id="topic-suggest" class="topic-suggest hidden">
-                        <div class="topic-suggest-title">📚 22 级库类似项目（点击填到描述）：</div>
-                        <ul class="topic-suggest-list"></ul>
-                    </div>
-                </div>
-
-                <!-- 描述 -->
-                <div class="form-card">
-                    <label for="description" class="form-label">
-                        描述 <span class="optional">可选</span>
-                    </label>
-                    <textarea
-                        id="description"
-                        rows="6"
-                        placeholder="可选：用自然语言补充需求。
-
-例：
-智能台灯。需要 2 个传感器（光敏电阻、人体红外），3 个执行器（LED 灯、蜂鸣器、舵机）。阈值 300 lux 触发开灯。"
-                        class="form-input form-textarea"></textarea>
-
-                    <div class="form-actions">
-                        <button type="button" class="btn-link" id="template-btn">
-                            📝 用模板
-                        </button>
-                        <button type="button" class="btn-link" id="clear-desc-btn">
-                            ✏️ 清空
-                        </button>
-                    </div>
-                </div>
-
-                <!-- 等级选择 -->
-                <div class="form-card">
-                    <label class="form-label">
-                        等级 <span class="required">*</span>
-                    </label>
-                    <div class="level-group">
-                        <label class="level-card">
-                            <input type="radio" name="level" value="A">
-                            <span class="level-content">
-                                <strong>A</strong>
-                                <small>复杂 · 云平台 · 10-15 功能</small>
-                            </span>
-                        </label>
-                        <label class="level-card active">
-                            <input type="radio" name="level" value="B" checked>
-                            <span class="level-content">
-                                <strong>B</strong>
-                                <small>中等 · 通信 · 5-10 功能</small>
-                            </span>
-                        </label>
-                        <label class="level-card">
-                            <input type="radio" name="level" value="C">
-                            <span class="level-content">
-                                <strong>C</strong>
-                                <small>简单 · 无通信 · 5个以下功能</small>
-                            </span>
-                        </label>
-                    </div>
-                </div>
-
-                <!-- 高级选项 -->
-                <details class="advanced">
-                    <summary>⚙️ 高级选项</summary>
-                    <div class="advanced-body">
-                        <div class="advanced-row">
-                            <label class="advanced-label">主控芯片：</label>
-                            <select id="mcu-select" class="advanced-select">
-                                <option value="">AI 自动推荐</option>
-                                <option value="STM32F103C8T6" selected>STM32F103C8T6（默认）</option>
-                                <option value="STC89C52">STC89C52 (51)</option>
-                                <option value="Arduino Uno">Arduino Uno</option>
-                                <option value="ESP32">ESP32</option>
-                                <option value="ESP8266">ESP8266</option>
-                                <option value="__custom__">自定义...</option>
-                            </select>
-                            <input type="text" id="mcu-custom" class="advanced-input"
-                                   placeholder="填型号" style="display:none;">
-                        </div>
-                        <div class="advanced-row">
-                            <label class="advanced-label">显示器：</label>
-                            <select id="display-select" class="advanced-select">
-                                <option value="">AI 自动推荐</option>
-                                <option value="OLED">0.96 寸 OLED</option>
-                                <option value="LCD1602">LCD1602</option>
-                                <option value="不需要">不需要</option>
-                                <option value="__custom__">自定义...</option>
-                            </select>
-                            <input type="text" id="display-custom" class="advanced-input"
-                                   placeholder="填型号" style="display:none;">
-                        </div>
-                        <div class="advanced-row">
-                            <label class="advanced-label">电源：</label>
-                            <select id="power-select" class="advanced-select">
-                                <option value="5V适配器">5V 适配器（推荐）</option>
-                                <option value="USB">USB</option>
-                                <option value="12V+AMS1117-5">12V + AMS1117-5</option>
-                                <option value="锂电池">锂电池</option>
-                                <option value="太阳能">太阳能板</option>
-                                <option value="__custom__">自定义...</option>
-                            </select>
-                            <input type="text" id="power-custom" class="advanced-input"
-                                   placeholder="填电源类型" style="display:none;">
-                        </div>
-                        <div class="advanced-tip">
-                            💡 这里不填 = AI 自由决定；填了 = 强制用你选的型号
-                        </div>
-                    </div>
-                </details>
-
-                <button id="generate-btn" class="btn btn-primary btn-large">
-                    🚀 生成方案
-                </button>
-
-                <!-- 共享输出区（题目生成方案 · 仅此子模式可见）-->
-                <section class="output-card" id="output-card" style="display:none;">
-                    <div class="output-header">
-                        <h2>📄 生成的方案</h2>
-                        <div style="display:flex; gap:8px;">
-                            <button id="regenerate-btn" class="btn btn-text" title="重新生成">🔄 重新生成</button>
-                        </div>
-                    </div>
-                    <div id="output-content" class="output-content"></div>
-                    <div class="output-actions">
-                        <button id="copy-btn" class="btn btn-secondary">
-                            📋 复制 Markdown
-                        </button>
-                        <button id="docx-btn" class="btn btn-secondary">
-                            📄 下载 .docx
-                        </button>
-                    </div>
-                    <!-- 下一步导航（生成成功后才出现） -->
-                    <div class="next-step-bar" id="next-step-bar" style="display:none;">
-                        <div class="next-step-info">
-                            <div class="next-step-label">✅ 方案已生成 · <strong>点下一步保存到共享数据</strong></div>
-                            <div class="next-step-hint">下一步：从方案反推开题报告</div>
-                        </div>
-                        <button id="next-step-btn" class="btn btn-primary btn-next">
-                            下一步：开题报告
-                            <span class="next-step-arrow">→</span>
-                        </button>
-                    </div>
-                </section>
-
-                <!-- 22 级库方案输出区（submode-topic 内 · 在 AI 输出 section 之外，独立显示） -->
-                <div id="scheme-22ji-output" class="output-22ji-container hidden"></div>
-            </div>
-            <div id="submode-taskbook" class="submode-panel">
-
-                <div class="form-card">
-                    <label class="form-label">
-                        📄 上传开题报告 / 任务书
-                    </label>
-                    <div class="upload-zone" id="upload-zone">
-                        <input type="file" id="docx-file" accept=".docx,.doc" hidden>
-                        <button type="button" class="btn-upload" id="upload-btn">
-                            📁 点击选择文件 (.docx / .doc)
-                        </button>
-                        <p class="upload-hint">支持 .docx（推荐）和老格式 .doc</p>
-                    </div>
-                    <div id="file-info" class="file-info" style="display:none;">
-                        <span class="file-name" id="file-name"></span>
-                        <button type="button" class="btn-link" id="clear-file-btn">✕ 移除</button>
-                    </div>
-                </div>
-
-                <!-- 提取出来的题目（可编辑） -->
-                <div class="form-card" id="topic-card" style="display:none;">
-                    <label for="tb-topic" class="form-label">题目 <span class="required">*</span></label>
-                    <input type="text" id="tb-topic" class="form-input" placeholder="从文档提取">
-                    <div class="upload-hint" style="margin-top: 8px;">
-                        ✏️ 可手动修改
-                    </div>
-                </div>
-
-                <div class="form-card" id="desc-card" style="display:none;">
-                    <label for="tb-desc" class="form-label">
-                        描述 <span class="optional">可选</span>
-                    </label>
-                    <textarea id="tb-desc" rows="4" placeholder="可选：用自然语言补充需求。" class="form-input form-textarea"></textarea>
-                    <div class="upload-hint" style="margin-top: 8px;">💡 <strong>描述里指定的内容会覆盖默认规则</strong></div>
-                </div>
-
-                <div class="form-card" id="extracted-card" style="display:none;">
-                    <label class="form-label">📋 提取的关键信息</label>
-                    <div id="extracted-content" class="extracted-box"></div>
-                    <div class="upload-hint" style="margin-top: 8px;">
-                        🔍 你检查后点生成
-                    </div>
-                </div>
-
-                <button id="tb-generate-btn" class="btn btn-primary btn-large" style="display:none;">
-                    🚀 生成开题方案
-                </button>
-
-                <!-- 共享输出区（taskbook 子模式）-->
-                <section class="output-card" id="tb-output-card" style="display:none;">
-                    <div class="output-header">
-                        <h2>📄 生成的开题方案</h2>
-                        <button id="tb-regenerate-btn" class="btn btn-text" title="重新生成">🔄 重新生成</button>
-                    </div>
-                    <div id="tb-output-content" class="output-content"></div>
-                    <div class="output-actions">
-                        <button id="tb-copy-btn" class="btn btn-secondary">📋 复制 Markdown</button>
-                        <button id="tb-docx-btn" class="btn btn-secondary">💾 下载 .docx</button>
-                    </div>
-                    <div class="next-step-bar" id="tb-next-step-bar" style="display:none;">
-                        <div class="next-step-info">
-                            <div class="next-step-label">✅ 方案已生成 · 共享数据已保存</div>
-                            <div class="next-step-hint">下一步：开发中的「开题报告」</div>
-                        </div>
-                        <button id="tb-next-step-btn" class="btn btn-primary btn-next">
-                            下一步：开题报告（占位）
-                            <span class="next-step-arrow">→</span>
-                        </button>
-                    </div>
-                </section>
-            </div>
-        </div>
-
-        <!-- ============== Area 2: 开题报告生成（开发中） ============== -->
-        <div id="taskbook-panel" class="tab-panel">
-            <div class="coming-soon">
-                <div class="coming-soon-emoji">📋</div>
-                <h2 class="coming-soon-title">开题报告 · 从方案反推</h2>
-                <p class="coming-soon-desc">
-                    基于方案设计的产出，自动生成标准格式的开题报告：选题背景 · 国内外现状 · 研究内容 · 方案论证 · 进度安排 · 主要参考文献
-                </p>
-                <div class="coming-soon-status">🚧 即将上线 · 区域 ②</div>
-            </div>
-        </div>
-
-        <!-- ============== Area 3: 论文生成（开发中） ============== -->
-        <div id="thesis-panel" class="tab-panel">
-            <div class="coming-soon">
-                <div class="coming-soon-emoji">📝</div>
-                <h2 class="coming-soon-title">论文生成 · 一键从方案到论文草稿</h2>
-                <p class="coming-soon-desc">
-                    选定方案后自动生成完整论文结构：摘要 · 绪论 · 系统设计 · 硬件设计 · 软件设计 · 调试与测试 · 总结 · 参考文献
-                </p>
-                <div class="coming-soon-status">🚧 即将上线 · 区域 ③</div>
-            </div>
-        </div>
-
-        <!-- ============== Area 4: PPT 制作（开发中） ============== -->
-        <div id="ppt-panel" class="tab-panel">
-            <div class="coming-soon">
-                <div class="coming-soon-emoji">🎨</div>
-                <h2 class="coming-soon-title">PPT 制作 · 一键从方案到答辩 PPT</h2>
-                <p class="coming-soon-desc">
-                    自动生成答辩 PPT 结构：封面 · 研究背景 · 系统设计 · 硬件设计 · 软件设计 · 实物演示 · 总结 · 致谢
-                </p>
-                <div class="coming-soon-status">🚧 即将上线 · 区域 ④</div>
-            </div>
-        </div>
-
-        <!-- ========== Loading Overlay ========== -->
-        <div id="loading-overlay" class="loading-overlay" style="display:none;">
-            <div class="loading-content">
-                <div class="loading-spinner"></div>
-                <div class="loading-title" id="loading-title">正在生成...</div>
-                <div class="loading-step" id="loading-step">准备请求...</div>
-                <div class="loading-progress">
-                    <div class="loading-progress-bar" id="loading-progress-bar"></div>
-                </div>
-                <div class="loading-elapsed" id="loading-elapsed">已耗时 0 秒</div>
-            </div>
-        </div>
-
-        <!-- ========== Toast ========== -->
-        <div id="toast" class="toast" style="display:none;"></div>
-
-        <!-- ========== Footer ========== -->
-        <footer class="footer">
-            <p>单片机办公套件 · 让方案 / 论文 / PPT 一站式生成</p>
-            <p>
-                <a href="https://github.com/3192917087-dotcom/mcu-plan-website" target="_blank">GitHub</a>
-                ·
-                <span>v9.2 · 2026-07-02</span>
-            </p>
-        </footer>
+    <div class="feature-card disabled">
+      <span class="feature-emoji">📄</span>
+      <h2 class="feature-title">论文生成</h2>
+      <p class="feature-desc">基于方案 + 开题报告，生成完整毕业论文结构（摘要 · 绪论 · 系统设计 · 硬件设计 · 软件设计 · 测试 · 总结）</p>
+      <span class="feature-badge dev">🚧 开发中</span>
     </div>
 
-    <!-- Markdown 渲染 -->
-    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
-    <!-- .docx 生成 -->
-    <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
-    <!-- 文件保存 -->
-    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
-    <!-- ZIP 解析 -->
-    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <div class="feature-card disabled">
+      <span class="feature-emoji">📊</span>
+      <h2 class="feature-title">PPT 生成</h2>
+      <p class="feature-desc">基于方案生成答辩 PPT（封面 · 目录 · 研究背景 · 系统设计 · 实现 · 测试 · 总结）</p>
+      <span class="feature-badge dev">🚧 开发中</span>
+    </div>
+  </div>
 
-    <!-- 应用脚本 -->
-    <script src="js/prompt-loader.js?v=20260703k"></script>
-    <script src="js/device-library.js?v=20260703k"></script>
-    <script src="js/api.js?v=20260703k"></script>
-    <script src="js/docx-export.js?v=20260703k"></script>
-    <script src="js/app.js?v=20260703k"></script>
-    <script src="js/taskbook.js?v=20260703k"></script>
+  <footer class="dashboard-footer">
+    <p>v14.8</p>
+  </footer>
+</main>
+
+<script type="module">
+import UIContainer from './shared/ui-kit.js';
+import ThemeToggle from './shared/theme-toggle.js';
+
+UIContainer.initTheme();
+ThemeToggle.init();
+</script>
+
 </body>
 </html>

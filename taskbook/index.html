@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="version" content="v14.1">
+<title>开题报告 · 雄鸡助手</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%90%93%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="../shared/design-tokens.css">
+<link rel="stylesheet" href="../topic/style.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ========== 顶部导航 ========== -->
+<header class="app-header">
+  <div class="app-header-inner">
+    <div class="app-brand">
+      <span class="app-logo">🐓</span>
+      <div class="app-title-group">
+        <h1 class="app-title">雄鸡助手</h1>
+        <span class="app-subtitle">开题报告</span>
+      </div>
+    </div>
+    <nav class="app-nav">
+      <a href="../index.html" class="nav-link nav-btn-prominent">🏠 主页</a>
+      <a href="../topic/index.html" class="nav-link nav-btn-prominent">📝 方案</a>
+      <button class="nav-btn nav-btn-prominent" id="theme-toggle" title="切换主题" aria-label="切换主题">
+        <span class="theme-icon">🌙</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- 顶部全局进度条 -->
+  <div class="workflow-progress">
+    <div class="workflow-step" data-stage="topic">
+      <span class="step-num">1</span>
+      <span class="step-label">方案</span>
+      <span class="step-icon"></span>
+    </div>
+    <div class="workflow-divider"></div>
+    <div class="workflow-step active" data-stage="taskbook">
+      <span class="step-num">2</span>
+      <span class="step-label">开题</span>
+      <span class="step-icon"></span>
+    </div>
+    <div class="workflow-divider"></div>
+    <div class="workflow-step" data-stage="thesis">
+      <span class="step-num">3</span>
+      <span class="step-label">论文</span>
+    </div>
+    <div class="workflow-divider"></div>
+    <div class="workflow-step" data-stage="ppt">
+      <span class="step-num">4</span>
+      <span class="step-label">PPT</span>
+    </div>
+  </div>
+</header>
+
+<!-- ========== 主内容区 ========== -->
+<main class="app-main">
+
+  <!-- 输入区 -->
+  <section class="pane pane-input" aria-label="输入区">
+    <div class="pane-inner">
+
+      <!-- 来源提示（自动加载提示） -->
+      <div class="card card-source" id="source-card">
+        <div class="source-info" id="source-info">
+          <span class="source-icon">📋</span>
+          <span class="source-text">加载中...</span>
+        </div>
+      </div>
+
+      <!-- 1. 题目 -->
+      <div class="card card-input">
+        <div class="card-header">
+          <label class="card-label" for="kaiti-topic">
+            <span class="label-icon">📝</span>
+            <span>题目</span>
+            <span class="required-mark">必填</span>
+          </label>
+          <button type="button" class="btn-import-doc" id="btn-import-kaiti" title="从 .docx / .txt 文档中自动识别题目、器件、功能">
+            <span class="import-icon">📎</span>
+            <span>从文档导入方案</span>
+          </button>
+          <input type="file" id="file-import-kaiti" accept=".docx,.txt" hidden>
+        </div>
+        <div class="input-with-clear">
+          <input type="text" id="kaiti-topic" class="form-input" placeholder="如：智能鱼缸养护系统设计与实现（也可点击右上“从文档导入方案”）">
+          <button type="button" class="btn-clear-field" id="btn-clear-topic" title="清除" aria-label="清除">✕</button>
+        </div>
+      </div>
+
+      <!-- 2. 器件清单 -->
+      <div class="card card-input">
+        <div class="card-header">
+          <label class="card-label" for="kaiti-devices">
+            <span class="label-icon">🔧</span>
+            <span>器件清单</span>
+            <span class="optional-mark">可选</span>
+            <span class="func-count" id="kaiti-device-count">(0)</span>
+          </label>
+        </div>
+        <div class="input-with-clear">
+          <textarea id="kaiti-devices" class="form-textarea" rows="8"
+                    placeholder="一行一个器件，格式：型号（角色）&#10;&#10;例如：&#10;STM32F103C8T6（主控）&#10;DS18B20（水温传感器）&#10;OLED 0.96寸（显示）&#10;5V 电源适配器（供电）&#10;&#10;不填也能生成（AI 会自动推荐器件）"></textarea>
+          <button type="button" class="btn-clear-field btn-clear-textarea" id="btn-clear-devices" title="清除" aria-label="清除">✕</button>
+        </div>
+      </div>
+
+      <!-- 3. 功能要求 -->
+      <div class="card card-input">
+        <div class="card-header">
+          <label class="card-label" for="kaiti-funcs">
+            <span class="label-icon">⚙️</span>
+            <span>功能要求</span>
+            <span class="required-mark">至少 1 条</span>
+            <span class="func-count" id="kaiti-func-count">(0)</span>
+          </label>
+        </div>
+        <div class="input-with-clear">
+          <textarea id="kaiti-funcs" class="form-textarea" rows="8"
+                    placeholder="一行一条功能&#10;&#10;例如：&#10;使用 DS18B20 实时采集水温&#10;使用水位传感器检测鱼缸水位&#10;水位过低时蜂鸣器报警"></textarea>
+          <button type="button" class="btn-clear-field btn-clear-textarea" id="btn-clear-funcs" title="清除" aria-label="清除">✕</button>
+        </div>
+      </div>
+
+      <!-- 4. 模板上传（可选） -->
+      <div class="card card-template">
+        <div class="card-header">
+          <span class="card-label">
+            <span class="label-icon">📄</span>
+            <span>学校开题报告模板</span>
+            <span class="optional-mark">可选</span>
+          </span>
+        </div>
+        <div class="template-upload" id="template-upload">
+          <input type="file" id="template-input" accept=".docx" hidden>
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-template-select">
+            <span>📁</span><span>选择 .docx 模板</span>
+          </button>
+          <span class="template-status" id="template-status">未上传（将用 11 章通用框架）</span>
+        </div>
+        <div class="template-preview hidden" id="template-preview">
+          <div class="template-preview-header">
+            <span>📑 章节结构（<span id="skeleton-count">0</span>）</span>
+            <button type="button" class="btn btn-ghost btn-xs" id="btn-template-clear">清除模板</button>
+          </div>
+          <pre class="template-preview-body" id="skeleton-preview"></pre>
+          <div class="ai-parse-status" id="ai-parse-status"></div>
+          <details class="raw-text-details">
+            <summary>🔍 查看原始文本</summary>
+            <pre class="raw-text-body" id="raw-text"></pre>
+          </details>
+        </div>
+      </div>
+
+      <!-- 5. 参考文献（可选） -->
+      <div class="card card-refs">
+        <div class="card-header">
+          <span class="card-label">
+            <span class="label-icon">📚</span>
+            <span>参考文献</span>
+            <span class="optional-mark">可选</span>
+            <span class="func-count" id="kaiti-ref-count">(0)</span>
+          </span>
+        </div>
+        <div class="input-with-clear">
+          <textarea id="kaiti-refs" class="form-textarea" rows="4"
+                    placeholder="一行一条参考文献，GB/T 7714 格式&#10;例如：&#10;[1] 张三. STM32 单片机应用技术研究[J]. 电子技术应用, 2023, 49(3): 45-50.&#10;[2] ST Microelectronics. STM32F103x8 Datasheet[EB/OL]. [2024-01-15]. https://www.st.com/&#10;&#10;不填则用占位符：[1]-[10] 待补充真实文献"></textarea>
+          <button type="button" class="btn-clear-field btn-clear-textarea" id="btn-clear-refs" title="清除" aria-label="清除">✕</button>
+        </div>
+      </div>
+
+      <!-- 生成按钮 -->
+      <div class="card card-generate">
+        <button type="button" class="btn btn-primary btn-lg btn-generate" id="btn-generate">
+          <span class="btn-icon">✨</span>
+          <span class="btn-text">生成开题报告</span>
+        </button>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 输出区 -->
+  <section class="pane pane-output" aria-label="输出区">
+    <div class="pane-inner">
+
+      <!-- 空状态 -->
+      <div class="output-empty" id="output-empty">
+        <div class="empty-icon">📄</div>
+        <div class="empty-text">等待生成开题报告</div>
+        <div class="empty-hint">填写左侧 5 项输入 → 点击「生成开题报告」</div>
+      </div>
+
+      <!-- 完成状态 -->
+      <div class="output-content hidden" id="output-content">
+        <div class="output-toolbar">
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-copy" title="复制到剪贴板">
+            <span>📋</span><span>复制</span>
+          </button>
+          <button type="button" class="btn btn-primary btn-sm" id="btn-download" title="下载 .docx">
+            <span>📥</span><span>下载 Word</span>
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-reset" title="清空生成框">
+            <span>🔄</span><span>复位</span>
+          </button>
+        </div>
+        <div class="output-md" id="output-md"></div>
+      </div>
+
+    </div>
+  </section>
+</main>
+
+<!-- mammoth 必须先于 app.js 加载（TemplateParser 依赖 window.mammoth） -->
+<!-- jszip 必须先于 app.js 加载（docx-export 依赖 window.JSZip） -->
+<script src="../shared/vendor/jszip.min.js"></script>
+<script src="../shared/vendor/mammoth.browser.min.js"></script>
+<script type="module">
+  import NavJump from '../shared/nav.js';
+  NavJump.init('taskbook/');
+</script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
