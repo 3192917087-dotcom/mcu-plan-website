@@ -8,7 +8,7 @@ const ApiClient = (() => {
   // === 默认配置（API key 写死） ===
   const DEFAULT_CONFIG = {
     baseUrl: 'https://api.minimaxi.com/v1',
-    apiKey: 'sk-api-_jtmHSbE7dYB76q7j-DGDmaSE4VYKM_l9OhHTB7l6aACjISl2IY1XJh0WAiyaQhKGOuPHmjYee00Pl3R6UAM14cz7R4mSq8-LlzPw5nD_H1TjBLHZwo9jys',
+        apiKey: 'sk-api-q17nGc67dm7W2XzdtisNfclEVSV7LgQiz84j-bCt7UG5p3bdxnXAmnAgRe9DnrngHvm0RxTAGMngK4eNa0WO3WnBh4Z877b6Ul25PUtY1OY_EmnOMUtbLpE',
     model: 'MiniMax-M3',
   };
 
