@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="version" content="v15.9">
+<title>论文生成 · 雄鸡助手</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%90%93%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="../shared/design-tokens.css?v=1595">
+<link rel="stylesheet" href="../topic/style.css?v=1595">
+<link rel="stylesheet" href="style.css?v=1595">
+</head>
+<body>
+
+<!-- ========== 顶部导航（与 topic / taskbook 一致） ========== -->
+<header class="app-header">
+  <div class="app-header-inner">
+    <div class="app-brand">
+      <span class="app-logo">🐓</span>
+      <div class="app-title-group">
+        <h1 class="app-title">雄鸡助手</h1>
+        <span class="app-subtitle">论文生成</span>
+      </div>
+    </div>
+    <nav class="app-nav">
+      <a href="../index.html" class="nav-link nav-btn-prominent">🏠 主页</a>
+      <button class="nav-btn nav-btn-prominent" id="theme-toggle" title="切换主题" aria-label="切换主题">
+        <span class="theme-icon">🌙</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- 顶部全局进度条 -->
+  <div class="workflow-progress">
+    <div class="workflow-step" data-stage="topic">
+      <span class="step-num">1</span>
+      <span class="step-label">方案</span>
+      <span class="step-icon"></span>
+    </div>
+    <div class="workflow-divider"></div>
+    <div class="workflow-step" data-stage="taskbook">
+      <span class="step-num">2</span>
+      <span class="step-label">开题</span>
+    </div>
+    <div class="workflow-divider"></div>
+    <div class="workflow-step active" data-stage="thesis">
+      <span class="step-num">3</span>
+      <span class="step-label">论文</span>
+    </div>
+    <div class="workflow-divider"></div>
+    <div class="workflow-step" data-stage="ppt">
+      <span class="step-num">4</span>
+      <span class="step-label">PPT</span>
+    </div>
+  </div>
+</header>
+
+<!-- ========== 主内容区 ========== -->
+<main class="app-main">
+
+  <!-- 输入区（左） -->
+  <section class="pane pane-input" aria-label="输入区">
+    <div class="pane-inner">
+
+      <!-- 1. 来源提示（数据来源状态） -->
+      <div class="card card-source" id="source-card">
+        <div class="source-info" id="source-info">
+          <span class="source-icon">📋</span>
+          <span class="source-text" id="source-text">正在加载数据...</span>
+        </div>
+      </div>
+
+      <!-- 2. 文件导入（方案文档 .docx/.txt） -->
+      <div class="card card-import">
+        <div class="card-header">
+          <label class="card-label" for="file-input">
+            <span class="label-icon">📤</span>
+            <span>上传文档</span>
+            <span class="optional-mark">开题报告 / 任务书 / 方案</span>
+          </label>
+          <button type="button" class="btn-link" id="btn-clear-upload" title="清除导入" style="display:none;">清除</button>
+        </div>
+        <div class="import-zone" id="import-zone">
+          <input type="file" id="file-input" accept=".docx,.txt" hidden>
+          <label for="file-input" class="import-label">
+            <span class="import-icon">📄</span>
+            <span class="import-text">
+              <strong>点击或拖入方案文档</strong>
+              <small>支持 .docx / .txt · AI 抽取题目、器件、功能</small>
+            </span>
+          </label>
+        </div>
+        <div class="import-preview hidden" id="import-preview">
+          <div class="preview-header">
+            <span class="preview-filename" id="preview-filename">file.docx</span>
+            <span class="preview-meta" id="preview-meta">12.3 KB</span>
+          </div>
+          <div class="preview-body">
+            <div class="preview-row">
+              <span class="preview-label">📋 题目</span>
+              <span class="preview-value" id="preview-topic">--</span>
+            </div>
+            <div class="preview-row">
+              <span class="preview-label">🔧 器件</span>
+              <span class="preview-value" id="preview-devices">--</span>
+            </div>
+            <div class="preview-row">
+              <span class="preview-label">⚙️ 功能</span>
+              <span class="preview-value" id="preview-funcs">--</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. 题目 -->
+      <div class="card">
+        <div class="card-header">
+          <label class="card-label" for="input-topic">
+            <span class="label-icon">📋</span>
+            <span>题目</span>
+            <span class="required-mark">*</span>
+          </label>
+          <button type="button" class="btn-link" id="btn-ai-polish" title="AI 智能整理填入内容">
+            ✨ AI 整理
+          </button>
+        </div>
+        <div class="input-with-clear">
+          <input
+            type="text"
+            id="input-topic"
+            class="form-input"
+            placeholder="如：基于 STM32 的智能家居环境监测与控制系统设计"
+            autocomplete="off"
+          >
+          <button type="button" class="btn-clear-field" id="btn-clear-topic" title="清空题目" aria-label="清空题目">×</button>
+        </div>
+      </div>
+
+      <!-- 4. 器件清单 -->
+      <div class="card">
+        <div class="card-header">
+          <label class="card-label" for="input-devices">
+            <span class="label-icon">🔧</span>
+            <span>器件清单</span>
+            <span class="required-mark">*</span>
+          </label>
+          <span class="count-tag" id="device-count">(0)</span>
+        </div>
+        <div class="input-with-clear">
+          <textarea
+            id="input-devices"
+            class="form-input form-textarea"
+            rows="8"
+            placeholder="多个器件用「、」分隔，如：STM32F103C8T6、DHT11、MQ-2、ESP-01S、OLED"
+          ></textarea>
+          <button type="button" class="btn-clear-field" id="btn-clear-devices" title="清空器件" aria-label="清空器件">×</button>
+        </div>
+        <small class="preview-hint">💡 一行一个器件或用逗号分隔</small>
+      </div>
+
+      <!-- 5. 功能要求 -->
+      <div class="card">
+        <div class="card-header">
+          <label class="card-label" for="input-funcs">
+            <span class="label-icon">⚙️</span>
+            <span>功能要求</span>
+            <span class="required-mark">*</span>
+          </label>
+          <span class="count-tag" id="func-count">(0)</span>
+        </div>
+        <div class="input-with-clear">
+          <textarea
+            id="input-funcs"
+            class="form-input form-textarea"
+            rows="8"
+            placeholder="一行一条功能描述，如：&#10;DHT11 实时采集温湿度&#10;MQ-2 检测烟雾浓度&#10;ESP-01S 上传数据到 OneNET"
+          ></textarea>
+          <button type="button" class="btn-clear-field" id="btn-clear-funcs" title="清空功能" aria-label="清空功能">×</button>
+        </div>
+        <small class="preview-hint">💡 一行一条功能描述（越详细生成质量越高）</small>
+      </div>
+
+      <!-- 6. 参考模板文件导入（可选） -->
+      <div class="card card-import">
+        <div class="card-header">
+          <label class="card-label" for="template-input">
+            <span class="label-icon">📋</span>
+            <span>参考论文模板</span>
+            <span class="optional-mark">可选</span>
+          </label>
+          <button type="button" class="btn-link" id="btn-template-clear" title="清除模板" style="display:none;">清除</button>
+        </div>
+        <div class="import-zone" id="template-zone">
+          <input type="file" id="template-input" accept=".docx" hidden>
+          <label for="template-input" class="import-label">
+            <span class="import-icon">📑</span>
+            <span class="import-text">
+              <strong>点击或拖入学校论文模板</strong>
+              <small>支持 .docx · 提取字体、字号、首行缩进等格式</small>
+            </span>
+          </label>
+        </div>
+        <div class="import-preview hidden" id="template-preview">
+          <div class="preview-header">
+            <span class="preview-filename" id="template-filename">学校模板.docx</span>
+            <span class="preview-meta" id="template-meta">376 KB</span>
+          </div>
+          <div class="preview-body">
+            <div class="preview-row">
+              <span class="preview-label">📐 字号</span>
+              <span class="preview-value" id="template-fontsize">--</span>
+            </div>
+            <div class="preview-row">
+              <span class="preview-label">🔤 字体</span>
+              <span class="preview-value" id="template-fontfamily">--</span>
+            </div>
+            <div class="preview-row">
+              <span class="preview-label">📏 缩进</span>
+              <span class="preview-value" id="template-indent">--</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7. 参考目录填写（可选） -->
+      <div class="card">
+        <div class="card-header">
+          <label class="card-label" for="input-outline">
+            <span class="label-icon">🗂️</span>
+            <span>参考目录</span>
+            <span class="important-mark">重要</span>
+          </label>
+          <span class="count-tag" id="outline-count">(0)</span>
+        </div>
+        <div class="input-with-clear">
+          <textarea
+            id="input-outline"
+            class="form-input form-textarea"
+            rows="6"
+            placeholder="学校论文目录（一行一条）：&#10;第一章 绪论&#10;  1.1 研究背景&#10;  1.2 研究现状&#10;第二章 系统设计&#10;..."
+          ></textarea>
+          <button type="button" class="btn-clear-field" id="btn-clear-outline" title="清空目录" aria-label="清空目录">×</button>
+        </div>
+        <small class="preview-hint">💡 提供学校目录可让论文章节结构更准确</small>
+      </div>
+
+      <!-- 8. 参考文献 -->
+      <div class="card">
+        <div class="card-header">
+          <label class="card-label" for="input-refs">
+            <span class="label-icon">📚</span>
+            <span>参考文献</span>
+            <span class="optional-mark">可选</span>
+          </label>
+          <span class="count-tag" id="ref-count">(0)</span>
+        </div>
+        <div class="input-with-clear">
+          <textarea
+            id="input-refs"
+            class="form-input form-textarea"
+            rows="6"
+            placeholder="一行一条参考文献（GB/T 7714 格式）：&#10;[1] 张三. STM32 技术手册[M]. 北京: 电子工业出版社, 2020.&#10;[2] 李四. 嵌入式系统设计[J]. 电子技术应用, 2021.&#10;..."
+          ></textarea>
+          <button type="button" class="btn-clear-field" id="btn-clear-refs" title="清空参考文献" aria-label="清空参考文献">×</button>
+        </div>
+        <small class="preview-hint">💡 仅绪论使用 [n] 引用标记；留空 AI 自动生成 8 条</small>
+      </div>
+
+      <!-- 9. 字数选择 -->
+      <div class="card">
+        <div class="card-header">
+          <label class="card-label">
+            <span class="label-icon">📏</span>
+            <span>总字数</span>
+            <span class="required-mark">*</span>
+          </label>
+        </div>
+        <div class="level-group level-group-4">
+          <label class="level-card" data-wc="10000">
+            <input type="radio" name="wordcount" value="10000">
+            <span class="level-content">
+              <strong class="level-name">1 万</strong>
+              <small class="level-desc">精简</small>
+            </span>
+          </label>
+          <label class="level-card active" data-wc="15000">
+            <input type="radio" name="wordcount" value="15000" checked>
+            <span class="level-content">
+              <strong class="level-name">1.5 万</strong>
+              <small class="level-desc">标准</small>
+            </span>
+          </label>
+          <label class="level-card" data-wc="20000">
+            <input type="radio" name="wordcount" value="20000">
+            <span class="level-content">
+              <strong class="level-name">2 万</strong>
+              <small class="level-desc">详细</small>
+            </span>
+          </label>
+          <label class="level-card" data-wc="25000">
+            <input type="radio" name="wordcount" value="25000">
+            <span class="level-content">
+              <strong class="level-name">2.5 万</strong>
+              <small class="level-desc">详尽</small>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <!-- 10. 生成按钮 -->
+      <div class="generate-action">
+        <button type="button" class="btn btn-primary btn-lg btn-generate" id="btn-generate">
+          <span class="btn-icon">✨</span>
+          <span>生成论文</span>
+        </button>
+        <div class="shortcut-hint">⚡ 预计 15-25 分钟（10+ 次 AI 调用）· Ctrl + Enter 快捷生成</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 结果区（右） -->
+  <section class="pane pane-result" aria-label="结果区">
+    <div class="pane-inner">
+
+      <!-- 空状态 -->
+      <div class="result-empty fade-in" id="result-empty">
+        <div class="empty-emoji">📄</div>
+        <h2 class="empty-title">左侧填入题目 → 点击「生成论文」</h2>
+        <p class="empty-desc">AI 自动生成 6 章完整结构（绪论 · 系统设计 · 硬件设计 · 软件设计 · 测试 · 总结）</p>
+
+        <div class="empty-divider"></div>
+
+        <div class="empty-stats">
+          <div class="stat-item">
+            <span class="stat-num">6</span>
+            <span class="stat-label">章节</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-num">23</span>
+            <span class="stat-label">图位占位符</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-num">5</span>
+            <span class="stat-label">双轨流程图</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-num">~10min</span>
+            <span class="stat-label">生成耗时</span>
+          </div>
+        </div>
+
+        <div class="empty-hint">
+          <span>💡</span>
+          <span>论文质量取决于左侧输入条件的准确性：器件清单 + 功能要求 + 参考模板 + 参考目录</span>
+        </div>
+      </div>
+
+      <!-- 进行中 -->
+      <div class="result-content hidden" id="result-content">
+        <div class="result-toolbar">
+          <div class="result-meta">
+            <span class="result-status" id="result-status">⏳ 生成中</span>
+            <span class="result-time" id="result-time">00:00</span>
+          </div>
+          <div class="result-actions">
+            <div class="copy-dropdown" id="copy-dropdown">
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-copy-toggle" aria-haspopup="menu" aria-expanded="false">
+                <span>📋</span><span>复制摘要</span><span class="dropdown-arrow">▾</span>
+              </button>
+              <div class="dropdown-menu" id="copy-menu" role="menu">
+                <button type="button" class="dropdown-item" data-copy="cn" role="menuitem">复制中文摘要</button>
+                <button type="button" class="dropdown-item" data-copy="en" role="menuitem">复制英文摘要</button>
+                <button type="button" class="dropdown-item" data-copy="all" role="menuitem">复制中文+英文</button>
+              </div>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="btn-download">
+              <span>📥</span><span>下载 .docx</span>
+            </button>
+            <button type="button" class="btn btn-danger-ghost btn-sm" id="btn-reset" title="清空所有内容">
+              <span>🔄</span><span>清空全部</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 章节进度 -->
+        <div class="chapter-list" id="chapter-list">
+          <!-- 动态填充 6 个章节状态 -->
+        </div>
+
+        <!-- 摘要 + 致谢 + 参考文献 -->
+        <div class="extras-section hidden" id="extras-section">
+          <h3 class="extras-title">📝 附加章节</h3>
+          <div class="extras-grid">
+            <div class="extras-item">
+              <strong>📋 中文摘要</strong>
+              <pre id="abstract-cn"></pre>
+            </div>
+            <div class="extras-item">
+              <strong>🇬🇧 英文摘要</strong>
+              <pre id="abstract-en"></pre>
+            </div>
+            <div class="extras-item">
+              <strong>🙏 致谢</strong>
+              <pre id="acknowledgment"></pre>
+            </div>
+            <div class="extras-item">
+              <strong>📚 参考文献</strong>
+              <pre id="references"></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- 实时日志 -->
+        <details class="log-panel" id="log-panel">
+          <summary>📜 生成日志</summary>
+          <pre id="log-content"></pre>
+        </details>
+
+        <!-- 质量统计 -->
+        <div class="quality-stats hidden" id="quality-stats">
+          <h3 class="extras-title">✅ 质量门禁</h3>
+          <div class="quality-grid">
+            <div class="q-item">
+              <span class="q-num" id="q-words">0</span>
+              <span class="q-label">总字数</span>
+            </div>
+            <div class="q-item">
+              <span class="q-num" id="q-figs">0</span>
+              <span class="q-label">图位占位符</span>
+            </div>
+            <div class="q-item">
+              <span class="q-num" id="q-refs">0</span>
+              <span class="q-label">引用（仅绪论）</span>
+            </div>
+            <div class="q-item">
+              <span class="q-num" id="q-indent">0%</span>
+              <span class="q-label">首行缩进</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<!-- JSZip（本地） -->
+<script src="../shared/vendor/jszip.min.js?v=1595"></script>
+<!-- mammoth.js（本地） -->
+<script src="../shared/vendor/mammoth.browser.min.js?v=1595"></script>
+<!-- AI helper library -->
+<script src="api.js?v=1595"></script>
+
+<!-- ES Modules -->
+<script type="module">
+import UIContainer from '../shared/ui-kit.js';
+import NavJump from '../shared/nav.js';
+import ThemeToggle from '../shared/theme-toggle.js';
+import { initApp } from './app.js';
+
+NavJump.init('thesis/');
+initApp();
+
+// 【v15.9.5】诊断 console（主题不能切换时 F12 查看）
+window.addEventListener('DOMContentLoaded', () => {
+  console.log('[thesis v15.9.5] 页面已加载');
+  console.log('  UIContainer.initTheme:', typeof UIContainer?.initTheme);
+  console.log('  UIContainer.toggleTheme:', typeof UIContainer?.toggleTheme);
+  console.log('  ThemeToggle.init:', typeof ThemeToggle?.init);
+  console.log('  data-theme:', document.documentElement.getAttribute('data-theme'));
+  console.log('  #theme-toggle button:', !!document.getElementById('theme-toggle'));
+});
+</script>
+
+</body>
+</html>

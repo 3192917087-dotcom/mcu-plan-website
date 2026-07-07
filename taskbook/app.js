@@ -69,13 +69,14 @@ function initDom() {
 
   dom.btnGenerate = $('btn-generate');
 
-  dom.outputEmpty = $('output-empty');
-  dom.outputContent = $('output-content');
-  dom.outputMd = $('output-md');
+  dom.resultEmpty = $('result-empty');
+  dom.resultContent = $('result-content');
+  dom.resultMd = $('result-md');
 
   dom.btnCopy = $('btn-copy');
   dom.btnDownload = $('btn-download');
   dom.btnReset = $('btn-reset');
+  dom.btnNext = $('btn-next');
 }
 
 function init() {
@@ -83,6 +84,19 @@ function init() {
   UIContainer.initTheme();
   ThemeToggle.init();
   bindEvents();
+  // 【v15.9.3】清理无效的 progress.taskbook（如果 taskbook 没有真实内容）
+  try {
+    const kaiti = Storage.Shared.getKaiti();
+    const lastInput = Storage.get('taskbook.lastInput');
+    const lastResult = Storage.get('taskbook.lastResult');
+    if (!kaiti && !lastInput && !lastResult) {
+      const p = Storage.Shared.getProgress();
+      if (p.taskbook) {
+        p.taskbook = false;
+        Storage.set('shared.progress', p);
+      }
+    }
+  } catch (e) {}
   updateProgress();
   autoLoadFromStorage();
   updateCounts();
@@ -114,14 +128,29 @@ function updateProgress() {
 
 // === 自动加载 shared 数据 ===
 function autoLoadFromStorage() {
-  const meta = Storage.Shared.getMeta();
-  if (meta) {
-    if (meta.topic && !dom.topic.value) dom.topic.value = meta.topic;
-    if (meta.devices && meta.devices.length && !dom.devices.value) {
-      dom.devices.value = Format.devicesToText(meta.devices);
+  // 【v15.9.2】优先用 taskbook 自己的输入缓存（taskbook.lastInput），回退到 shared.meta
+  // 这样：1) 刷新 taskbook 页面可以恢复上次输入；2) 不会受上游 shared.meta 干扰
+  const cached = Storage.get('taskbook.lastInput') || Storage.Shared.getMeta();
+  if (cached) {
+    if (cached.topic && !dom.topic.value) dom.topic.value = cached.topic;
+    if (cached.devices && cached.devices.length && !dom.devices.value) {
+      dom.devices.value = Format.devicesToText(cached.devices);
     }
-    if (meta.funcs && meta.funcs.length && !dom.funcs.value) {
-      dom.funcs.value = Format.funcsToText(meta.funcs);
+    if (cached.funcs && cached.funcs.length && !dom.funcs.value) {
+      dom.funcs.value = Format.funcsToText(cached.funcs);
+    }
+  }
+  // 【v15.9.5】同时恢复生成结果（不依赖 shared.kaiti）
+  const lastResult = Storage.get('taskbook.lastResult', '');
+  if (lastResult && !state.lastResult) {
+    state.lastResult = lastResult;
+    renderOutput(lastResult);
+  } else {
+    // 回退：读 shared.kaiti（首次启动可能没有 taskbook.lastResult）
+    const kaiti = Storage.Shared.getKaiti();
+    if (kaiti && !state.lastResult) {
+      state.lastResult = kaiti;
+      renderOutput(kaiti);
     }
   }
 }
@@ -205,10 +234,19 @@ function updateCounts() {
 
 // === 事件绑定 ===
 function bindEvents() {
+  // 【v15.9.2】实时同步 taskbook.lastInput （刷新页面能恢复）
+  function syncLastInput() {
+    Storage.set('taskbook.lastInput', {
+      topic: dom.topic.value,
+      devices: Format.textToLines(dom.devices.value),
+      funcs: Format.textToLines(dom.funcs.value),
+      refs: dom.refs.value,
+    });
+  }
   // 实时更新提示框：每次输入都刷新状态
-  dom.topic.addEventListener('input', () => { updateCounts(); refreshBanner(); });
-  dom.devices.addEventListener('input', () => { updateCounts(); refreshBanner(); });
-  dom.funcs.addEventListener('input', () => { updateCounts(); refreshBanner(); });
+  dom.topic.addEventListener('input', () => { syncLastInput(); updateCounts(); refreshBanner(); });
+  dom.devices.addEventListener('input', () => { syncLastInput(); updateCounts(); refreshBanner(); });
+  dom.funcs.addEventListener('input', () => { syncLastInput(); updateCounts(); refreshBanner(); });
   dom.refs.addEventListener('input', updateCounts);
 
   // 从文档导入方案
@@ -231,6 +269,15 @@ function bindEvents() {
   dom.btnCopy.addEventListener('click', onCopy);
   dom.btnDownload.addEventListener('click', onDownload);
   dom.btnReset.addEventListener('click', onResetResult);
+  if (dom.btnNext) dom.btnNext.addEventListener('click', onNextStep);
+
+  // 快捷键 Ctrl+Enter（v15.8 统一 · 与 topic 对齐）
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      if (!state.isGenerating) onGenerate();
+    }
+  });
 }
 
 // === 从文档导入方案：提取题目/器件/功能 ===
@@ -580,8 +627,8 @@ async function onGenerate() {
   state.isGenerating = true;
   dom.btnGenerate.disabled = true;
   dom.btnGenerate.classList.add('is-loading');
-  dom.outputEmpty.classList.add('hidden');
-  dom.outputContent.classList.add('hidden');
+  dom.resultEmpty.classList.add('hidden');
+  dom.resultContent.classList.add('hidden');
 
   state.abortController = UIContainer.showProgress(
     state.template
@@ -617,15 +664,28 @@ async function onGenerate() {
 
     UIContainer.updateProgress(100, '生成成功');
     state.lastResult = cleaned;
+    // 【v15.9.5】同时存 lastResult——切页面回来不丢内容
+    Storage.set('taskbook.lastResult', cleaned);
+    // 【v15.9.2】点“下一步”才同步 meta，生成成功只暂存
+    state.lastMeta = {
+      topic: dom.topic.value.trim(),
+      devices: Format.textToLines(dom.devices.value),
+      funcs: Format.textToLines(dom.funcs.value),
+      kaitiFilename: '开题报告生成结果',
+      updatedAt: new Date().toISOString(),
+      generatorVersion: 'v15.9.2',
+    };
     renderOutput(cleaned);
 
-    // 写入 storage
+    // 写入 storage（仅 taskbook 自己的结果 + 进度标记）
     Storage.Shared.setKaiti(cleaned);
     Storage.Shared.markComplete('taskbook');
+    // 【v15.9.2】同时清除上游的 shared.meta，防止不点下一步进 thesis 时被旧数据污染
+    Storage.Shared.clearMeta();
     updateProgress();
 
     setTimeout(() => UIContainer.hideProgress(), 600);
-    UIContainer.toast('开题报告生成完成', 'success');
+    UIContainer.toast('生成成功！点「下一步：论文」可继续生成论文', 'success', 4000);
   } catch (err) {
     if (err.name === 'AbortError') {
       UIContainer.toast('已取消生成', 'info');
@@ -633,7 +693,7 @@ async function onGenerate() {
       console.error(err);
       UIContainer.toast('生成失败：' + err.message, 'error');
     }
-    dom.outputEmpty.classList.remove('hidden');
+    dom.resultEmpty.classList.remove('hidden');
     UIContainer.hideProgress();
   } finally {
     state.isGenerating = false;
@@ -644,9 +704,9 @@ async function onGenerate() {
 
 // === 渲染输出 ===
 function renderOutput(md) {
-  dom.outputMd.innerHTML = Markdown.render(md);
-  dom.outputEmpty.classList.add('hidden');
-  dom.outputContent.classList.remove('hidden');
+  dom.resultMd.innerHTML = Markdown.render(md);
+  dom.resultEmpty.classList.add('hidden');
+  dom.resultContent.classList.remove('hidden');
 }
 
 // === 工具栏 ===
@@ -693,9 +753,9 @@ async function onDownload() {
 function onResetResult() {
   // 清输出
   state.lastResult = '';
-  dom.outputMd.innerHTML = '';
-  dom.outputEmpty.classList.remove('hidden');
-  dom.outputContent.classList.add('hidden');
+  dom.resultMd.innerHTML = '';
+  dom.resultEmpty.classList.remove('hidden');
+  dom.resultContent.classList.add('hidden');
 
   // 清 5 个输入框
   dom.topic.value = '';
@@ -710,7 +770,14 @@ function onResetResult() {
 
   // 清 storage
   Storage.Shared.setKaiti('');
+  Storage.Shared.setTopic('');   // 【v15.9.3】清 shared.topic
+  Storage.Shared.setScheme('');  // 【v15.9.3】清 shared.scheme
+  Storage.Shared.setDevices([]); // 【v15.9.3】清 shared.devices
+  Storage.Shared.setFuncs([]);   // 【v15.9.3】清 shared.funcs
   Storage.Shared.markIncomplete('taskbook');
+  Storage.Shared.clearMeta();        // 【v15.9.2】清上游 meta
+  Storage.remove('taskbook.lastInput');  // 【v15.9.2】清 taskbook 自己的输入缓存
+  Storage.remove('taskbook.lastResult');  // 【v15.9.5】清生成结果缓存
   updateProgress();
   updateCounts();
   refreshBanner();  // 实时提示框同步重置为初始状态
@@ -719,4 +786,53 @@ function onResetResult() {
 }
 
 // === 启动 ===
+
+
+// === 下一步 → 跳到论文生成页 ===
+// 【v15.8 修复】无论 meta 是否存在，都写一份新 meta（防止 meta 为 null 时论文页读不到）
+function onNextStep() {
+  if (!state.lastResult) {
+    UIContainer.toast('请先生成开题报告', 'error');
+    return;
+  }
+  // 从 textarea 读出最新手动修改值
+  const topicVal = dom.topic.value.trim();
+  const devices = Format.textToLines(dom.devices.value);
+  const funcs = Format.textToLines(dom.funcs.value);
+  if (!topicVal) {
+    UIContainer.toast('题目为空，无法跳到论文生成', 'error');
+    dom.topic.focus();
+    return;
+  }
+  if (devices.length === 0) {
+    UIContainer.toast('器件为空，无法跳到论文生成', 'error');
+    dom.devices.focus();
+    return;
+  }
+  if (funcs.length === 0) {
+    UIContainer.toast('功能为空，无法跳到论文生成', 'error');
+    dom.funcs.focus();
+    return;
+  }
+  // 取旧 meta（如果有）并合并
+  const oldMeta = Storage.Shared.getMeta() || {};
+  // 【v15.9.2】复用 onGenerate 暂存的 lastMeta，优先使用最新手动修改后的值
+  const latest = state.lastMeta || {};
+  const newMeta = {
+    ...oldMeta,
+    ...latest,  // lastMeta 包含 topic/devices/funcs/kaitiFilename
+    topic: topicVal,  // 手动改过的以当前值为准
+    devices: devices,
+    funcs: funcs,
+    updatedAt: new Date().toISOString(),
+    generatorVersion: 'v15.9.2',
+  };
+  Storage.Shared.setMeta(newMeta);
+  // 跳论文页
+  UIContainer.toast('已保存最新数据，跳到论文生成...', 'info', 1500);
+  setTimeout(() => {
+    window.location.href = '../thesis/index.html';
+  }, 600);
+}
+
 init();

@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="version" content="v14.0">
+<meta name="version" content="v15.9.2">
 <title>方案生成 · 雄鸡助手</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%90%93%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="../shared/design-tokens.css">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../shared/design-tokens.css?v=1595">
+<link rel="stylesheet" href="style.css?v=1595">
 </head>
 <body>
 
@@ -314,10 +314,14 @@
             <button type="button" class="btn btn-ghost btn-sm" id="btn-download">
               <span>📄</span><span>下载 .docx</span>
             </button>
-            <button type="button" class="btn btn-primary btn-sm" id="btn-next">
-              <span>下一步</span>
-              <span>→</span>
-            </button>
+            <div class="next-step-group">
+              <button type="button" class="btn btn-ghost btn-sm btn-next-taskbook" id="btn-next-taskbook" title="先生成开题报告，再生成论文">
+                <span>📝</span><span>下一步：开题报告</span><span>→</span>
+              </button>
+              <button type="button" class="btn btn-primary btn-sm btn-next-thesis" id="btn-next-thesis" title="跳过开题报告，直接生成论文">
+                <span>📄</span><span>下一步：论文</span><span>→</span>
+              </button>
+            </div>
           </div>
         </div>
         <article class="result-body" id="result-body">
@@ -355,9 +359,9 @@
 </dialog>
 
 <!-- JSZip（本地，避免 CDN tracking warning） -->
-<script src="../shared/vendor/jszip.min.js"></script>
+<script src="../shared/vendor/jszip.min.js?v=1595"></script>
 <!-- mammoth.js（本地，读取 .docx 文本） -->
-<script src="../shared/vendor/mammoth.browser.min.js"></script>
+<script src="../shared/vendor/mammoth.browser.min.js?v=1595"></script>
 
 <!-- ES Modules -->
 <script type="module">

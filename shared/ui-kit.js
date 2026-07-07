@@ -179,6 +179,13 @@ const UIContainer = (() => {
     document.head.appendChild(style);
     progressContainer.querySelector('.progress-cancel').addEventListener('click', () => {
       if (abortController) abortController.abort();
+      // 【v15.9.5】取消时立刻关闭进度框（不要等 fetch 响应）
+      setTimeout(() => {
+        if (progressContainer) {
+          progressContainer.remove();
+          progressContainer = null;
+        }
+      }, 100);
     });
     document.body.appendChild(progressContainer);
     return abortController;

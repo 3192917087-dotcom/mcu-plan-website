@@ -6,7 +6,7 @@ const NavJump = (() => {
     { value: '../index.html', label: '🏠 主页',     key: '0' },
     { value: '../topic/',     label: '📋 方案生成', key: '1' },
     { value: '../taskbook/',  label: '📝 开题报告', key: '2' },
-    { value: '../thesis/',    label: '📄 论文生成（开发中）', key: '3', disabled: true },
+    { value: '../thesis/',    label: '📄 论文生成', key: '3' },
     { value: '../ppt/',       label: '📊 PPT 生成（开发中）',  key: '4', disabled: true },
   ];
 

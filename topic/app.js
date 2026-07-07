@@ -36,7 +36,8 @@ export function initApp() {
     btnGenerate: $('btn-generate'),
     btnCopy: $('btn-copy'),
     btnDownload: $('btn-download'),
-    btnNext: $('btn-next'),
+    btnNextTaskbook: $('btn-next-taskbook'),
+    btnNextThesis: $('btn-next-thesis'),
     btnReset: $('btn-reset'),
     btnThemeToggle: $('theme-toggle'),
     advMcu: $('adv-mcu'),
@@ -69,6 +70,20 @@ export function initApp() {
   });
 
   UIContainer.initTheme();
+
+  // 【v15.9.3】清理无效的 progress.topic（如果 topic 自身没内容）
+  try {
+    const hasInput = Storage.get('topic.lastInput.topic');
+    const hasResult = Storage.get('topic.lastResult');
+    const hasScheme = Storage.Shared.getScheme();
+    if (!hasInput && !hasResult && !hasScheme) {
+      const p = Storage.Shared.getProgress();
+      if (p.topic) {
+        p.topic = false;
+        Storage.set('shared.progress', p);
+      }
+    }
+  } catch (e) {}
 
   restoreFromStorage();
   bindEvents();
@@ -165,11 +180,11 @@ async function loadCatalogItemContent(id) {
       const md = buildLibraryPreview({ id, name: item.name, title, devices, funcs });
       showResult(md, { kind: 'library', libraryId: id });
 
-      // 用 markdown.extractMetadata 统一解析器件+功能（避免重复逻辑）
+      // 【v15.9.2】库加载不写入 shared——必须点“下一步”才共享
+      // 只暂存到 state，用户点“下一步”时才进 shared
       const libMeta = Markdown.extractMetadata(md);
       const level = /A$/.test(id) ? 'A' : 'B';
-
-      const structuredMeta = {
+      state.lastMeta = {
         topic: title || item.name,
         level,
         source: 'library',
@@ -181,22 +196,14 @@ async function loadCatalogItemContent(id) {
         devices: libMeta.devices || [],
         funcs: libMeta.funcs || [],
         generatedAt: new Date().toISOString(),
-        generatorVersion: 'v14.0',
+        generatorVersion: 'v15.9.2',
       };
-      Storage.Shared.setTopic(title || item.name);
-      Storage.Shared.setScheme(md);
-      Storage.Shared.setDevices(libMeta.devices || []);
-      Storage.Shared.setFuncs(libMeta.funcsRaw || []);
-      Storage.Shared.setMeta(structuredMeta);
+      state.lastInputs = { source: 'library', libraryId: id };
 
       // 同步 lastInput（避免刷新后库题丢失）
       syncLastInputFromCurrent();
 
-      // 库加载后也标记 topic 完成（顶部进度条显示✓）
-      Storage.Shared.markComplete('topic');
-      updateProgress();
-
-      UIContainer.toast(`已加载 ${item.id} 的内容到生成框，可点"生成方案"让 AI 重新设计`, 'success');
+      UIContainer.toast(`已加载 ${item.id} 的内容到生成框，可点"下一步"跳过 AI 重新设计`, 'success');
     }
   } catch (e) {
     console.warn('Failed to load catalog item content:', e);
@@ -509,8 +516,9 @@ function bindEvents() {
       .catch(err => UIContainer.showError(err));
   });
 
-  // 下一步按钮
-  dom.btnNext.addEventListener('click', onNextStep);
+  // 下一步按钮（v15.8 · 拆成两个：开题报告 / 论文）
+  if (dom.btnNextTaskbook) dom.btnNextTaskbook.addEventListener('click', () => onNextStep('taskbook'));
+  if (dom.btnNextThesis) dom.btnNextThesis.addEventListener('click', () => onNextStep('thesis'));
 
   // 复位/清空按钮
   dom.btnReset.addEventListener('click', onResetResult);
@@ -598,8 +606,13 @@ function restoreFromStorage() {
 }
 
 function loadFromShared() {
+  // 【v15.9.5】优先读 lastResult（不依赖 shared.meta，让切页面回来不丢内容）
+  const lastResult = Storage.get('topic.lastResult', '');
   const sharedScheme = Storage.Shared.getScheme();
-  if (sharedScheme && !state.lastResult) {
+  if (lastResult && !state.lastResult) {
+    state.lastResult = lastResult;
+    showResult(lastResult, { fromShared: false });
+  } else if (sharedScheme && !state.lastResult) {
     showResult(sharedScheme, { fromShared: true });
   }
 }
@@ -683,37 +696,19 @@ async function onGenerate(opts = {}) {
     UIContainer.updateProgress(80, '正在整理结果...');
     const cleaned = cleanResult(result);
     state.lastResult = cleaned;
+    state.lastMeta = Markdown.extractMetadata(cleaned);  // 【v15.9】暂存，不写入 shared
+    state.lastInputs = { topic, desc, level, mcu, display, power, fromImport, edited };
     // 生成成功后才存输入（失败/abort 不存，避免下次启动只恢复输入不恢复结果）
     saveInput();
+    // 【v15.9.5】同时存生成结果——切走页面回来不至于丢内容
+    Storage.set('topic.lastResult', cleaned);
 
     UIContainer.updateProgress(100, '完成');
     setTimeout(() => {
       UIContainer.hideProgress();
       showResult(cleaned);
-      // 写入 shared（完整方案 + 结构化元数据）
-      Storage.Shared.setTopic(topic);
-      Storage.Shared.setScheme(cleaned);
-      const meta = Markdown.extractMetadata(cleaned);
-      Storage.Shared.setDevices(meta.devices || []);
-      Storage.Shared.setFuncs(meta.funcsRaw || []);
-
-      // 结构化元数据（供开题报告 / 论文调用）
-      // 抽取模式：不以用户等级/高级选项为准，以开题报告原文为准。
-      const isExtractMode = fromImport && state.imported;
-      const structuredMeta = {
-        topic: meta.topic || topic,
-        level: isExtractMode ? 'auto' : level,  // 抽取模式表示"自动判定"
-        source: isExtractMode ? 'kaiti' : 'ai',  // kaiti = 开题报告抽取
-        kaitiFilename: isExtractMode ? state.imported.filename : undefined,
-        mcu: isExtractMode ? '未指定' : mcu,
-        display: isExtractMode ? '未指定' : display,
-        power: isExtractMode ? '未指定' : power,
-        devices: meta.devices || [],     // [{model, role}]
-        funcs: meta.funcs || [],          // [{text, category}]
-        generatedAt: new Date().toISOString(),
-        generatorVersion: 'v14.0',
-      };
-      Storage.Shared.setMeta(structuredMeta);
+      // 【v15.9 修复】不写入 shared meta——必须点“下一步”才共享（与 v9.3 规则一致）
+      // 渲染完成只更新“已完成”主题进度（用于顶部进度条）
       Storage.Shared.markComplete('topic');
       updateProgress();
     }, 300);
@@ -785,6 +780,11 @@ function showResult(md, opts = {}) {
       dom.resultContent.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 100);
   }
+
+  // 生成成功后提示可跳论文页
+  setTimeout(() => {
+    UIContainer.toast('生成成功！点右上角「下一步：论文」可继续生成论文', 'success', 4000);
+  }, 600);
 }
 
 function onResetResult() {
@@ -827,21 +827,26 @@ function onResetResult() {
   // 清生成框
   state.lastResult = '';
 
-  // 清 storage（lastInput + shared.scheme + shared.meta + shared.progress.topic）
+  // 清 storage（lastInput + lastResult + shared.scheme + shared.meta + shared.progress.topic）
   Storage.remove('topic.lastInput.topic');
   Storage.remove('topic.lastInput.desc');
   Storage.remove('topic.lastInput.level');
   Storage.remove('topic.lastInput.advMcu');
   Storage.remove('topic.lastInput.advDisplay');
   Storage.remove('topic.lastInput.advPower');
+  Storage.remove('topic.lastResult');  // 【v15.9.5】生成结果也清
   Storage.Shared.clearScheme();
   Storage.Shared.clearMeta();
+  Storage.Shared.setTopic('');   // 【v15.9】清 topic
+  Storage.Shared.setDevices([]); // 【v15.9】清器件
+  Storage.Shared.setFuncs([]);   // 【v15.9】清功能
   // 复位后清除 topic 完成标记（顶部进度条回到 active）
   const progress = Storage.Shared.getProgress();
   if (progress.topic) {
     progress.topic = false;
     Storage.set('shared.progress', progress);
   }
+  updateProgress();  // 【v15.9.3】刷新进度条 UI（去掉 topic 的已完成绿色）
 
   // 显示空状态
   dom.resultEmpty.classList.remove('hidden');
@@ -865,43 +870,72 @@ function resetAdv(selId, customId, defaultValue) {
   }
 }
 
-async function onNextStep() {
+async function onNextStep(dest = 'taskbook') {
   if (!state.lastResult) {
     UIContainer.toast('请先生成方案', 'error');
     return;
   }
-  // 确保 structured meta 已写入（taskbook 页依赖 getMeta 自动加载）
-  const meta = Storage.Shared.getMeta();
-  if (!meta) {
-    // 写一份默认 meta（避免 taskbook 页提示“未检测到方案数据”）
-    const cleaned = state.lastResult;
-    const parsed = Markdown.extractMetadata(cleaned);
-    Storage.Shared.setMeta({
-      topic: parsed.topic || dom.inputTopic.value.trim(),
-      level: 'B',
-      source: 'ai',
-      mcu: '',
-      display: '',
-      power: '',
-      devices: parsed.devices || [],
-      funcs: parsed.funcs || [],
-      generatedAt: new Date().toISOString(),
-      generatorVersion: 'v14.0',
-    });
-  }
-  Storage.Shared.setTopic(dom.inputTopic.value.trim());
-  Storage.Shared.setScheme(state.lastResult);
+  // 【v15.9】点“下一步”才写入 shared meta（v9.3 规则：主动存档）
+  // 复用 onGenerate 暂存的 state.lastMeta，避免重复 extract
+  const cleaned = state.lastResult;
+  const parsed = state.lastMeta || Markdown.extractMetadata(cleaned);
+  const topicVal = dom.inputTopic.value.trim();
+  const inputs = state.lastInputs || {};
+  const mergedMeta = {
+    topic: parsed.topic || topicVal,
+    level: 'B',
+    source: 'ai',
+    mcu: '',
+    display: '',
+    power: '',
+    devices: Array.isArray(parsed.devices) && parsed.devices.length
+      ? parsed.devices
+      : (Array.isArray(parsed.devicesRaw)
+          ? parsed.devicesRaw
+          : (typeof parsed.devicesRaw === 'string'
+              ? parsed.devicesRaw.split(/[、,，]/).map(s => s.trim()).filter(Boolean)
+              : [])),
+    funcs: Array.isArray(parsed.funcs) && parsed.funcs.length
+      ? parsed.funcs.map(f => typeof f === 'string' ? f : (f.text || JSON.stringify(f)))
+      : (Array.isArray(parsed.funcsRaw) ? parsed.funcsRaw : []),
+    generatedAt: new Date().toISOString(),
+    generatorVersion: 'v15.9',
+  };
+  Storage.Shared.setTopic(mergedMeta.topic);
+  Storage.Shared.setScheme(cleaned);
+  Storage.Shared.setDevices(mergedMeta.devices);
+  Storage.Shared.setFuncs(mergedMeta.funcs);
+  Storage.Shared.setMeta(mergedMeta);
   Storage.Shared.markComplete('topic');
-  try {
-    const r = await fetch('../taskbook/index.html', { method: 'HEAD' });
-    if (r.ok) {
-      window.location.href = '../taskbook/index.html';
+
+  if (dest === 'thesis') {
+    // 跳过开题报告，直接生成论文
+    try {
+      const r = await fetch('../thesis/index.html', { method: 'HEAD' });
+      if (r.ok) {
+        UIContainer.toast('已保存方案数据，跳到论文生成...', 'info', 1500);
+        setTimeout(() => { window.location.href = '../thesis/index.html'; }, 600);
+        return;
+      }
+    } catch (e) {
+      UIContainer.toast('论文页不可用，请检查路径', 'error');
       return;
     }
-  } catch (e) {
-    // taskbook 还没做
+  } else {
+    // 默认：先生成开题报告
+    try {
+      const r = await fetch('../taskbook/index.html', { method: 'HEAD' });
+      if (r.ok) {
+        UIContainer.toast('已保存方案数据，跳到开题报告...', 'info', 1500);
+        setTimeout(() => { window.location.href = '../taskbook/index.html'; }, 600);
+        return;
+      }
+    } catch (e) {
+      UIContainer.toast('开题报告页不可用，请检查路径', 'error');
+      return;
+    }
   }
-  UIContainer.toast('开题报告功能开发中，方案已保存到本地', 'success');
+  UIContainer.toast('页面不可用，方案已保存到本地', 'success');
 }
 
 function updateProgress() {
@@ -917,6 +951,7 @@ function updateProgress() {
       if (icon) icon.textContent = '✓';
     } else if (stage === 'topic') {
       el.classList.add('active');
+      el.classList.remove('done');
       if (icon) icon.textContent = '';
     } else {
       el.classList.remove('done', 'active');

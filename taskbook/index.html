@@ -6,9 +6,9 @@
 <meta name="version" content="v14.1">
 <title>开题报告 · 雄鸡助手</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%90%93%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="../shared/design-tokens.css">
-<link rel="stylesheet" href="../topic/style.css">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../shared/design-tokens.css?v=1595">
+<link rel="stylesheet" href="../topic/style.css?v=1595">
+<link rel="stylesheet" href="style.css?v=1595">
 </head>
 <body>
 
@@ -24,7 +24,6 @@
     </div>
     <nav class="app-nav">
       <a href="../index.html" class="nav-link nav-btn-prominent">🏠 主页</a>
-      <a href="../topic/index.html" class="nav-link nav-btn-prominent">📝 方案</a>
       <button class="nav-btn nav-btn-prominent" id="theme-toggle" title="切换主题" aria-label="切换主题">
         <span class="theme-icon">🌙</span>
       </button>
@@ -68,7 +67,7 @@
       <div class="card card-source" id="source-card">
         <div class="source-info" id="source-info">
           <span class="source-icon">📋</span>
-          <span class="source-text">加载中...</span>
+          <span class="source-text" id="source-text">加载中...</span>
         </div>
       </div>
 
@@ -179,25 +178,26 @@
           <span class="btn-icon">✨</span>
           <span class="btn-text">生成开题报告</span>
         </button>
+        <div class="shortcut-hint">💡 Ctrl + Enter 快捷生成</div>
       </div>
 
     </div>
   </section>
 
-  <!-- 输出区 -->
-  <section class="pane pane-output" aria-label="输出区">
+  <!-- 结果区 -->
+  <section class="pane pane-result" aria-label="结果区">
     <div class="pane-inner">
 
       <!-- 空状态 -->
-      <div class="output-empty" id="output-empty">
+      <div class="result-empty" id="result-empty">
         <div class="empty-icon">📄</div>
         <div class="empty-text">等待生成开题报告</div>
         <div class="empty-hint">填写左侧 5 项输入 → 点击「生成开题报告」</div>
       </div>
 
       <!-- 完成状态 -->
-      <div class="output-content hidden" id="output-content">
-        <div class="output-toolbar">
+      <div class="result-content hidden" id="result-content">
+        <div class="result-toolbar">
           <button type="button" class="btn btn-ghost btn-sm" id="btn-copy" title="复制到剪贴板">
             <span>📋</span><span>复制</span>
           </button>
@@ -207,8 +207,12 @@
           <button type="button" class="btn btn-ghost btn-sm" id="btn-reset" title="清空生成框">
             <span>🔄</span><span>复位</span>
           </button>
+          <button type="button" class="btn btn-primary btn-sm btn-next-thesis" id="btn-next" title="跳到论文生成页">
+            <span>下一步：论文</span>
+            <span>→</span>
+          </button>
         </div>
-        <div class="output-md" id="output-md"></div>
+        <div class="result-md" id="result-md"></div>
       </div>
 
     </div>
@@ -217,12 +221,12 @@
 
 <!-- mammoth 必须先于 app.js 加载（TemplateParser 依赖 window.mammoth） -->
 <!-- jszip 必须先于 app.js 加载（docx-export 依赖 window.JSZip） -->
-<script src="../shared/vendor/jszip.min.js"></script>
-<script src="../shared/vendor/mammoth.browser.min.js"></script>
+<script src="../shared/vendor/jszip.min.js?v=1595"></script>
+<script src="../shared/vendor/mammoth.browser.min.js?v=1595"></script>
 <script type="module">
   import NavJump from '../shared/nav.js';
   NavJump.init('taskbook/');
 </script>
-<script type="module" src="app.js"></script>
+<script type="module" src="app.js?v=1595"></script>
 </body>
 </html>

@@ -180,14 +180,17 @@
 }
 
 .workflow-step.active {
-  background: var(--color-primary-light);
-  color: var(--color-primary);
+  background: var(--color-primary);
+  color: white;
   font-weight: var(--font-weight-semibold);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
 }
 
 .workflow-step.done {
-  background: var(--color-success-light);
-  color: var(--color-success);
+  background: var(--color-success);
+  color: white;
+  font-weight: var(--font-weight-semibold);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
 }
 
 .step-num {
@@ -199,18 +202,18 @@
   justify-content: center;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-bold);
-  background: currentColor;
-  color: var(--color-surface);
+  background: rgba(255, 255, 255, 0.25);
+  color: white;
 }
 
 .workflow-step.active .step-num {
-  background: var(--color-primary);
-  color: var(--color-text-inverse);
+  background: rgba(255, 255, 255, 0.3);
+  color: white;
 }
 
 .workflow-step.done .step-num {
-  background: var(--color-success);
-  color: var(--color-text-inverse);
+  background: rgba(255, 255, 255, 0.3);
+  color: white;
 }
 
 .step-icon {
@@ -221,7 +224,10 @@
 .workflow-step.done .step-icon {
   display: inline-block;
   animation: checkmarkPop var(--duration-slow) var(--ease-spring);
-  color: var(--color-success);
+  color: white;
+  font-size: 16px;
+  margin-left: 2px;
+}-success);
 }
 
 .workflow-divider {
@@ -1125,6 +1131,37 @@
   display: flex;
   gap: var(--space-2);
   flex-wrap: wrap;
+  align-items: center;
+}
+
+/* 下一步按钮组 */
+.next-step-group {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding-left: var(--space-2);
+  border-left: 1px dashed var(--color-border);
+  margin-left: var(--space-2);
+}
+
+.next-step-group .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+@media (max-width: 720px) {
+  .next-step-group {
+    border-left: none;
+    padding-left: 0;
+    margin-left: 0;
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .next-step-group .btn {
+    width: 100%;
+  }
 }
 
 .result-body {

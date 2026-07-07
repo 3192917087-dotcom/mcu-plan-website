@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="version" content="v14.8">
+<meta name="version" content="v15.0">
 <title>雄鸡助手 · 主页</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F90%93%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="shared/design-tokens.css">
@@ -181,6 +181,9 @@ body {
   <button id="theme-toggle" title="切换主题">
     <span class="theme-icon">🌙</span>
   </button>
+  <button id="reset-progress" title="重置所有进度（进度条乱码 / 背景色不切换时使用）" style="font-size: 14px; font-weight: 600;">
+    🔄
+  </button>
 </div>
 
 <main class="dashboard">
@@ -205,12 +208,12 @@ body {
       <span class="feature-badge">✓ 可用</span>
     </a>
 
-    <div class="feature-card disabled">
+    <a href="thesis/" class="feature-card">
       <span class="feature-emoji">📄</span>
       <h2 class="feature-title">论文生成</h2>
       <p class="feature-desc">基于方案 + 开题报告，生成完整毕业论文结构（摘要 · 绪论 · 系统设计 · 硬件设计 · 软件设计 · 测试 · 总结）</p>
-      <span class="feature-badge dev">🚧 开发中</span>
-    </div>
+      <span class="feature-badge">✅ 可用</span>
+    </a>
 
     <div class="feature-card disabled">
       <span class="feature-emoji">📊</span>
@@ -221,16 +224,27 @@ body {
   </div>
 
   <footer class="dashboard-footer">
-    <p>v14.8</p>
+    <p>v15.9.6 · 修复论文取消按钮 + 切页面不丢内容 + 库项目输入保存</p>
   </footer>
 </main>
 
 <script type="module">
 import UIContainer from './shared/ui-kit.js';
 import ThemeToggle from './shared/theme-toggle.js';
+import Storage from './shared/storage.js';
 
 UIContainer.initTheme();
 ThemeToggle.init();
+
+// 重置进度按钮（调试 / 进度条不更新时使用）
+document.getElementById('reset-progress').addEventListener('click', () => {
+  if (!confirm('⚠️ 重置所有进度？\n\n会清空：\n• 进度状态（topic / taskbook / thesis / ppt 步骤）\n• 跨页面数据流（题目 / 器件 / 功能 / 开题 / 论文）\n• lastInput 缓存\n• 主题设置（恢复 light）\n\n页面缓存可能也需要 Ctrl+F5 硬刷新才能生效。')) return;
+  // 清空所有 mcu.* 键
+  Object.keys(localStorage).filter(k => k.startsWith('mcu.')).forEach(k => localStorage.removeItem(k));
+  // 主题也清
+  localStorage.removeItem('mcu.theme');
+  UIContainer.toast('✓ 所有进度已清空，请 Ctrl+F5 硬刷新', 'success', 4000);
+});
 </script>
 
 </body>
