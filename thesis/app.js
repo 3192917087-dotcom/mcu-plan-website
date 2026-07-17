@@ -24,6 +24,9 @@ const state = {
   outline: [],         // 参考目录（章节目录）
   refs: [],            // 参考文献
   templateInfo: null,  // {filename, size, fontSize, fontFamily, firstLineIndent}
+  codeFiles: [],       // 【v15.10.0】[{name, size, lines, content}]
+  codeContext: '',     // 【v15.10.0】合并后的代码字符串（≤ 8000 字）
+  pdfContext: '',      // 【v15.10.4】原理图分析报告（手动粘贴）
   wordCount: 15000,
   chapters: {},        // {1: '...', 2: '...', ...}
   abstractCn: '',
@@ -64,6 +67,22 @@ function bindDom() {
     'template-filename', 'template-meta',
     'template-fontsize', 'template-fontfamily', 'template-indent',
     'btn-template-clear',
+    // 【v15.10.4】原理图上下文（去除 PDF 上传，纯粘贴）
+    'schematic-preview',
+    'schematic-filename', 'schematic-chars',
+    'schematic-text',
+    'btn-schematic-clear',
+    'btn-schematic-paste',
+    'schematic-paste-modal',
+    'schematic-paste-textarea',
+    'btn-schematic-paste-close',
+    'btn-schematic-paste-cancel',
+    'btn-schematic-paste-confirm',
+    // 【v15.10.0】软件代码上下文
+    'code-input', 'code-zone', 'code-preview',
+    'code-stat-files', 'code-stat-lines', 'code-stat-chars',
+    'code-list', 'code-paste',
+    'btn-code-clear',
     // AI 整理
     'btn-ai-polish',
   ].forEach(id => dom[id] = $(id));
@@ -71,12 +90,12 @@ function bindDom() {
 
 // ===== 启动 =====
 export function initApp() {
-  bindDom();
-  bindEvents();
-  console.log('[thesis] initTheme available?', typeof UIContainer?.initTheme);
-  console.log('[thesis] ThemeToggle available?', typeof ThemeToggle?.init);
-  UIContainer.initTheme();   // 【v15.9.3】初始化主题（修复背景色不能切换）
-  ThemeToggle.init();        // 【v15.9.3】初始化主题切换按钮（修复点没反应）
+  console.log('[thesis v15.10.0] initApp 启动');
+  try { bindDom(); console.log('[thesis] bindDom OK'); } catch (e) { console.error('[thesis] bindDom ERR:', e); }
+  try { bindEvents(); console.log('[thesis] bindEvents OK'); } catch (e) { console.error('[thesis] bindEvents ERR:', e); }
+  try { UIContainer.initTheme(); console.log('[thesis] initTheme OK'); } catch (e) { console.error('[thesis] initTheme ERR:', e); }
+  try { ThemeToggle.init(); console.log('[thesis] ThemeToggle.init OK'); } catch (e) { console.error('[thesis] ThemeToggle.init ERR:', e); }
+  console.log('[thesis] initApp 完成');
   console.log('[thesis] data-theme after init:', document.documentElement.getAttribute('data-theme'));
   refreshSourceBanner();
   loadFromStorage();
@@ -157,6 +176,39 @@ function bindEvents() {
     dom['btn-template-clear'].addEventListener('click', clearTemplate);
   }
   setupDragAndDrop(dom['template-zone'], dom['template-input'], handleTemplateUpload);
+
+  // 【v15.10.0】上传代码文件（多选）
+  if (dom['code-input']) {
+    dom['code-input'].addEventListener('change', handleCodeFiles);
+  }
+  if (dom['btn-code-clear']) {
+    dom['btn-code-clear'].addEventListener('click', clearCode);
+  }
+  if (dom['code-paste']) {
+    dom['code-paste'].addEventListener('input', handleCodePasteChange);
+  }
+  setupDragAndDrop(dom['code-zone'], dom['code-input'], handleCodeFiles);
+
+  // 【v15.10.4】原理图上下文：纯粘贴，无 PDF 上传
+  if (dom['btn-schematic-clear']) {
+    dom['btn-schematic-clear'].addEventListener('click', clearSchematic);
+  }
+  if (dom['schematic-text']) {
+    dom['schematic-text'].addEventListener('input', handleSchematicTextChange);
+  }
+  if (dom['btn-schematic-paste']) {
+    dom['btn-schematic-paste'].addEventListener('click', openSchematicPasteModal);
+  }
+  if (dom['btn-schematic-paste-close']) {
+    dom['btn-schematic-paste-close'].addEventListener('click', closeSchematicPasteModal);
+  }
+  if (dom['btn-schematic-paste-cancel']) {
+    dom['btn-schematic-paste-cancel'].addEventListener('click', closeSchematicPasteModal);
+  }
+  if (dom['btn-schematic-paste-confirm']) {
+    dom['btn-schematic-paste-confirm'].addEventListener('click', confirmSchematicPaste);
+  }
+
 
   // AI 整理
   if (dom['btn-ai-polish']) {
@@ -255,12 +307,14 @@ async function aiPolishInputs() {
 
   try {
     const sys = [
-      '你是单片机/嵌入式系统写作助手。任务是“补全 + 整理”用户输入的论文信息，不许改变原意。',
+      '你是单片机/嵌入式系统写作助手。任务是“整理”用户输入的论文信息，不许改变原意。',
       '',
-      '【补全题目】',
-      '- 如果题目太短（如「健康监测系统」），补全为完整论文题目格式：「基于 [主控] 的 [项目描述] 设计」',
-      '- 保留原意，不许换主题',
-      '- 长度控制在 30 字以内',
+      '【【v15.10.6】题目不变原则（用户对齐 · 最重要）】',
+      '- **严格保留用户输入的原题，一字不改**',
+      '- ❌ 不许加修饰词（「超/智能/多功能/养护/系统/设计/基于 STM32 的」等）',
+      '- ❌ 不许扩写、缩简、换成更“学术”的题目格式',
+      '- 用户写「智能鱼缸」→ 返回「智能鱼缸」（**不是**「超智能鱼缸养护系统」）',
+      '- 用户写什么就返回什么，原封不动',
       '',
       '【整理器件】',
       '- 保留全部型号，去重',
@@ -299,7 +353,9 @@ async function aiPolishInputs() {
       throw new Error('JSON 解析失败：' + e.message);
     }
 
-    if (parsed.topic && typeof parsed.topic === 'string') {
+    // 【v15.10.6】题目不覆盖——AI 可能改题，用原值保持
+    // （题目如果 AI 返回改了，就丢弃，用用户输入的原值）
+    if (parsed.topic && typeof parsed.topic === 'string' && parsed.topic.trim() === topicVal) {
       dom['input-topic'].value = parsed.topic.trim();
     }
     if (parsed.devices && typeof parsed.devices === 'string') {
@@ -631,6 +687,189 @@ function clearTemplate() {
   toast('已清除模板', 'info');
 }
 
+// ===== 【v15.10.0】软件代码上下文（多文件上传 + 粘贴 · 不限字符上限） =====
+
+async function handleCodeFiles(e) {
+  const input = e.target;
+  const fileList = input.files ? Array.from(input.files) : [];
+  if (!fileList.length) return;
+
+  // 单个文件 200KB 上限（防止误传大文件）
+  for (const f of fileList) {
+    if (f.size > 200 * 1024) {
+      toast(`${f.name} 超过 200KB，跳过`, 'error');
+      continue;
+    }
+    try {
+      const content = await readFileAsText(f);
+      const lines = content.split(/\r?\n/).length;
+      state.codeFiles.push({ name: f.name, size: f.size, lines, content });
+    } catch (err) {
+      console.error('[thesis] code file read failed', f.name, err);
+      toast(`读取 ${f.name} 失败：${err.message}`, 'error');
+    }
+  }
+
+  rebuildCodeContext();
+  updateCodePreview();
+  input.value = '';  // 重置 input 允许重复传同名文件
+  toast(`已加载 ${state.codeFiles.length} 个代码文件`, 'success');
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = ev => resolve(String(ev.target.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('读取失败'));
+    reader.readAsText(file, 'utf-8');
+  });
+}
+
+function handleCodePasteChange() {
+  rebuildCodeContext();
+  updateCodePreview();
+}
+
+function rebuildCodeContext() {
+  // 优先级：main.* / app.* > 其他
+  const sorted = [...state.codeFiles].sort((a, b) => {
+    const score = name => /^(main|app)\.[ch]/i.test(name) ? 0 : 1;
+    return score(a.name) - score(b.name);
+  });
+
+  const parts = [];
+  let total = 0;
+  for (const f of sorted) {
+    const header = `\n/* ====== FILE: ${f.name} (${f.lines} lines) ====== */\n`;
+    const tail = `\n/* ====== END FILE: ${f.name} ====== */\n`;
+    parts.push(header + f.content + tail);
+    total += header.length + f.content.length + tail.length;
+  }
+
+  // 粘贴区文本拼到末尾
+  const paste = dom['code-paste'] ? dom['code-paste'].value.trim() : '';
+  if (paste) {
+    const seg = `\n/* ====== PASTE: 用户粘贴 ====== */\n${paste}\n/* ====== END PASTE ====== */\n`;
+    parts.push(seg);
+    total += seg.length;
+  }
+
+  state.codeContext = parts.join('');
+  state.codeTotalChars = total;
+}
+
+function updateCodePreview() {
+  const hasContent = state.codeFiles.length > 0 || (dom['code-paste'] && dom['code-paste'].value.trim());
+  if (!dom['code-zone'] || !dom['code-preview']) return;
+
+  // 【v15.10.1】上传区始终可见，有内容时变成"添加更多"入口
+  dom['code-zone'].classList.remove('hidden');
+  dom['code-preview'].classList.toggle('hidden', !hasContent);
+
+  // 有内容时简化上传区提示语
+  const uploadText = dom['code-zone'].querySelector('.import-text strong');
+  const uploadSmall = dom['code-zone'].querySelector('.import-text small');
+  if (hasContent) {
+    if (uploadText) uploadText.textContent = '➕ 点击或拖入添加更多文件';
+    if (uploadSmall) uploadSmall.textContent = '可分多次上传，自动累加 · 单文件 ≤ 200KB';
+    if (dom['btn-code-clear']) dom['btn-code-clear'].style.display = 'inline-block';
+  } else {
+    if (uploadText) uploadText.textContent = '点击或拖入代码文件（支持多选）';
+    if (uploadSmall) uploadSmall.textContent = '.c / .h / .cpp / .ino / .txt · Ch4 软件设计将严格基于实际代码生成，不编造';
+    if (dom['btn-code-clear']) dom['btn-code-clear'].style.display = 'none';
+  }
+
+  // 文件列表
+  if (dom['code-list']) {
+    dom['code-list'].innerHTML = state.codeFiles.map((f, idx) =>
+      `<div class="code-file-item">
+        <div class="file-info">
+          <span class="file-icon">📄</span>
+          <span class="file-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+        </div>
+        <span class="file-meta">${f.lines} 行 · ${(f.size/1024).toFixed(1)} KB</span>
+        <button type="button" class="file-remove" data-idx="${idx}" title="移除">×</button>
+      </div>`
+    ).join('');
+    dom['code-list'].querySelectorAll('.file-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx, 10);
+        state.codeFiles.splice(idx, 1);
+        rebuildCodeContext();
+        updateCodePreview();
+      });
+    });
+  }
+
+  // 统计
+  const totalLines = state.codeFiles.reduce((s, f) => s + f.lines, 0);
+  if (dom['code-stat-files']) dom['code-stat-files'].textContent = state.codeFiles.length;
+  if (dom['code-stat-lines']) dom['code-stat-lines'].textContent = totalLines;
+  if (dom['code-stat-chars']) dom['code-stat-chars'].textContent = state.codeTotalChars || 0;
+}
+
+function clearCode() {
+  state.codeFiles = [];
+  state.codeContext = '';
+  state.codeTotalChars = 0;
+  if (dom['code-input']) dom['code-input'].value = '';
+  if (dom['code-paste']) dom['code-paste'].value = '';
+  updateCodePreview();
+  toast('已清除代码上下文', 'info');
+}
+
+// ===== 【v15.10.4】原理图上下文（纯粘贴，无 PDF 上传） =====
+// ===== 【v15.10.3】一键粘贴原理图报告弹窗（无默认模板） =====
+// ===== 【v15.10.4】原理图上下文（纯粘贴，无 PDF 上传） =====
+function updateSchematicPreviewUI() {
+  const text = (state.pdfContext || '').trim();
+  const hasContent = text.length > 0;
+  if (dom['schematic-chars']) dom['schematic-chars'].textContent = state.pdfContext.length;
+  if (dom['schematic-filename']) dom['schematic-filename'].textContent = hasContent ? '已填入报告' : '未填入报告';
+  if (dom['btn-schematic-clear']) dom['btn-schematic-clear'].style.display = hasContent ? 'inline-block' : 'none';
+}
+
+function clearSchematic() {
+  state.pdfContext = '';
+  if (dom['schematic-text']) dom['schematic-text'].value = '';
+  updateSchematicPreviewUI();
+  toast('已清除原理图报告', 'info');
+}
+
+function handleSchematicTextChange() {
+  state.pdfContext = dom['schematic-text']?.value || '';
+  updateSchematicPreviewUI();
+}
+function openSchematicPasteModal() {
+  if (!dom['schematic-paste-modal']) return;
+  // 弹窗打开时不预填任何内容（按用户要求：不存默认模板）
+  if (dom['schematic-paste-textarea']) dom['schematic-paste-textarea'].value = '';
+  dom['schematic-paste-modal'].style.display = 'flex';
+  setTimeout(() => {
+    if (dom['schematic-paste-textarea']) dom['schematic-paste-textarea'].focus();
+  }, 50);
+}
+
+function closeSchematicPasteModal() {
+  if (!dom['schematic-paste-modal']) return;
+  dom['schematic-paste-modal'].style.display = 'none';
+  if (dom['schematic-paste-textarea']) dom['schematic-paste-textarea'].value = '';
+}
+
+function confirmSchematicPaste() {
+  const text = dom['schematic-paste-textarea']?.value?.trim() || '';
+  if (!text) {
+    toast('报告内容为空', 'error');
+    return;
+  }
+  // 写入 state + 文本框
+  state.pdfContext = text;
+  if (dom['schematic-text']) dom['schematic-text'].value = text;
+  updateSchematicPreviewUI();
+  closeSchematicPasteModal();
+  toast(`已填入报告，字符数见文本框`, 'success');
+}
+
 // ===== 主流程 =====
 async function startGeneration() {
   if (state.generating) {
@@ -814,6 +1053,21 @@ async function generateChapter(ch_id, ch_title, target, signal) {
   return cleanChapterContent(result.text, ch_id);
 }
 
+
+// === v15.10.9 规范 [数字/字母] 与 [汉字] 之间的空格 ===
+//   - 'STM 32'    -> 'STM32'    (字母+空格+数字)
+//   - '1 . 5V'    -> '1.5V'
+//   - '5 V'       -> '5V'
+//   - 'STM32 控制器' -> 'STM32控制器'
+//   - '温 度 25 度' -> '温度25度'
+// v15.10.9: 规范 [数字/字母] 与 [汉字] 之间的空格（贪心循环，直到稳定）
+//   - 'STM 32'        -> 'STM32'
+//   - '1 . 5V'        -> '1.5V'
+//   - '5 V'           -> '5V'
+//   - 'STM32 控制器'  -> 'STM32控制器'
+//   - '控 制 器'       -> '控制器'
+//   - '单 片 机 STM 32' -> '单片机STM32'
+
 function buildSystemPrompt() {
   const devices = state.devices.join('、');
   const funcs = state.funcs.join('\n');
@@ -862,7 +1116,29 @@ ${state.refs.join('\n')}
 3. 不要写电路原理图内容（占位符 [待插入图：fig-x-x 人类语言] 代替）
 4. 论文段落要严谨、有数据支撑、避免口语化
 5. Ch1 绪论是唯一允许出现 [n] 参考文献标记的章节（Ch2-6 严禁 [n]）
-6. 段落首行缩进 2 字符（在 .docx 中会自动处理，正文无需自己写空格）`;
+6. 段落首行缩进 2 字符（在 .docx 中会自动处理，正文无需自己写空格）
+
+【【v15.10.0】全章节禁捏造约束】
+7. 严禁编造任何代码细节：函数名、变量名、寄存器名、参数值、时序数值、通信协议字段名，只能引用实际代码中出现的
+8. 严禁虚构库函数调用：如未提供代码中明确出现，不得引用 HAL_I2C_Master_Transmit、HAL_SPI_Transmit 等具体 API
+9. 器件顺序引脚编号不得确定：未提供代码时只能说"与主控通过 UART 通信"，不得写"PA2/PA3"
+10. 测试数据不得捏造：未提供测试数据时只能说"经过多轮测试系统稳定运行"，不得编造具体表格
+
+【【v15.10.5】排版约束】
+11. 术语（如 STM32、WiFi 模块、主控制器）可以用两个星号包起来实现加粗
+12. 严禁整句、整段加粗（加粗内容应为 2-6 个汉字的术语，不是一整句话）
+13. 一段内加粗术语不超过 2 个
+14. 普通描述不要用任何加粗，直接平铺文字
+15. 章节标题不要加粗（H1 / H2 / H3 标题样式已自带加粗，不要再手动加星号）
+
+【【v15.10.7】标题编号与层级要求】
+16. **每个章节必须有编号标题**：H1 写 \`# X 章节名\`（X 为 1-6 阿拉伯数字），H2 写 \`## X.Y 子标题\`，H3 写 \`### X.Y.Z 三级标题\`。
+17. **不得省略编号**：不能写 \`# 绪论\`、\`## 研究背景\`（必須 \`# 1 绪论\`、\`## 1.1 研究背景\`）。
+18. **不得重复标题**：你输出的章节内容里不要写 H1（导出器会按章节号自动生成“1 绪论”等）；只输出 H2 / H3 / 正文。
+19. **标题层级区分明显**：H1 = 32（三号）·居中·黑体；H2 = 28（小三）·左对齐·黑体；H3 = 24（小四）·左对齐·黑体。正文 = 24（小四）·首行缩进 2 字符·宋体。加粗一律不要。
+
+20. **不要加粗**：v15.10.7 已全面去除加粗（导出器不再处理 \`**xxx**\`）。输出里不许出现 \`**术语**\` 字样，包了也会被原样保留为“\**术语**\”字面字符串。
+`;
 }
 
 function buildChapterPrompt(ch_id, ch_title, target) {
@@ -891,16 +1167,42 @@ function buildChapterPrompt(ch_id, ch_title, target) {
 ${chapterGuidance[ch_id] || ''}
 ${outlineHint}
 ${isCh1 ? '\n【重要】本章是唯一允许写 [n] 参考文献的位置，其他章禁止。\n' : ''}
-${isCh3 ? '\n【重要】器件型号严格按锁定清单，不要编造（如 SHT30 / BH1750 / MQ-4 严禁出现）。每个电路描述末尾留一行 `[待插入图：fig-3-x 描述]` 占位符。\n' : ''}
-${isCh4 ? '\n【重要】本章必须包含 5 张流程图。每张流程图格式：\n\n### 图4-1 主程序流程图\n\nASCII 框图：\n```\n[开始] → [初始化] → [主循环]\n                          ↓\n                  [读取传感器] → [判断阈值] → [控制执行器]\n                          ↓\n                  [上传云端] ← [延时] → [返回循环]\n```\n\nMermaid 源码（复制到 mermaid.live 渲染）：\n\`\`\`mermaid\nflowchart TD\n    A[开始] --> B[初始化]\n    B --> C[主循环]\n    C --> D[读取传感器]\n    D --> E{判断阈值}\n    E -->|是| F[控制执行器]\n    E -->|否| G[上传云端]\n    F --> G\n    G --> H[延时]\n    H --> C\n\`\`\`\n\n图 4-1 ~ 4-5：主程序流程图 / 数据采集流程图 / 通信流程图 / 控制流程图 / 异常处理流程图\n' : ''}
+${isCh3 ? buildCh3PromptAddition() : ''}
+${isCh4 ? buildCh4PromptAddition() : ''}
 
 【输出格式】
-- 第一行：# ${ch_title}（H1 标题）
-- 段落用 H2 / H3 分节
+- 【v15.10.7】**不要写 H1 标题**（导出器会自动生成“${ch_id} ${ch_title}”作为 H1），从 H2 开始输出。
+- 段落用 H2 / H3 分节：【v15.10.7】H2 必须是 \`## ${ch_id}.X 子标题\`，H3 必须是 \`### ${ch_id}.X.Y 三级标题\`。
 - 每个 H2 之间段落连贯
 - 不要输出"本章小结""本章内容"等冗余引导
+- 不要加粗（v15.10.7 已去除）
 
 直接输出章节内容即可。`;
+}
+
+// 【v15.10.0】Ch4 软件设计专用 prompt 拼接：有代码则强约束贴代码，无代码则保守描述
+// 【v15.10.3】Ch3 硬件设计专用 prompt 拼接：有原理图报告则严格贴报告，无报告则保守描述
+function buildCh3PromptAddition() {
+  const hasPdf = state.pdfContext && state.pdfContext.length > 100;
+
+  if (hasPdf) {
+    return `\n【【v15.10.3】重要】已提供原理图分析报告，本章必须严格基于下方报告描述，**严禁捏造**。\n\n【原理图分析报告】（所有描述只能依据此处出现的模块、元件、连接关系）：\n\`\`\`\n${state.pdfContext}\n\`\`\`\n\n【【v15.10.3】强约束】\n1. **不要在正文中写元器件标号**（R1/C1/Q1/U1 这种 PCB 标号一律不出现）\n2. **所有模块、元件、连接关系只能使用报告中实际出现的**：不得添加报告里没有的电路\n3. **GPIO 引脚可以引用报告中标注的**（如 DS18B20 接 PB8），不得推测未标注的引脚\n4. **电路功能用业务术语描述**：说"加热控制电路由 MOS 管驱动 5V 继电器实现"而不是"Q3 驱动 K10 继电器"\n5. **报告未提及的部分不要补充**：如报告未提"光耦隔离 / TVS / 屏蔽"就不要写这些\n6. 每个电路描述末尾保留一行 \`[待插入图：fig-3-x 人类语言描述]\` 占位符`;
+  } else {
+    return `\n【【v15.10.3】无原理图报告】未提供原理图，按以下原则写：\n1. 只写通用电路功能，**不要写元器件标号**（R1/C1 这种禁止）\n2. 引脚只能写器件清单中明确使用的（如 DS18B20 接 PB8 来自器件清单）\n3. 不得推测未知的电路（光耦隔离 / TVS / 屏蔽 / 看门狗等）\n4. 每个电路描述末尾保留一行 \`[待插入图：fig-3-x 描述]\` 占位符`;
+  }
+}
+
+function buildCh4PromptAddition() {
+  const hasCode = state.codeContext && state.codeContext.length > 100;
+
+  // 【v15.10.2】极简 ASCII 流程图模板（不要 Mermaid）
+  const flowChartGuide = `\n【流程图要求】本章需包含 5 张流程图，**仅使用 ASCII 框图，不需要 Mermaid**。每张 5-7 步，简洁明了，用业务术语：\n\n例：\n### 图4-1 主程序流程图\n\n\`\`\`\n[开始] → [初始化] → [主循环]\n   ↓\n[采集数据] → [阈值判断] → [控制执行器]\n   ↓\n[上传云端] → [延时] → [返回主循环]\n\`\`\`\n\n5 张图：主程序 / 数据采集 / 通信上报 / 控制执行 / 异常处理`;
+
+  if (hasCode) {
+    return `\n【【v15.10.2】重要】已提供实际代码作为**逻辑参考**，但描述要用业务术语，避免贴代码细节。\n\n${flowChartGuide}\n\n【代码逻辑参考】（仅用于理解实际业务流程，**不要在正文中贴函数名/变量名/寄存器**）：\n\`\`\`c\n${state.codeContext}\n\`\`\`\n\n【【v15.10.2】写作原则】\n1. **用业务术语描述逻辑**：说"采集温度传感器数据"而不是"调用 DS18B20_GetTemp_SkipRom()"；说"WiFi 上报数据到 APP"而不是"通过 AT+CIPSEND 发送 msg=#T#SW#..."\n2. **不要在正文中贴函数名/变量名/宏定义**：除非介绍核心算法时有必要，否则一律用中文业务术语\n3. **描述业务流程要准确**：根据代码反映的实际判断条件（如温度低→开加热、水位低→开水泵、光照低→开灯），不要套用通用模板\n4. **GPIO 引脚简写**：用"主控 GPIO 引脚"代替具体 PB12/13/14/15，除非必要不写具体编号\n5. **通信协议用通用描述**：说"通过 WiFi 模块以自定义格式上报数据"，不要贴具体 AT 指令或数据包格式\n6. **流程图用业务术语**：图中的方块写"采集水质数据""判断是否超过阈值"等，不要写"调用 DS18B20_ReadByte()"`;
+  } else {
+    return `\n【重要】本章需要包含 5 张流程图（仅 ASCII，不需要 Mermaid）。${flowChartGuide}\n\n【【v15.10.2】无代码上下文】未提供实际代码，按以下原则写：\n1. 只写最通用的软件架构描述（主程序循环 / 数据采集 / 阈值控制 / 通信 / 显示）\n2. 不得编造任何具体函数名、HAL 库 API、寄存器名称、参数数值\n3. 描述业务逻辑时使用"采集传感器数据→判断阈值→控制执行器"这种抽象表述\n4. GPIO 引脚不写具体编号，用"主控 GPIO 引脚"代替\n5. 5 张流程图用通用模板（采集→判断→控制→通信→显示）`;
+  }
 }
 
 function cleanChapterContent(text, ch_id) {
@@ -1036,6 +1338,7 @@ async function downloadDocx() {
       return;
     }
     toast('生成 .docx 中...', 'info');
+    // v15.10.8：下载前清掉所有 ** 标记（避免论文里出现 **xxx** 字面字符串）
     const blob = await exportPaperDocx({
       topic: state.topic,
       abstractCn: state.abstractCn,
@@ -1069,6 +1372,8 @@ function resetAll() {
   // 清除上传文件
   clearUploadedFile();
   clearTemplate();
+  clearCode();  // 【v15.10.0】
+  clearSchematic();  // 【v15.10.3】
 
   // 清空状态
   state.chapters = {};

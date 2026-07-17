@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="version" content="v15.9">
+<meta name="version" content="v15.10.5">
 <title>论文生成 · 雄鸡助手</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%90%93%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="../shared/design-tokens.css?v=1595">
@@ -180,7 +180,70 @@
         <small class="preview-hint">💡 一行一条功能描述（越详细生成质量越高）</small>
       </div>
 
-      <!-- 6. 参考模板文件导入（可选） -->
+            <!-- 6. 原理图分析报告（可选 · 让 Ch3 硬件设计贴合实际原理图） -->
+      <div class="card card-schematic">
+        <div class="card-header">
+          <label class="card-label">
+            <span class="label-icon">📐</span>
+            <span>原理图分析报告</span>
+            <span class="optional-mark">可选</span>
+          </label>
+          <button type="button" class="btn-link" id="btn-schematic-paste" title="一键粘贴秘书生成的报告">📋 粘贴报告</button>
+          <button type="button" class="btn-link" id="btn-schematic-clear" title="清除报告" style="display:none;">清除</button>
+        </div>
+        <div class="schematic-preview" id="schematic-preview">
+          <div class="preview-header">
+            <span class="preview-title">📁 <span id="schematic-filename">未填入报告</span> · <span id="schematic-chars">0</span> 字符</span>
+          </div>
+          <div class="input-with-clear" style="margin-top: 12px;">
+            <textarea
+              id="schematic-text"
+              class="form-input form-textarea"
+              rows="12"
+              placeholder="点 [📋 粘贴报告] 弹窗 → 把秘书生成的原理图分析报告粘进去 → 自动填入此处"
+            ></textarea>
+          </div>
+          <small class="preview-hint">💡 也可手动在文本框直接编辑；Ch3 硬件设计将严格基于此报告生成（不写标号）</small>
+        </div>
+      </div>
+<!-- 7. 软件代码上下文（可选 · 让 Ch4 软件设计贴合实际代码） -->
+      <div class="card card-code-context">
+        <div class="card-header">
+          <label class="card-label">
+            <span class="label-icon">💻</span>
+            <span>软件代码上下文</span>
+            <span class="optional-mark">可选</span>
+          </label>
+          <button type="button" class="btn-link" id="btn-code-clear" title="清除代码" style="display:none;">清除</button>
+        </div>
+        <div class="import-zone" id="code-zone">
+          <input type="file" id="code-input" accept=".c,.h,.cpp,.hpp,.ino,.txt,.inc,.s,.asm" multiple hidden>
+          <label for="code-input" class="import-label">
+            <span class="import-icon">📂</span>
+            <span class="import-text">
+              <strong>点击或拖入代码文件（支持多选）</strong>
+              <small>.c / .h / .cpp / .ino / .txt · Ch4 软件设计将严格基于实际代码生成，不编造</small>
+            </span>
+          </label>
+        </div>
+        <div class="code-preview hidden" id="code-preview">
+          <div class="preview-header">
+            <span class="preview-title">📁 已加载 <span id="code-stat-files">0</span> 个文件 / <span id="code-stat-lines">0</span> 行 / <span id="code-stat-chars">0</span> 字符</span>
+          </div>
+          <div class="code-files" id="code-list"></div>
+          <div class="input-with-clear" style="margin-top: 12px;">
+            <textarea
+              id="code-paste"
+              class="form-input form-textarea"
+              rows="6"
+              placeholder="（可选）也可以在这里直接粘贴代码片段，会与上传文件合并计算"
+            ></textarea>
+          </div>
+          <small class="preview-hint">💡 无字符上限，多次上传自动累加（单文件 ≤ 200KB）</small>
+        </div>
+      </div>
+
+      <!-- 7. 参考模板文件导入（可选） -->
       <div class="card card-import">
         <div class="card-header">
           <label class="card-label" for="template-input">
@@ -474,5 +537,22 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 
-</body>
+
+<!-- 【v15.10.3】一键粘贴原理图报告弹窗 -->
+<div class="modal-overlay" id="schematic-paste-modal" style="display:none;">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <h3>📋 粘贴原理图分析报告</h3>
+      <button type="button" class="modal-close" id="btn-schematic-paste-close" title="关闭">×</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-hint">把秘书生成的原理图分析报告粘到下面 → 点 [填入报告] 自动同步到论文生成上下文</p>
+      <textarea id="schematic-paste-textarea" class="form-input form-textarea modal-textarea" rows="14" placeholder="把秘书生成的分析报告粘到这里..."></textarea>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-secondary" id="btn-schematic-paste-cancel">取消</button>
+      <button type="button" class="btn-primary" id="btn-schematic-paste-confirm">📋 填入报告</button>
+    </div>
+  </div>
+</div></body>
 </html>

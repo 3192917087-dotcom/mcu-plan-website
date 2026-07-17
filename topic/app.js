@@ -879,10 +879,16 @@ async function onNextStep(dest = 'taskbook') {
   // 复用 onGenerate 暂存的 state.lastMeta，避免重复 extract
   const cleaned = state.lastResult;
   const parsed = state.lastMeta || Markdown.extractMetadata(cleaned);
-  const topicVal = dom.inputTopic.value.trim();
   const inputs = state.lastInputs || {};
+  // 【【v15.10.6】题目不变原则】题目用用户原始输入或预览区编辑结果，不受 AI 输出标题影响
+  // create 模式：topicVal = dom.inputTopic.value（用户填的）
+  // 抽模式：previewTopic = inputs.edited.topic（用户在预览区编辑过的）
+  // 兜底：parsed.topic（AI 抽取的）—— 仅在用户没填也没编辑时使用
+  const topicVal = dom.inputTopic.value.trim();
+  const previewTopic = (inputs.edited && inputs.edited.topic) ? inputs.edited.topic.trim() : '';
+  const finalTopic = topicVal || previewTopic || (parsed.topic || '');
   const mergedMeta = {
-    topic: parsed.topic || topicVal,
+    topic: finalTopic,
     level: 'B',
     source: 'ai',
     mcu: '',
@@ -899,7 +905,7 @@ async function onNextStep(dest = 'taskbook') {
       ? parsed.funcs.map(f => typeof f === 'string' ? f : (f.text || JSON.stringify(f)))
       : (Array.isArray(parsed.funcsRaw) ? parsed.funcsRaw : []),
     generatedAt: new Date().toISOString(),
-    generatorVersion: 'v15.9',
+    generatorVersion: 'v15.10.6',
   };
   Storage.Shared.setTopic(mergedMeta.topic);
   Storage.Shared.setScheme(cleaned);

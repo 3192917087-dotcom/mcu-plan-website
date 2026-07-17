@@ -46,3 +46,10 @@ _backup_*
 
 # 本地测试页
 test.html
+
+# === v15.10.6-L · 2026-07-18 · sensitive (NEVER push) ===
+docs/
+external-skills/
+thesis/backend/
+thesis/templates/
+workspace/
