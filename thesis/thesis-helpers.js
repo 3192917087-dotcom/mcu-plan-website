@@ -1,43 +1,35 @@
 // ============================================================
 // thesis/thesis-helpers.js - 论文生成专用工具
 // ============================================================
-// - getHardcodedApiKey(): 从 shared/api.js 读取 hardcoded API Key
-// - callMinimax(): 强制 thinking disabled（避免 token 被吃掉）
+// - callOpenAI(): 通过本机后端调用 DeepSeek Chat Completions 接口
 // - extractFromDocx(): 浏览器端用 mammoth 读 .docx 提取纯文本
 // - aiParsePlan(): AI 拆解开题报告/任务书/方案文档
 // - countCnChars(): 统计中文字符数
 // ============================================================
 
-// === 从 shared/api.js 读取 hardcoded API Key ===
-export function getHardcodedApiKey() {
-  if (window.ApiClient && window.ApiClient.DEFAULT_CONFIG) {
-    return window.ApiClient.DEFAULT_CONFIG.apiKey || '';
-  }
-  return '';
-}
-
-// === callMinimax（强制 thinking:disabled）===
-export async function callMinimax(apiKey, messages, options = {}) {
+// === DeepSeek Chat Completions ===
+export async function callOpenAI(messages, options = {}) {
   const {
     temperature = 0.7,
     max_tokens = 4000,
-    model = 'MiniMax-M3',
+    model,
     signal,
   } = options;
 
-  const response = await fetch('https://api.minimaxi.com/v1/chat/completions', {
+  const config = window.ApiClient?.loadConfig?.() || {};
+  const targetModel = model || config.model || 'deepseek-v4-pro';
+
+  const response = await fetch('/api/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + apiKey,
     },
     body: JSON.stringify({
-      model,
+      model: targetModel,
       messages,
       temperature,
-      max_tokens,
+      max_completion_tokens: max_tokens,
       stream: false,
-      thinking: { type: 'disabled' },
     }),
     signal,
   });
@@ -75,7 +67,7 @@ export async function extractFromDocx(file) {
 }
 
 // === AI 拆解开题报告/任务书/方案文档 ===
-export async function aiParsePlan(apiKey, rawText) {
+export async function aiParsePlan(rawText) {
   const systemPrompt = `你是一位单片机/嵌入式系统专家，擅长从开题报告/任务书/方案文档中精确提取关键信息。
 
 【任务】
@@ -109,7 +101,7 @@ ${rawText.slice(0, 6000)}
 
 【输出 JSON】`;
 
-  const result = await callMinimax(apiKey, [
+  const result = await callOpenAI([
     { role: 'system', content: systemPrompt },
     { role: 'user', content: userPrompt },
   ], { temperature: 0.3, max_tokens: 2500 });

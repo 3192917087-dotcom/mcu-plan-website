@@ -4,7 +4,7 @@
  * ============================================================ */
 
 import UIContainer from '../shared/ui-kit.js';
-import ApiClient from '../shared/api.js';
+import ApiClient from '../shared/api.js?v=1600';
 import DocxReader from '../shared/docx-reader.js';
 import Markdown from '../shared/markdown.js';
 import Storage from '../shared/storage.js';
@@ -671,7 +671,7 @@ async function onGenerate(opts = {}) {
   if (fromImport && state.imported?.text) {
     // 抽取模式：原文 + 用户编辑后的结果一起传
     // 【核心】AI 只能严格按编辑后的结果输出，不得添加任何原文没有的内容
-    userMessage = `【开题报告原文】（供参考，不得凭空添加内容）\n${state.imported.text}\n\n---\n\n【用户整理后的题目】${topic}\n【用户整理后的器件】${edited.devices.join('、') || '（无）'}\n【用户整理后的功能】\n${edited.funcs.map((f, i) => (i+1) + '. ' + f).join('\n')}\n\n请按 prompt 中 extract 模式的规则，将上面【用户整理后的】内容整理为三段式方案。\n【严格约束】\n- 题目、器件、功能都以【用户整理后的】为准\n- 不要添加原文里【没有】的功能，即使原文里貌似有隐藏含义\n- 不要凭“想象”补全任何用户没填的内容`;
+    userMessage = `【工作模式】extract\n【题目抽取自开题报告】是\n\n【开题报告原文】（仅供核对，不得覆盖用户确认内容）\n${state.imported.text}\n\n---\n\n【用户确认的题目】${topic}\n【用户确认的器件】${edited.devices.join('、') || '（无）'}\n【用户确认的功能】\n${edited.funcs.map((f, i) => (i+1) + '. ' + f).join('\n')}\n\n请按 extract 模式整理为三段式方案。\n【事实优先级】用户确认内容 > 原文；原文只用于核对。\n【严格约束】\n- 题目必须逐字保持为【用户确认的题目】\n- 器件、功能只能来自【用户确认】内容\n- 不要推断型号，不要添加隐含功能，不要补全用户没填的内容`;
   } else {
     userMessage = buildUserMessage({ topic, desc, level, mcu, display, power });
   }
@@ -694,7 +694,12 @@ async function onGenerate(opts = {}) {
     });
 
     UIContainer.updateProgress(80, '正在整理结果...');
-    const cleaned = cleanResult(result);
+    const cleaned = validateSchemeResult(cleanResult(result), {
+      topic,
+      level,
+      fromImport,
+      allowedDevices: edited?.devices || [],
+    });
     state.lastResult = cleaned;
     state.lastMeta = Markdown.extractMetadata(cleaned);  // 【v15.9】暂存，不写入 shared
     state.lastInputs = { topic, desc, level, mcu, display, power, fromImport, edited };
@@ -758,6 +763,36 @@ function cleanResult(text) {
   t = t.replace(/^```(?:markdown|md)?\s*\n?/i, '');
   t = t.replace(/\n?```\s*$/i, '');
   return t.trim();
+}
+
+function validateSchemeResult(text, { topic, level, fromImport, allowedDevices }) {
+  if (!text) throw new Error('方案内容为空，请重新生成');
+  let normalized = text;
+  if (/^#\s+.+$/m.test(normalized)) {
+    normalized = normalized.replace(/^#\s+.+$/m, `# ${topic}`);
+  } else {
+    normalized = `# ${topic}\n\n${normalized}`;
+  }
+
+  const parsed = Markdown.extractMetadata(normalized);
+  if (!parsed.devices.length) throw new Error('方案没有识别到有效器件清单，请重新生成');
+  if (!parsed.funcs.length) throw new Error('方案没有识别到有效功能清单，请重新生成');
+
+  if (!fromImport) {
+    const limits = { A: [10, 15], B: [7, 10], C: [3, Infinity] };
+    const [min, max] = limits[level] || [3, Infinity];
+    if (parsed.funcs.length < min || parsed.funcs.length > max) {
+      throw new Error(`${level}级方案应包含${max === Infinity ? `至少${min}` : `${min}-${max}`}条功能，当前为${parsed.funcs.length}条，请重新生成`);
+    }
+  } else if (allowedDevices.length) {
+    const allowed = allowedDevices.map(value => String(value).toLowerCase().replace(/\s+/g, ''));
+    const added = parsed.devices.filter(item => {
+      const model = String(item.model || '').toLowerCase().replace(/\s+/g, '');
+      return model && !allowed.some(source => source.includes(model) || model.includes(source.split(/[（(]/)[0]));
+    });
+    if (added.length) throw new Error(`方案新增了未确认器件：${added.map(item => item.model).join('、')}。请重新生成`);
+  }
+  return normalized.trim();
 }
 
 function showResult(md, opts = {}) {
@@ -837,6 +872,7 @@ function onResetResult() {
   Storage.remove('topic.lastResult');  // 【v15.9.5】生成结果也清
   Storage.Shared.clearScheme();
   Storage.Shared.clearMeta();
+  Storage.Shared.clearProjectContext();
   Storage.Shared.setTopic('');   // 【v15.9】清 topic
   Storage.Shared.setDevices([]); // 【v15.9】清器件
   Storage.Shared.setFuncs([]);   // 【v15.9】清功能
@@ -907,12 +943,15 @@ async function onNextStep(dest = 'taskbook') {
     generatedAt: new Date().toISOString(),
     generatorVersion: 'v15.10.6',
   };
-  Storage.Shared.setTopic(mergedMeta.topic);
-  Storage.Shared.setScheme(cleaned);
-  Storage.Shared.setDevices(mergedMeta.devices);
-  Storage.Shared.setFuncs(mergedMeta.funcs);
-  Storage.Shared.setMeta(mergedMeta);
+  Storage.Shared.setProjectContext({
+    ...mergedMeta,
+    scheme: cleaned,
+    kaiti: '',
+    refs: [],
+  });
   Storage.Shared.markComplete('topic');
+  Storage.Shared.markIncomplete('taskbook');
+  Storage.Shared.markIncomplete('thesis');
 
   if (dest === 'thesis') {
     // 跳过开题报告，直接生成论文
@@ -968,7 +1007,7 @@ function updateProgress() {
 
 async function loadPrompt() {
   try {
-    const r = await fetch('./prompt.md');
+    const r = await fetch('./prompt.md?v=1610');
     if (r.ok) return await r.text();
   } catch (e) {
     console.warn('Failed to load prompt.md');

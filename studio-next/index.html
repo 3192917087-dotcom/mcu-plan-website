@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="面向单片机毕业设计的方案设计与论文写作工作台">
+  <title>单片机方案与论文工作台 · 新版预览</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230f8f83'/%3E%3Cpath d='M18 45V19h7l7 12 7-12h7v26h-7V30l-7 11-7-11v15z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css?v=20260824-6">
+</head>
+<body>
+  <a class="skip-link" href="#app-main">跳到主要内容</a>
+
+  <div class="app-shell">
+    <header class="app-header" id="app-header">
+      <div class="brand-area">
+        <button class="brand-button" id="btn-brand-home" type="button" aria-label="返回项目中心">
+          <span class="brand-mark" aria-hidden="true">芯</span>
+          <span class="brand-copy">
+            <strong>单片机毕业设计工作台</strong>
+            <small>新版本地测试</small>
+          </span>
+        </button>
+      </div>
+
+      <nav class="primary-nav" id="primary-nav" aria-label="主要功能">
+        <button class="nav-button is-active" id="nav-home" type="button" aria-current="page">项目中心</button>
+        <button class="nav-button" id="nav-plan" type="button">方案设计</button>
+        <button class="nav-button" id="nav-paper" type="button">论文写作</button>
+      </nav>
+
+      <div class="header-actions">
+        <select class="project-switcher sr-only" id="project-switcher" aria-label="当前项目">
+          <option value="">尚未创建项目</option>
+        </select>
+        <span class="save-state" id="global-save-state" role="status" aria-live="polite">已自动保存</span>
+        <button class="header-tool-button" id="btn-open-api-settings" type="button" aria-label="打开API设置">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.1A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3V9.6h.1A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.12.38.34.72.64 1 .3.26.68.4 1.08.4H21v4h-.1a1.7 1.7 0 0 0-1.5.6Z"/></svg>
+          <span>设置</span>
+        </button>
+        <button class="header-tool-button" id="btn-open-help" type="button" aria-label="打开使用帮助">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.7 9.1a2.45 2.45 0 0 1 4.68 1c0 1.63-1.24 2.08-2.02 2.76-.43.38-.61.78-.61 1.39"/><path d="M12 17.35h.01"/></svg>
+          <span>帮助</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="app-main" id="app-main">
+      <!-- 首页 / 项目中心 -->
+      <section class="app-view is-active" id="view-home" aria-labelledby="home-title">
+        <div class="home-hero">
+          <div class="hero-copy">
+            <span class="eyebrow">面向单片机工作室的写作工具</span>
+            <h1 id="home-title">资料多少都能开始，最终交付一份可编辑论文</h1>
+            <p>只有题目可以开始；有器件、程序、原理图或参考文献时，系统会优先按真实资料写作。方案设计与论文写作互不绑定，可以分别使用。</p>
+            <div class="hero-actions">
+              <button class="button button-primary" id="btn-start-paper" type="button">开始写论文</button>
+              <button class="button button-secondary" id="btn-start-scheme" type="button">快速生成方案</button>
+            </div>
+          </div>
+          <div class="hero-process" aria-label="完整工作流程">
+            <div class="process-line">
+              <span class="process-number">01</span>
+              <div><strong>按现有资料开始</strong><small>只有题目、部分资料或完整资料都可以</small></div>
+            </div>
+            <div class="process-line">
+              <span class="process-number">02</span>
+              <div><strong>自动补齐写作依据</strong><small>整理器件、引脚、功能和目录结构</small></div>
+            </div>
+            <div class="process-line">
+              <span class="process-number">03</span>
+              <div><strong>生成并下载 DOCX</strong><small>自动分章、续写、检查和排版本科论文</small></div>
+            </div>
+          </div>
+        </div>
+
+        <section class="current-project-card" id="current-project-card" aria-labelledby="current-project-heading">
+          <div class="current-project-main">
+            <span class="section-kicker">当前项目</span>
+            <h2 id="current-project-heading"><span id="current-project-title">尚未创建项目</span></h2>
+            <p id="current-project-summary">创建项目后，这里会显示你做到哪一步、还有什么需要处理。</p>
+          </div>
+          <div class="current-project-progress">
+            <div class="status-row">
+              <span class="status-pill status-neutral" id="current-project-status">未开始</span>
+              <span class="muted-text" id="current-project-updated">暂无保存记录</span>
+            </div>
+            <p class="next-action" id="current-project-next-action">下一步：创建一个毕业设计项目</p>
+            <div class="inline-actions">
+              <button class="button button-primary button-small" id="btn-continue" type="button">新建项目</button>
+              <button class="button button-quiet button-small" id="btn-current-project-menu" type="button" aria-haspopup="menu">更多操作</button>
+              <button class="button button-quiet button-small button-clear-project" id="btn-clear-current-project" type="button" hidden>清空并开始下一题</button>
+            </div>
+          </div>
+        </section>
+
+        <div class="workflow-grid" aria-label="核心功能">
+          <article class="workflow-card workflow-card-plan" id="home-plan-card">
+            <div class="workflow-card-header">
+              <span class="workflow-index">A</span>
+              <span class="status-pill status-neutral" id="home-plan-status">未开始</span>
+            </div>
+            <h2>方案设计</h2>
+            <p>输入题目和补充要求，直接得到“题目＋器件＋功能”的制作方案。</p>
+            <ol class="compact-steps">
+              <li><span>1</span>填写题目和可选要求</li>
+              <li><span>2</span>复制文本或下载 Word</li>
+            </ol>
+            <div class="workflow-output">输出：器件写明型号与作用，功能写明实现方式</div>
+            <button class="button button-primary button-block" id="btn-enter-plan" type="button">进入方案设计</button>
+          </article>
+
+          <article class="workflow-card workflow-card-paper" id="home-paper-card">
+            <div class="workflow-card-header">
+              <span class="workflow-index">B</span>
+              <span class="status-pill status-neutral" id="home-paper-status">未开始</span>
+            </div>
+            <h2>论文写作</h2>
+            <p>无需先生成网站方案。题目必填，其余资料可选；资料越完整，硬件和程序描述越贴合实物。</p>
+            <ol class="compact-steps">
+              <li><span>1</span>填写现有资料</li>
+              <li><span>2</span>确认器件与引脚</li>
+              <li><span>3</span>选择目录结构</li>
+              <li><span>4</span>生成并下载</li>
+            </ol>
+            <div class="workflow-output" id="home-paper-next">输出：自动检查并下载 Word / WPS 可编辑 DOCX</div>
+            <button class="button button-primary button-block" id="btn-enter-paper" type="button">进入论文写作</button>
+          </article>
+        </div>
+
+        <section class="project-list-section" aria-labelledby="project-list-title">
+          <div class="section-heading-row">
+            <div>
+              <span class="section-kicker">我的项目</span>
+              <h2 id="project-list-title">最近使用</h2>
+            </div>
+            <button class="button button-secondary button-small" id="btn-new-project" type="button">新建项目</button>
+          </div>
+          <div class="empty-state" id="project-list-empty">
+            <span class="empty-state-mark" aria-hidden="true">+</span>
+            <strong>还没有项目</strong>
+            <p>创建后会自动保存方案与论文进度。</p>
+          </div>
+          <div class="project-list" id="project-list" hidden></div>
+        </section>
+      </section>
+
+      <!-- 方案设计工作区 -->
+      <section class="app-view" id="view-scheme" aria-labelledby="plan-workspace-title" hidden>
+        <div class="workspace-heading">
+          <div>
+            <button class="back-link" id="btn-plan-back-home" type="button">← 返回项目中心</button>
+            <span class="section-kicker">方案设计</span>
+            <h1 id="plan-workspace-title">把项目要求整理成可执行方案</h1>
+            <p id="plan-workspace-subtitle">当前项目：尚未命名</p>
+          </div>
+          <div class="workspace-heading-status">
+            <span class="status-pill status-progress" id="plan-overall-status">第 1 / 2 步</span>
+            <span class="muted-text" id="plan-save-state" role="status" aria-live="polite">尚未保存</span>
+          </div>
+        </div>
+
+        <div class="workspace-layout">
+          <aside class="step-rail" id="scheme-step-nav" aria-label="方案设计步骤">
+            <div class="rail-progress" aria-hidden="true"><span id="plan-progress-bar" style="width:25%"></span></div>
+            <button class="step-button is-current" id="plan-step-nav-1" type="button" aria-current="step">
+              <span>1</span><div><strong>基本信息</strong><small>说明要做什么</small></div>
+            </button>
+            <button class="step-button" id="plan-step-nav-2" type="button">
+              <span>2</span><div><strong>生成方案</strong><small>比较实现路线</small></div>
+            </button>
+            <button class="step-button" id="plan-step-nav-3" type="button">
+              <span>3</span><div><strong>核对内容</strong><small>确认功能闭环</small></div>
+            </button>
+            <button class="step-button" id="plan-step-nav-4" type="button">
+              <span>4</span><div><strong>确认方案</strong><small>锁定并进入论文</small></div>
+            </button>
+          </aside>
+
+          <div class="workspace-content">
+            <section class="step-panel" id="scheme-step-1" aria-labelledby="plan-step-1-title">
+              <div class="panel-heading">
+                <div>
+                  <span class="step-label">第 1 步</span>
+                  <h2 id="plan-step-1-title">先说清楚你想做什么</h2>
+                  <p>不确定专业表达也没关系，用自己的话填写即可。</p>
+                </div>
+                <span class="status-pill status-required">需要填写</span>
+              </div>
+
+              <form class="form-stack" id="form-plan-basic">
+                <div class="field-group">
+                  <label for="plan-topic">设计题目 <span class="required-text">必填</span></label>
+                  <input id="plan-topic" name="plan-topic" type="text" placeholder="例如：基于 STM32 的智能鱼缸控制系统设计" autocomplete="off" required>
+                  <small>题目还没确定时，可以先填写一个临时名称，后面再确认。</small>
+                </div>
+
+                <div class="field-group">
+                  <label for="plan-goal">系统要解决什么问题 <span class="required-text">必填</span></label>
+                  <textarea id="plan-goal" name="plan-goal" rows="4" placeholder="例如：自动检测水温和水位，在异常时控制加热、水泵并提醒用户。" required></textarea>
+                </div>
+
+                <div class="field-grid">
+                  <div class="field-group">
+                    <label for="plan-known-requirements">已经确定的要求</label>
+                    <textarea id="plan-known-requirements" name="plan-known-requirements" rows="5" placeholder="一行一条；没有可以暂时留空"></textarea>
+                  </div>
+                  <div class="field-group">
+                    <label for="plan-known-devices">已经购买或指定的器件</label>
+                    <textarea id="plan-known-devices" name="plan-known-devices" rows="5" placeholder="例如：STM32F103C8T6、DHT11、OLED"></textarea>
+                  </div>
+                </div>
+
+                <fieldset class="field-group">
+                  <legend>你希望方案更侧重什么</legend>
+                  <div class="choice-grid">
+                    <label class="choice-card" for="plan-priority-stable">
+                      <input id="plan-priority-stable" name="plan-priority" type="radio" value="stable" checked>
+                      <span><strong>容易实现</strong><small>器件常见、资料丰富，适合多数本科项目</small></span>
+                    </label>
+                    <label class="choice-card" for="plan-priority-cost">
+                      <input id="plan-priority-cost" name="plan-priority" type="radio" value="cost">
+                      <span><strong>控制成本</strong><small>优先减少器件数量和采购费用</small></span>
+                    </label>
+                    <label class="choice-card" for="plan-priority-feature">
+                      <input id="plan-priority-feature" name="plan-priority" type="radio" value="feature">
+                      <span><strong>功能完整</strong><small>允许更高的制作和编程难度</small></span>
+                    </label>
+                  </div>
+                </fieldset>
+
+                <div class="upload-panel" id="plan-source-upload-panel">
+                  <div>
+                    <strong>已有任务书或参考资料？</strong>
+                    <p>支持一次选择多个文件，系统会先提取内容，再让你确认。</p>
+                  </div>
+                  <label class="button button-secondary" for="plan-source-files">选择文件</label>
+                  <input id="plan-source-files" name="plan-source-files" type="file" accept=".docx,.pdf,.txt" multiple hidden>
+                </div>
+                <div class="file-list" id="plan-source-file-list" aria-live="polite"></div>
+                <button class="text-button" id="btn-plan-analyze-sources" type="button">识别已上传资料</button>
+              </form>
+
+              <div class="sticky-actions">
+                <span id="plan-step-1-message" class="action-message" role="status" aria-live="polite">填写后会自动保存</span>
+                <div>
+                  <button class="button button-secondary" id="btn-plan-step-1-save" type="button">保存草稿</button>
+                  <button class="button button-primary" id="btn-plan-step-1-next" type="button">保存并生成方案</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-panel" id="scheme-step-2" aria-labelledby="plan-step-2-title" hidden>
+              <div class="panel-heading">
+                <div>
+                  <span class="step-label">第 2 步</span>
+                  <h2 id="plan-step-2-title">生成并比较实现方案</h2>
+                  <p>系统最多给出三套可实现方案，并用容易理解的方式说明差别。</p>
+                </div>
+                <span class="status-pill status-neutral" id="plan-generation-state">尚未生成</span>
+              </div>
+
+              <div class="summary-strip" id="plan-input-summary">
+                <div><span>题目</span><strong id="plan-summary-topic">等待基本信息</strong></div>
+                <div><span>功能要求</span><strong id="plan-summary-function-count">0 项</strong></div>
+                <div><span>指定器件</span><strong id="plan-summary-device-count">0 项</strong></div>
+              </div>
+
+              <div class="generation-card">
+                <div>
+                  <span class="section-kicker">方案生成</span>
+                  <h3>根据已填写内容规划实现路线</h3>
+                  <p>不会擅自改变题目和指定器件；遇到不确定内容会放到下一步让你核对。</p>
+                </div>
+                <button class="button button-primary" id="btn-generate-plan-options" type="button">生成可选方案</button>
+              </div>
+
+              <div class="progress-box" id="plan-generation-progress" hidden>
+                <div class="progress-heading"><strong id="plan-generation-progress-label">正在分析功能与器件...</strong><span id="plan-generation-progress-value">0%</span></div>
+                <div class="linear-progress"><span id="plan-generation-progress-bar" style="width:0%"></span></div>
+                <button class="text-button" id="btn-cancel-plan-generation" type="button">取消生成</button>
+              </div>
+
+              <div class="proposal-list" id="plan-proposal-list">
+                <div class="empty-state compact" id="plan-proposal-empty">
+                  <span class="empty-state-mark" aria-hidden="true">A</span>
+                  <strong>等待生成方案</strong>
+                  <p>生成后可比较制作难度、编程难度、成本与主要风险。</p>
+                </div>
+              </div>
+
+              <div class="sticky-actions">
+                <span id="plan-step-2-message" class="action-message" role="status" aria-live="polite">请选择一套方案后继续</span>
+                <div>
+                  <button class="button button-secondary" id="btn-plan-step-2-back" type="button">上一步</button>
+                  <button class="button button-primary" id="btn-plan-step-2-next" type="button" disabled>选择此方案并核对</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-panel" id="scheme-step-3" aria-labelledby="plan-step-3-title" hidden>
+              <div class="panel-heading">
+                <div>
+                  <span class="step-label">第 3 步</span>
+                  <h2 id="plan-step-3-title">核对方案能否真正实现</h2>
+                  <p>重点确认功能、器件、程序和测试是否能够对应起来。</p>
+                </div>
+                <span class="status-pill status-warning" id="plan-review-status">等待核对</span>
+              </div>
+
+              <div class="metric-grid metric-grid-four" id="plan-review-metrics">
+                <div class="metric-card"><span>功能</span><strong id="plan-review-function-total">0</strong><small>共计</small></div>
+                <div class="metric-card"><span>已闭环</span><strong id="plan-review-closed-total">0</strong><small>能够完整实现</small></div>
+                <div class="metric-card"><span>需确认</span><strong id="plan-review-pending-total">0</strong><small>需要你的判断</small></div>
+                <div class="metric-card"><span>有冲突</span><strong id="plan-review-conflict-total">0</strong><small>资料不一致</small></div>
+              </div>
+
+              <div class="review-toolbar">
+                <div class="filter-tabs" id="plan-review-filters" role="group" aria-label="筛选核对内容">
+                  <button class="filter-button is-active" id="plan-review-filter-all" type="button">全部</button>
+                  <button class="filter-button" id="plan-review-filter-pending" type="button">待确认</button>
+                  <button class="filter-button" id="plan-review-filter-conflict" type="button">有冲突</button>
+                  <button class="filter-button" id="plan-review-filter-complete" type="button">已完整</button>
+                </div>
+                <button class="button button-secondary button-small" id="btn-plan-review-refresh" type="button">重新检查</button>
+              </div>
+
+              <div class="review-list" id="plan-review-list">
+                <div class="empty-state compact" id="plan-review-empty">
+                  <span class="empty-state-mark" aria-hidden="true">✓</span>
+                  <strong>等待选择方案</strong>
+                  <p>选择方案后，这里会逐项显示需要核对的内容。</p>
+                </div>
+              </div>
+
+              <section class="closure-section" aria-labelledby="closure-title">
+                <div class="section-heading-row compact-heading">
+                  <div><span class="section-kicker">实现闭环</span><h3 id="closure-title">功能如何落地</h3></div>
+                  <button class="text-button" id="btn-expand-plan-closure" type="button">展开全部</button>
+                </div>
+                <div class="table-scroll">
+                  <table id="plan-closure-table">
+                    <thead><tr><th>功能</th><th>硬件负责</th><th>程序负责</th><th>如何验证</th><th>状态</th></tr></thead>
+                    <tbody id="plan-closure-table-body">
+                      <tr><td colspan="5" class="table-empty">生成方案后显示完整对应关系</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <div class="sticky-actions">
+                <span id="plan-step-3-message" class="action-message" role="status" aria-live="polite">关键问题确认后才能锁定方案</span>
+                <div>
+                  <button class="button button-secondary" id="btn-plan-step-3-back" type="button">上一步</button>
+                  <button class="button button-primary" id="btn-plan-step-3-next" type="button" disabled>核对完成，查看方案</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-panel" id="scheme-step-4" aria-labelledby="plan-step-4-title" hidden>
+              <div class="panel-heading">
+                <div>
+                  <span class="step-label">第 4 步</span>
+                  <h2 id="plan-step-4-title">确认并锁定最终方案</h2>
+                  <p>锁定后，题目、器件和功能会作为论文写作的事实依据。</p>
+                </div>
+                <span class="status-pill status-warning" id="plan-final-status">方案草稿</span>
+              </div>
+
+              <div class="notice notice-warning" id="plan-unresolved-notice" role="status">
+                <strong id="plan-unresolved-title">方案尚未完成核对</strong>
+                <p id="plan-unresolved-description">处理完所有关键问题后才能锁定。</p>
+              </div>
+
+              <div class="final-summary-grid">
+                <article class="summary-card"><span>论文题目</span><strong id="plan-final-topic">等待填写</strong></article>
+                <article class="summary-card"><span>主控制器</span><strong id="plan-final-controller">等待确认</strong></article>
+                <article class="summary-card"><span>器件数量</span><strong id="plan-final-device-count">0 项</strong></article>
+                <article class="summary-card"><span>功能数量</span><strong id="plan-final-function-count">0 项</strong></article>
+              </div>
+
+              <section class="content-card" aria-labelledby="plan-final-functions-title">
+                <div class="section-heading-row compact-heading">
+                  <div><span class="section-kicker">最终内容</span><h3 id="plan-final-functions-title">功能与实现摘要</h3></div>
+                  <button class="text-button" id="btn-edit-final-plan" type="button">返回修改</button>
+                </div>
+                <div class="final-plan-content" id="plan-final-content">
+                  <p class="muted-text">完成前三步后，这里会显示最终方案摘要。</p>
+                </div>
+              </section>
+
+              <label class="confirm-box" for="plan-lock-confirm">
+                <input id="plan-lock-confirm" name="plan-lock-confirm" type="checkbox">
+                <span><strong>我已核对以上内容</strong><small>实际制作中如有变化，可以重新解锁；受影响的论文内容会被标记为需要复查。</small></span>
+              </label>
+
+              <div class="sticky-actions sticky-actions-wrap">
+                <span id="plan-step-4-message" class="action-message" role="status" aria-live="polite">锁定后即可直接进入论文写作</span>
+                <div>
+                  <button class="button button-secondary" id="btn-plan-step-4-back" type="button">上一步</button>
+                  <button class="button button-secondary" id="btn-export-plan" type="button">导出方案</button>
+                  <button class="button button-primary" id="btn-lock-plan" type="button" disabled>确认并锁定方案</button>
+                  <button class="button button-primary" id="btn-plan-to-paper" type="button" hidden>开始论文写作</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <!-- 论文写作工作区 -->
+      <section class="app-view" id="view-paper" aria-labelledby="paper-workspace-title" hidden>
+        <div class="workspace-heading">
+          <div>
+            <button class="back-link" id="btn-paper-back-home" type="button">← 返回项目中心</button>
+            <span class="section-kicker">论文写作</span>
+            <h1 id="paper-workspace-title">从真实资料开始，一键生成论文</h1>
+            <p id="paper-workspace-subtitle">当前项目：尚未命名</p>
+          </div>
+          <div class="workspace-heading-status">
+            <span class="status-pill status-progress" id="paper-overall-status">第 1 / 4 步</span>
+            <span class="muted-text" id="paper-save-state" role="status" aria-live="polite">尚未保存</span>
+          </div>
+        </div>
+
+        <div class="notice notice-info paper-material-policy" role="note">
+          <strong>资料不全也可以生成论文</strong>
+          <p>论文题目必须填写；实际器件或功能不确定时可以先留空，AI会根据题目和已有说明提出建议，再由你确认。连接说明、程序、参考文献、学校目录、测试记录和照片均为选填。缺项会采用保守写作策略，不会擅自确定未知引脚、电压、地址或阈值。深度写作可能需要较长时间，已完成内容会持续保存。</p>
+        </div>
+
+        <div class="workspace-layout">
+          <aside class="step-rail" id="paper-step-nav" aria-label="论文写作步骤">
+            <div class="rail-progress" aria-hidden="true"><span id="paper-progress-bar" style="width:25%"></span></div>
+            <button class="step-button is-current" id="paper-step-nav-1" type="button" aria-current="step">
+              <span>1</span><div><strong>资料确认</strong><small>上传已有资料</small></div>
+            </button>
+            <button class="step-button" id="paper-step-nav-2" type="button">
+              <span>2</span><div><strong>事实核对</strong><small>解决冲突与缺失</small></div>
+            </button>
+            <button class="step-button" id="paper-step-nav-3" type="button">
+              <span>3</span><div><strong>目录规划</strong><small>明确每节职责</small></div>
+            </button>
+            <button class="step-button" id="paper-step-nav-4" type="button">
+              <span>4</span><div><strong>生成论文</strong><small>自动写作与检查</small></div>
+            </button>
+            <button class="step-button" id="paper-step-nav-5" type="button" hidden aria-hidden="true" tabindex="-1">
+              <span>5</span><div><strong>质量检查</strong><small>通过后导出</small></div>
+            </button>
+          </aside>
+
+          <div class="workspace-content">
+            <section class="step-panel" id="paper-step-1" aria-labelledby="paper-step-1-title">
+              <div class="panel-heading">
+                <div>
+                  <span class="step-label">第 1 步</span>
+                  <h2 id="paper-step-1-title">把已有资料一次放进来</h2>
+                   <p>可直接使用自己的方案和资料，不需要先完成网站的方案设计。</p>
+                </div>
+                <span class="status-pill status-required" id="paper-material-status">等待资料</span>
+              </div>
+
+              <div class="notice notice-info" id="paper-plan-source-notice">
+                <strong id="paper-plan-source-title">可以直接开始</strong>
+                <p id="paper-plan-source-description">自己的方案、任务书、器件和功能清单都可以直接使用；网站方案只在你主动选择时带入。</p>
+              </div>
+
+              <div class="material-grid" id="paper-material-grid">
+                <article class="material-card">
+                  <div class="material-card-heading"><span class="material-code">01</span><span class="status-pill status-neutral" id="material-status-requirements">未上传</span></div>
+                  <h3>任务书、开题报告或方案</h3>
+                  <p>用于识别题目、研究目标、功能要求和技术路线。</p>
+                  <label class="button button-secondary button-small" for="paper-files-requirements">选择文件</label>
+                  <input id="paper-files-requirements" name="paper-files-requirements" type="file" accept=".docx,.pdf,.txt" multiple hidden>
+                  <div class="mini-file-list" id="material-list-requirements"></div>
+                </article>
+
+                <article class="material-card">
+                  <div class="material-card-heading"><span class="material-code">02</span><span class="status-pill status-neutral" id="material-status-schematic">未上传</span></div>
+                  <h3>原理图或连接资料 <small class="optional-badge">选填</small></h3>
+                  <p>用于核对模块、电路连接、电压和主控引脚。</p>
+                  <label class="button button-secondary button-small" for="paper-files-schematic">选择文件</label>
+                  <input id="paper-files-schematic" name="paper-files-schematic" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt,.docx" multiple hidden>
+                  <div class="mini-file-list" id="material-list-schematic"></div>
+                </article>
+
+                <article class="material-card">
+                  <div class="material-card-heading"><span class="material-code">03</span><span class="status-pill status-neutral" id="material-status-code">未上传</span></div>
+                  <h3>源程序 <small class="optional-badge">选填</small></h3>
+                  <p>用于还原实际控制逻辑、通信方式和异常处理。</p>
+                  <label class="button button-secondary button-small" for="paper-files-code">选择文件</label>
+                  <input id="paper-files-code" name="paper-files-code" type="file" accept=".c,.h,.cpp,.hpp,.ino,.txt,.inc,.s,.asm" multiple hidden>
+                  <div class="mini-file-list" id="material-list-code"></div>
+                </article>
+
+                <article class="material-card">
+                  <div class="material-card-heading"><span class="material-code">04</span><span class="status-pill status-neutral" id="material-status-references">未上传</span></div>
+                  <h3>参考文献 <small class="optional-badge">选填</small></h3>
+                  <p>只使用你提供的真实文献，不自动编造条目。</p>
+                  <label class="button button-secondary button-small" for="paper-files-references">选择文件</label>
+                  <input id="paper-files-references" name="paper-files-references" type="file" accept=".docx,.pdf,.txt,.ris,.bib" multiple hidden>
+                  <div class="mini-file-list" id="material-list-references"></div>
+                </article>
+
+                <article class="material-card">
+                  <div class="material-card-heading"><span class="material-code">05</span><span class="status-pill status-neutral" id="material-status-template">未上传</span></div>
+                  <h3>学校模板和目录 <small class="optional-badge">选填</small></h3>
+                  <p>用于识别章节结构、字体、字号和排版要求。</p>
+                  <label class="button button-secondary button-small" for="paper-files-template">选择文件</label>
+                  <input id="paper-files-template" name="paper-files-template" type="file" accept=".docx,.pdf,.txt" multiple hidden>
+                  <div class="mini-file-list" id="material-list-template"></div>
+                </article>
+
+                <article class="material-card">
+                  <div class="material-card-heading"><span class="material-code">06</span><span class="status-pill status-neutral" id="material-status-test">未上传</span></div>
+                  <h3>测试数据和实物照片 <small class="optional-badge">选填</small></h3>
+                  <p>用于形成可信的测试结果；没有时按器件能力保守生成可编辑的量化测试表。</p>
+                  <label class="button button-secondary button-small" for="paper-files-test">选择文件</label>
+                  <input id="paper-files-test" name="paper-files-test" type="file" accept=".xlsx,.xls,.csv,.docx,.pdf,.txt,.png,.jpg,.jpeg" multiple hidden>
+                  <div class="mini-file-list" id="material-list-test"></div>
+                </article>
+              </div>
+
+              <div class="material-summary" id="paper-material-summary">
+                <div><span>已识别资料</span><strong id="paper-material-file-count">0 个文件</strong></div>
+                <div><span>可以继续</span><strong id="paper-material-ready-count">0 / 6 类</strong></div>
+                <div><span>需要处理</span><strong id="paper-material-question-count">0 项</strong></div>
+                <button class="button button-secondary" id="btn-paper-classify-files" type="button">识别并分类资料</button>
+              </div>
+
+              <div class="sticky-actions">
+                <span id="paper-step-1-message" class="action-message" role="status" aria-live="polite">至少需要明确题目、器件和功能</span>
+                <div>
+                  <button class="button button-secondary" id="btn-paper-step-1-save" type="button">保存草稿</button>
+                  <button class="button button-primary" id="btn-paper-step-1-next" type="button">资料齐了，开始核对</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-panel" id="paper-step-2" aria-labelledby="paper-step-2-title" hidden>
+              <div class="panel-heading">
+                <div>
+                  <span class="step-label">第 2 步</span>
+                  <h2 id="paper-step-2-title">逐条核对论文会使用的事实</h2>
+                  <p>只把已确认的信息写入正式正文，不确定内容可以稍后处理。</p>
+                </div>
+                <span class="status-pill status-warning" id="paper-fact-status">等待确认</span>
+              </div>
+
+              <div class="metric-grid metric-grid-four" id="paper-fact-metrics">
+                <div class="metric-card"><span>全部事实</span><strong id="paper-fact-total">0</strong><small>系统已提取</small></div>
+                <div class="metric-card"><span>已确认</span><strong id="paper-fact-confirmed">0</strong><small>可用于正文</small></div>
+                <div class="metric-card"><span>待确认</span><strong id="paper-fact-pending">0</strong><small>需要你的判断</small></div>
+                <div class="metric-card"><span>有冲突</span><strong id="paper-fact-conflicts">0</strong><small>资料说法不同</small></div>
+              </div>
+
+              <div class="review-toolbar">
+                <div class="filter-tabs" id="paper-fact-filters" role="group" aria-label="筛选事实类型">
+                  <button class="filter-button is-active" id="fact-filter-all" type="button">全部</button>
+                  <button class="filter-button" id="fact-filter-basic" type="button">基本信息</button>
+                  <button class="filter-button" id="fact-filter-device" type="button">器件</button>
+                  <button class="filter-button" id="fact-filter-connection" type="button">连接</button>
+                  <button class="filter-button" id="fact-filter-function" type="button">功能</button>
+                  <button class="filter-button" id="fact-filter-software" type="button">程序</button>
+                  <button class="filter-button" id="fact-filter-test" type="button">测试</button>
+                  <button class="filter-button" id="fact-filter-reference" type="button">文献</button>
+                </div>
+                <button class="button button-secondary button-small" id="btn-paper-fact-rescan" type="button">重新分析资料</button>
+              </div>
+
+              <div class="fact-review-layout">
+                <div class="fact-list" id="paper-fact-list">
+                  <div class="empty-state compact" id="paper-fact-empty">
+                    <span class="empty-state-mark" aria-hidden="true">F</span>
+                    <strong>等待分析资料</strong>
+                    <p>完成资料识别后，这里会按类别显示需要确认的信息。</p>
+                  </div>
+                </div>
+                <aside class="fact-detail" id="paper-fact-detail" aria-labelledby="fact-detail-title">
+                  <div class="fact-detail-empty" id="fact-detail-empty">
+                    <span>选择左侧内容后查看详细来源和影响章节</span>
+                  </div>
+                  <div id="fact-detail-content" hidden>
+                    <div class="fact-detail-heading">
+                      <span class="status-pill status-warning" id="fact-detail-status">待确认</span>
+                      <span class="muted-text" id="fact-detail-category">器件信息</span>
+                    </div>
+                    <h3 id="fact-detail-title">事实内容</h3>
+                    <p class="fact-value" id="fact-detail-value">—</p>
+                    <dl class="definition-list">
+                      <div><dt>信息来源</dt><dd id="fact-detail-source">—</dd></div>
+                      <div><dt>可信程度</dt><dd id="fact-detail-confidence">—</dd></div>
+                      <div><dt>影响内容</dt><dd id="fact-detail-impact">—</dd></div>
+                    </dl>
+                    <div class="stacked-actions">
+                      <button class="button button-primary" id="btn-fact-confirm" type="button">确认这条信息</button>
+                      <button class="button button-secondary" id="btn-fact-edit" type="button">填写实际情况</button>
+                      <button class="button button-quiet" id="btn-fact-later" type="button">暂时不确定</button>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+
+              <section class="analysis-report-section" aria-labelledby="analysis-report-title">
+                <div class="section-heading-row compact-heading">
+                  <div><span class="section-kicker">自动分析</span><h3 id="analysis-report-title">技术关系报告</h3></div>
+                  <span class="muted-text">随事实确认自动更新</span>
+                </div>
+                <div class="report-grid">
+                  <article class="report-card"><span>硬件连接</span><strong id="hardware-report-status">等待分析</strong><button class="text-button" id="btn-view-hardware-report" type="button">查看报告</button></article>
+                  <article class="report-card"><span>程序逻辑</span><strong id="software-report-status">等待分析</strong><button class="text-button" id="btn-view-software-report" type="button">查看报告</button></article>
+                  <article class="report-card"><span>功能闭环</span><strong id="closure-report-status">等待分析</strong><button class="text-button" id="btn-view-closure-report" type="button">查看报告</button></article>
+                </div>
+              </section>
+
+              <div class="sticky-actions">
+                <span id="paper-step-2-message" class="action-message" role="status" aria-live="polite">关键事实确认后才能规划正式目录</span>
+                <div>
+                  <button class="button button-secondary" id="btn-paper-step-2-back" type="button">上一步</button>
+                  <button class="button button-primary" id="btn-paper-step-2-next" type="button" disabled>事实已核对，规划目录</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-panel" id="paper-step-3" aria-labelledby="paper-step-3-title" hidden>
+              <div class="panel-heading">
+                <div>
+                  <span class="step-label">第 3 步</span>
+                  <h2 id="paper-step-3-title">确认论文目录和每节任务</h2>
+                  <p>目录确定后再写正文，可以减少章节重复和内容跑题。</p>
+                </div>
+                <span class="status-pill status-neutral" id="outline-status">尚未规划</span>
+              </div>
+
+              <fieldset class="field-group">
+                <legend>目录依据</legend>
+                <div class="choice-grid choice-grid-two">
+                  <label class="choice-card" for="outline-mode-school">
+                    <input id="outline-mode-school" name="outline-mode" type="radio" value="school">
+                    <span><strong>采用学校目录</strong><small>优先保留上传模板中的章节名称和顺序</small></span>
+                  </label>
+                  <label class="choice-card" for="outline-mode-recommended">
+                    <input id="outline-mode-recommended" name="outline-mode" type="radio" value="recommended" checked>
+                    <span><strong>使用推荐目录</strong><small>根据项目类型和复杂程度自动规划</small></span>
+                  </label>
+                </div>
+              </fieldset>
+
+              <div class="outline-toolbar">
+                <button class="button button-primary" id="btn-generate-outline" type="button">生成推荐目录</button>
+                <button class="button button-secondary" id="btn-add-outline-section" type="button">添加小节</button>
+                <button class="button button-quiet" id="btn-reset-outline" type="button">恢复推荐结构</button>
+              </div>
+
+              <div class="outline-layout">
+                <section class="outline-tree-panel" aria-labelledby="outline-tree-title">
+                  <div class="subpanel-heading"><h3 id="outline-tree-title">论文目录</h3><span class="muted-text" id="outline-section-count">0 个小节</span></div>
+                  <div class="outline-tree" id="outline-tree">
+                    <div class="empty-state compact" id="outline-empty">
+                      <span class="empty-state-mark" aria-hidden="true">O</span>
+                      <strong>还没有目录</strong>
+                      <p>选择目录依据后生成推荐结构。</p>
+                    </div>
+                  </div>
+                </section>
+
+                <aside class="contract-panel" id="chapter-contract-panel" aria-labelledby="chapter-contract-title">
+                  <div class="subpanel-heading"><h3 id="chapter-contract-title">本节写作要求</h3><span class="status-pill status-neutral" id="chapter-contract-status">未选择</span></div>
+                  <div class="contract-empty" id="chapter-contract-empty">选择左侧小节后，查看这一节负责写什么。</div>
+                  <div id="chapter-contract-content" hidden>
+                    <div class="field-group">
+                      <label for="chapter-contract-name">小节名称</label>
+                      <input id="chapter-contract-name" type="text">
+                    </div>
+                    <dl class="definition-list contract-list">
+                      <div><dt>本节目标</dt><dd id="chapter-contract-goal">—</dd></div>
+                      <div><dt>允许使用</dt><dd id="chapter-contract-facts">—</dd></div>
+                      <div><dt>不要重复</dt><dd id="chapter-contract-exclusions">—</dd></div>
+                      <div><dt>需要图表</dt><dd id="chapter-contract-visuals">—</dd></div>
+                      <div><dt>建议篇幅</dt><dd id="chapter-contract-length">—</dd></div>
+                    </dl>
+                    <button class="button button-secondary button-block" id="btn-save-chapter-contract" type="button">保存本节要求</button>
+                  </div>
+                </aside>
+              </div>
+
+              <div class="sticky-actions">
+                <span id="paper-step-3-message" class="action-message" role="status" aria-live="polite">确认目录后才会开始生成正文</span>
+                <div>
+                  <button class="button button-secondary" id="btn-paper-step-3-back" type="button">上一步</button>
+                  <button class="button button-primary" id="btn-confirm-outline" type="button" disabled>确认目录并开始写作</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-panel chapter-workspace" id="paper-step-4" aria-labelledby="paper-step-4-title" hidden>
+              <div class="panel-heading">
+                <div>
+                  <span class="step-label">第 4 步</span>
+                  <h2 id="paper-step-4-title">一键生成完整论文</h2>
+                  <p>点击生成后，系统会自动完成分章写作、质量检查，并返回采用本科论文通用版式的 DOCX 文档。</p>
+                </div>
+                <span class="status-pill status-progress" id="chapter-workflow-status">0 / 0 章已锁定</span>
+              </div>
+
+              <div class="chapter-layout">
+                <aside class="chapter-sidebar" aria-labelledby="chapter-list-title">
+                  <div class="subpanel-heading"><h3 id="chapter-list-title">论文章节</h3><button class="text-button" id="btn-collapse-chapter-list" type="button">收起</button></div>
+                  <div class="chapter-list" id="chapter-list">
+                    <button class="chapter-list-item is-current" id="chapter-nav-1" type="button"><span>第 1 章</span><strong>绪论</strong><small class="status-pill status-neutral">尚未开始</small></button>
+                    <button class="chapter-list-item" id="chapter-nav-2" type="button"><span>第 2 章</span><strong>系统总体设计</strong><small class="status-pill status-neutral">尚未开始</small></button>
+                    <button class="chapter-list-item" id="chapter-nav-3" type="button"><span>第 3 章</span><strong>硬件设计</strong><small class="status-pill status-neutral">尚未开始</small></button>
+                    <button class="chapter-list-item" id="chapter-nav-4" type="button"><span>第 4 章</span><strong>软件设计</strong><small class="status-pill status-neutral">尚未开始</small></button>
+                    <button class="chapter-list-item" id="chapter-nav-5" type="button"><span>第 5 章</span><strong>系统测试</strong><small class="status-pill status-neutral">尚未开始</small></button>
+                    <button class="chapter-list-item" id="chapter-nav-6" type="button"><span>第 6 章</span><strong>总结与展望</strong><small class="status-pill status-neutral">尚未开始</small></button>
+                  </div>
+                </aside>
+
+                <div class="chapter-main">
+                  <section class="chapter-contract-summary" id="chapter-contract-summary" aria-labelledby="active-chapter-title">
+                    <div>
+                      <span class="section-kicker" id="active-chapter-number">第 1 章</span>
+                      <h3 id="active-chapter-title">绪论</h3>
+                    </div>
+                    <div class="chapter-contract-mini-grid">
+                      <div><span>本章负责</span><strong id="active-chapter-goal">等待目录确认</strong></div>
+                      <div><span>主要依据</span><strong id="active-chapter-sources">等待事实核对</strong></div>
+                      <div><span>不要重复</span><strong id="active-chapter-exclusions">等待章节合同</strong></div>
+                    </div>
+                    <button class="text-button" id="btn-view-active-contract" type="button">查看完整要求</button>
+                  </section>
+
+                  <div class="editor-toolbar" role="toolbar" aria-label="章节写作操作">
+                    <div>
+                      <button class="button button-primary button-small" id="btn-generate-chapter" type="button">生成本章</button>
+                      <button class="button button-secondary button-small" id="btn-check-chapter" type="button">检查本章</button>
+                      <button class="button button-secondary button-small" id="btn-rewrite-chapter" type="button">按问题修改</button>
+                    </div>
+                    <div class="editor-meta"><span id="chapter-word-count">0 字</span><span id="chapter-edit-state">未保存</span></div>
+                  </div>
+
+                  <label class="sr-only" for="chapter-content-editor">章节正文</label>
+                  <textarea class="chapter-editor" id="chapter-content-editor" name="chapter-content-editor" placeholder="生成后可在这里直接修改正文。你的手动修改会单独保存，不会被其他章节覆盖。"></textarea>
+
+                  <div class="chapter-bottom-bar">
+                    <span class="status-pill status-neutral" id="chapter-lock-state">草稿未锁定</span>
+                    <div>
+                      <button class="button button-secondary" id="btn-save-chapter" type="button">保存修改</button>
+                      <button class="button button-primary" id="btn-lock-chapter" type="button" disabled>确认并锁定本章</button>
+                      <button class="button button-secondary" id="btn-next-chapter" type="button">下一章</button>
+                    </div>
+                  </div>
+                </div>
+
+                <aside class="issue-sidebar" id="chapter-issue-panel" aria-labelledby="chapter-issue-title">
+                  <div class="subpanel-heading"><h3 id="chapter-issue-title">本章检查</h3><span class="status-pill status-neutral" id="chapter-issue-status">未检查</span></div>
+                  <div class="issue-list" id="chapter-issue-list">
+                    <div class="empty-state compact" id="chapter-issue-empty">
+                      <span class="empty-state-mark" aria-hidden="true">✓</span>
+                      <strong>尚未检查</strong>
+                      <p>生成或修改后运行本章检查。</p>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+
+              <div class="sticky-actions">
+                <span id="paper-step-4-message" class="action-message" role="status" aria-live="polite">所有章节锁定后进入全文质量检查</span>
+                <div>
+                  <button class="button button-secondary" id="btn-paper-step-4-back" type="button">返回目录</button>
+                  <button class="button button-primary" id="btn-paper-step-4-next" type="button" disabled>全部章节已确认，检查全文</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-panel" id="paper-step-5" aria-labelledby="paper-step-5-title" hidden>
+              <div class="panel-heading">
+                <div>
+                  <span class="step-label">第 5 步</span>
+                  <h2 id="paper-step-5-title">检查全文，再决定导出什么版本</h2>
+                  <p>必须解决的问题清零后，才会开放最终稿导出。</p>
+                </div>
+                <span class="status-pill status-warning" id="quality-overall-status">论文草稿</span>
+              </div>
+
+              <section class="quality-hero" id="quality-gate" aria-labelledby="quality-gate-title">
+                <div class="quality-gauge" aria-hidden="true"><span id="quality-gauge-value">0</span><small>项已检查</small></div>
+                <div>
+                  <span class="section-kicker">最终门禁</span>
+                  <h3 id="quality-gate-title">全文还没有运行质量检查</h3>
+                  <p id="quality-gate-description">检查事实一致性、功能闭环、引用、重复内容和正文篇幅。</p>
+                </div>
+                <button class="button button-primary" id="btn-run-quality-check" type="button">开始全文检查</button>
+              </section>
+
+              <div class="quality-level-grid">
+                <article class="quality-level quality-required"><span>必须解决</span><strong id="quality-required-count">0</strong><small>未处理前只能导出草稿</small></article>
+                <article class="quality-level quality-recommended"><span>建议确认</span><strong id="quality-review-count">0</strong><small>建议根据实际情况处理</small></article>
+                <article class="quality-level quality-polish"><span>写作优化</span><strong id="quality-polish-count">0</strong><small>改善表达和阅读体验</small></article>
+              </div>
+
+              <div class="quality-check-grid" id="quality-check-grid">
+                <article class="quality-check-card"><span>事实一致性</span><strong id="quality-fact-result">未检查</strong><small id="quality-fact-detail">器件、引脚、阈值和术语</small></article>
+                <article class="quality-check-card"><span>功能闭环</span><strong id="quality-closure-result">未检查</strong><small id="quality-closure-detail">硬件、程序和测试对应关系</small></article>
+                <article class="quality-check-card"><span>引用检查</span><strong id="quality-reference-result">未检查</strong><small id="quality-reference-detail">真实文献、编号和引用顺序</small></article>
+                <article class="quality-check-card"><span>重复内容</span><strong id="quality-duplicate-result">未检查</strong><small id="quality-duplicate-detail">章节职责和同义重复</small></article>
+                <article class="quality-check-card"><span>正文篇幅</span><strong id="quality-word-result">0 字</strong><small id="quality-word-detail">最终稿要求不少于 18000 字</small></article>
+                <article class="quality-check-card"><span>图表完整性</span><strong id="quality-visual-result">未检查</strong><small id="quality-visual-detail">图位、说明和正文引用</small></article>
+              </div>
+
+              <div class="review-toolbar">
+                <div class="filter-tabs" id="quality-filters" role="group" aria-label="筛选质量问题">
+                  <button class="filter-button is-active" id="quality-filter-all" type="button">全部问题</button>
+                  <button class="filter-button" id="quality-filter-required" type="button">必须解决</button>
+                  <button class="filter-button" id="quality-filter-review" type="button">建议确认</button>
+                  <button class="filter-button" id="quality-filter-polish" type="button">写作优化</button>
+                  <button class="filter-button" id="quality-filter-resolved" type="button">已处理</button>
+                </div>
+                <button class="button button-secondary button-small" id="btn-rerun-quality-check" type="button">重新检查</button>
+              </div>
+
+              <div class="quality-issue-list" id="quality-issue-list">
+                <div class="empty-state compact" id="quality-issue-empty">
+                  <span class="empty-state-mark" aria-hidden="true">Q</span>
+                  <strong>还没有检查结果</strong>
+                  <p>运行全文检查后，可逐项定位和处理问题。</p>
+                </div>
+              </div>
+
+              <section class="export-panel" aria-labelledby="export-title">
+                <div>
+                  <span class="section-kicker">导出论文</span>
+                  <h3 id="export-title">选择要导出的版本</h3>
+                  <p id="export-description">草稿可随时导出；最终稿需要通过全部必须检查项。</p>
+                </div>
+                <div class="export-actions">
+                  <button class="button button-secondary" id="btn-export-paper-draft" type="button">导出论文草稿</button>
+                  <button class="button button-primary" id="btn-export-paper-final" type="button" disabled>导出最终稿</button>
+                </div>
+              </section>
+
+              <div class="sticky-actions">
+                <span id="paper-step-5-message" class="action-message" role="status" aria-live="polite">最终稿导出条件尚未满足</span>
+                <div>
+                  <button class="button button-secondary" id="btn-paper-step-5-back" type="button">返回分章写作</button>
+                  <button class="button button-primary" id="btn-finish-project" type="button" disabled>完成本项目</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast-region" id="toast" aria-live="polite" aria-atomic="true" hidden></div>
+
+  <dialog class="app-dialog busy-dialog" id="busy-dialog" aria-labelledby="busy-dialog-title">
+    <div class="busy-indicator" aria-hidden="true"></div>
+    <div>
+      <span class="section-kicker">正在处理</span>
+      <h2 id="busy-dialog-title">正在准备内容</h2>
+      <p id="busy-dialog-message">请稍候，当前进度会自动保存。</p>
+      <p class="busy-dialog-meta" id="busy-dialog-meta">本次已用时 0秒 · 最近保存刚刚</p>
+      <div class="linear-progress" id="busy-dialog-progressbar" role="progressbar" aria-label="当前处理进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="busy-dialog-progress" style="width:0%"></span></div>
+      <div class="progress-heading" role="status" aria-live="polite" aria-atomic="true"><span id="busy-dialog-step">正在分析资料</span><strong id="busy-dialog-value">0%</strong></div>
+      <button class="button button-secondary button-block" id="btn-cancel-busy" type="button">暂停生成（已完成内容会保留）</button>
+    </div>
+  </dialog>
+
+  <dialog class="app-dialog" id="dialog-new-project" aria-labelledby="new-project-dialog-title">
+    <form method="dialog" id="form-new-project">
+      <div class="dialog-heading">
+        <div><span class="section-kicker">新建项目</span><h2 id="new-project-dialog-title">从哪里开始？</h2></div>
+        <button class="icon-button" id="btn-close-new-project-dialog" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="field-group">
+        <label for="new-project-name">项目名称</label>
+        <input id="new-project-name" name="new-project-name" type="text" placeholder="可以先填写临时名称" required>
+      </div>
+      <fieldset class="field-group">
+        <legend>选择起点</legend>
+        <div class="choice-grid choice-grid-two">
+          <label class="choice-card" for="new-project-start-plan"><input id="new-project-start-plan" name="new-project-start" type="radio" value="plan" checked><span><strong>从方案设计开始</strong><small>适合题目和器件还没有完全确定</small></span></label>
+          <label class="choice-card" for="new-project-start-paper"><input id="new-project-start-paper" name="new-project-start" type="radio" value="paper"><span><strong>直接开始论文</strong><small>已有自己的方案即可直接使用，无需网站方案</small></span></label>
+        </div>
+      </fieldset>
+      <div class="dialog-actions">
+        <button class="button button-secondary" id="btn-cancel-new-project" type="button">取消</button>
+        <button class="button button-primary" id="btn-create-new-project" type="submit">创建并继续</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="app-dialog" id="dialog-edit-fact" aria-labelledby="edit-fact-dialog-title">
+    <form method="dialog" id="form-edit-fact">
+      <div class="dialog-heading">
+        <div><span class="section-kicker">填写实际情况</span><h2 id="edit-fact-dialog-title">修改这条信息</h2></div>
+        <button class="icon-button" id="btn-close-edit-fact-dialog" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="field-group">
+        <label for="edit-fact-value">实际内容</label>
+        <textarea id="edit-fact-value" name="edit-fact-value" rows="4" required></textarea>
+      </div>
+      <div class="field-group">
+        <label for="edit-fact-source-note">依据或说明</label>
+        <textarea id="edit-fact-source-note" name="edit-fact-source-note" rows="3" placeholder="例如：以实际焊接电路为准"></textarea>
+      </div>
+      <div class="dialog-actions">
+        <button class="button button-secondary" id="btn-cancel-edit-fact" type="button">取消</button>
+        <button class="button button-primary" id="btn-save-edit-fact" type="submit">保存并确认</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="app-dialog" id="dialog-impact-warning" aria-labelledby="impact-dialog-title">
+    <div class="dialog-heading">
+      <div><span class="section-kicker">修改影响</span><h2 id="impact-dialog-title">部分内容需要重新检查</h2></div>
+      <button class="icon-button" id="btn-close-impact-dialog" type="button" aria-label="关闭">×</button>
+    </div>
+    <p id="impact-dialog-description">修改此项后，受影响的章节会标记为需要复查，已写内容不会自动删除。</p>
+    <div class="impact-list" id="impact-dialog-list"></div>
+    <div class="dialog-actions">
+      <button class="button button-secondary" id="btn-cancel-impact-change" type="button">取消修改</button>
+      <button class="button button-primary" id="btn-confirm-impact-change" type="button">继续修改</button>
+    </div>
+  </dialog>
+
+  <dialog class="app-dialog api-settings-dialog" id="dialog-api-settings" aria-labelledby="api-settings-title">
+    <form id="form-api-settings" method="dialog">
+      <div class="dialog-heading">
+        <div><span class="section-kicker">高级设置</span><h2 id="api-settings-title">生成服务设置</h2></div>
+        <button class="icon-button" id="btn-close-api-settings" type="button" aria-label="关闭API设置">×</button>
+      </div>
+      <p class="dialog-lead">默认服务已经配置好，正常使用无需修改。只有需要换用其他厂商时才切换到自定义API。</p>
+
+      <fieldset class="api-mode-picker">
+        <legend>使用方式</legend>
+        <label><input type="radio" name="api-mode" value="default" checked><span><strong>使用默认API</strong><small>推荐，打开网站即可生成</small></span></label>
+        <label><input type="radio" name="api-mode" value="custom"><span><strong>使用自定义API</strong><small>替换为其他厂商兼容接口</small></span></label>
+      </fieldset>
+
+      <div class="api-custom-fields" id="api-custom-fields" hidden>
+        <label class="field"><span>厂家预设</span><select id="api-provider"><option value="openai-compatible">其他兼容接口</option><option value="deepseek">DeepSeek</option><option value="zhipu">智谱 GLM</option><option value="moonshot">Kimi / Moonshot</option><option value="openai">OpenAI</option></select></label>
+        <label class="field field-wide"><span>API地址 <b>必填</b></span><input id="api-base-url" type="url" autocomplete="url" placeholder="https://厂家接口地址/chat/completions"></label>
+        <label class="field field-wide"><span>API Key <b>必填</b></span><span class="secret-field"><input id="api-key" type="password" autocomplete="off" placeholder="只保存在当前浏览器"><button id="btn-toggle-api-key" type="button" aria-label="显示或隐藏API Key">显示</button></span></label>
+        <div class="form-grid compact-api-grid">
+          <label class="field"><span>普通模型名称 <b>必填</b></span><input id="api-chat-model" autocomplete="off" placeholder="填写厂家模型名称"></label>
+          <label class="field"><span>深度推理模型 <small>可与普通模型相同</small></span><input id="api-reasoning-model" autocomplete="off" placeholder="留空时使用普通模型"></label>
+        </div>
+        <p class="field-help">自定义Key只保存在当前浏览器，换电脑或清除浏览器数据后需要重新填写。</p>
+      </div>
+
+      <div class="api-status-row">
+        <span class="service-status is-checking" id="service-status" role="status" aria-live="polite"><span aria-hidden="true"></span> 正在读取设置</span>
+        <button class="button button-secondary button-small" id="btn-test-api" type="button">测试连接</button>
+      </div>
+      <p class="field-error" id="api-settings-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="button button-quiet" id="btn-reset-api-settings" type="button">恢复默认API</button>
+        <button class="button button-primary" id="btn-save-api-settings" type="submit">保存设置</button>
+      </div>
+    </form>
+  </dialog>
+
+  <aside class="help-drawer" id="help-drawer" aria-labelledby="help-drawer-title" hidden>
+    <div class="dialog-heading">
+      <div><span class="section-kicker">使用帮助</span><h2 id="help-drawer-title">现在应该做什么？</h2></div>
+      <button class="icon-button" id="btn-close-help" type="button" aria-label="关闭帮助">×</button>
+    </div>
+    <p id="help-current-guidance">系统会根据当前进度给出简短说明。</p>
+    <button class="button button-primary button-block" id="btn-help-next-action" type="button">前往下一步</button>
+  </aside>
+
+  <script src="github-config.js?v=20260824-1"></script>
+  <script src="vendor/mammoth.browser.min.js"></script>
+  <script src="vendor/docx.umd.js"></script>
+  <script src="docx-export.js?v=20260824-1"></script>
+  <script type="module" src="app.js?v=20260824-6"></script>
+</body>
+</html>

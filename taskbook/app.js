@@ -9,7 +9,7 @@
  * ============================================================ */
 
 import UIContainer from '../shared/ui-kit.js';
-import ApiClient from '../shared/api.js';
+import ApiClient from '../shared/api.js?v=1600';
 import TemplateParser from '../shared/template-parser.js';
 import Markdown from '../shared/markdown.js';
 import Storage from '../shared/storage.js';
@@ -130,7 +130,7 @@ function updateProgress() {
 function autoLoadFromStorage() {
   // 【v15.9.2】优先用 taskbook 自己的输入缓存（taskbook.lastInput），回退到 shared.meta
   // 这样：1) 刷新 taskbook 页面可以恢复上次输入；2) 不会受上游 shared.meta 干扰
-  const cached = Storage.get('taskbook.lastInput') || Storage.Shared.getMeta();
+  const cached = Storage.get('taskbook.lastInput') || Storage.Shared.getProjectContext() || Storage.Shared.getMeta();
   if (cached) {
     if (cached.topic && !dom.topic.value) dom.topic.value = cached.topic;
     if (cached.devices && cached.devices.length && !dom.devices.value) {
@@ -138,6 +138,9 @@ function autoLoadFromStorage() {
     }
     if (cached.funcs && cached.funcs.length && !dom.funcs.value) {
       dom.funcs.value = Format.funcsToText(cached.funcs);
+    }
+    if (cached.refs && !dom.refs.value) {
+      dom.refs.value = Array.isArray(cached.refs) ? cached.refs.join('\n') : cached.refs;
     }
   }
   // 【v15.9.5】同时恢复生成结果（不依赖 shared.kaiti）
@@ -247,7 +250,7 @@ function bindEvents() {
   dom.topic.addEventListener('input', () => { syncLastInput(); updateCounts(); refreshBanner(); });
   dom.devices.addEventListener('input', () => { syncLastInput(); updateCounts(); refreshBanner(); });
   dom.funcs.addEventListener('input', () => { syncLastInput(); updateCounts(); refreshBanner(); });
-  dom.refs.addEventListener('input', updateCounts);
+  dom.refs.addEventListener('input', () => { syncLastInput(); updateCounts(); });
 
   // 从文档导入方案
   dom.btnImport.addEventListener('click', () => dom.fileImport.click());
@@ -511,7 +514,7 @@ ${state.template.rawText.slice(0, 8000)}
 
 // === 加载 prompt ===
 async function loadPrompt() {
-  const res = await fetch('prompt.md');
+  const res = await fetch('prompt.md?v=1610');
   if (!res.ok) throw new Error('prompt.md 加载失败');
   const text = await res.text();
   // 去掉 BOM（防 UTF-8 BOM）
@@ -519,22 +522,28 @@ async function loadPrompt() {
 }
 
 // === 构建 user message ===
-function buildUserMessage({ topic, devices, funcs, refs, template, skeletonText }) {
+function buildUserMessage({ topic, devices, funcs, refs, template, skeletonText, projectContext }) {
   const parts = [];
 
   parts.push(`【题目】${topic || '（未填）'}`);
 
   if (devices.length) {
     parts.push(`【器件清单】\n${devices.map((d, i) => (i + 1) + '. ' + d).join('\n')}`);
-  } else {
-    parts.push(`【器件清单】（未提供 — 请根据题目和功能推断合理选型，主控+电源必须包括）`);
   }
 
   if (funcs.length) {
     parts.push(`【功能要求】\n${funcs.map((f, i) => (i + 1) + '. ' + f).join('\n')}`);
-  } else {
-    parts.push(`【功能要求】（未提供 — 请根据题目推导 5-10 条核心功能）`);
   }
+
+  if (projectContext?.scheme) {
+    parts.push(`【上游已确认方案】（用于一致性核对；若与当前输入框冲突，以当前输入框为准）\n${projectContext.scheme.slice(0, 5000)}`);
+  }
+
+  parts.push(`【事实边界与优先级】
+1. 当前题目、器件清单、功能要求是最高优先级事实。
+2. 上游方案只用于保持术语和设计方向一致，不得从中扩写未确认的新器件或新功能。
+3. 不得修改题目，不得替换器件型号，不得虚构引脚、测试数据、学者、论文或统计数字。
+4. 器件与功能必须形成对应关系；没有器件支撑的功能不得写入。`);
 
   // 优先使用 AI 解析后的结构化骨架（更准确）
   if (template && template.aiChapters && template.aiChapters.length) {
@@ -609,7 +618,11 @@ async function onGenerate() {
   }
 
   const devices = Format.textToLines(dom.devices.value);
-  // 器件为空不阻挡（AI 可自动推断）
+  if (devices.length === 0) {
+    UIContainer.toast('为了保证下游论文准确，请先填写器件清单', 'error');
+    dom.devices.focus();
+    return;
+  }
 
   const funcs = Format.textToLines(dom.funcs.value);
   if (funcs.length === 0) {
@@ -639,10 +652,12 @@ async function onGenerate() {
 
   try {
     const systemPrompt = await loadPrompt();
+    const projectContext = Storage.Shared.getProjectContext();
     const userMessage = buildUserMessage({
       topic, devices, funcs, refs,
       template: state.template,
       skeletonText,
+      projectContext,
     });
 
     UIContainer.updateProgress(40, '正在调用 AI 生成...');
@@ -656,9 +671,12 @@ async function onGenerate() {
 
     UIContainer.updateProgress(80, '正在整理结果...');
 
-    const cleaned = cleanResult(raw);
+    const cleaned = validateTaskbookResult(cleanResult(raw), {
+      refs,
+      template: state.template,
+    });
 
-    if (!cleaned || cleaned.length < 100) {
+    if (!cleaned || cleaned.length < 800) {
       throw new Error('生成结果过短，可能生成失败');
     }
 
@@ -678,10 +696,17 @@ async function onGenerate() {
     renderOutput(cleaned);
 
     // 写入 storage（仅 taskbook 自己的结果 + 进度标记）
-    Storage.Shared.setKaiti(cleaned);
+    Storage.Shared.setProjectContext({
+      topic: dom.topic.value.trim(),
+      devices: Format.textToLines(dom.devices.value),
+      funcs: Format.textToLines(dom.funcs.value),
+      scheme: projectContext?.scheme || '',
+      kaiti: cleaned,
+      refs,
+      source: 'taskbook',
+    });
     Storage.Shared.markComplete('taskbook');
-    // 【v15.9.2】同时清除上游的 shared.meta，防止不点下一步进 thesis 时被旧数据污染
-    Storage.Shared.clearMeta();
+    Storage.Shared.markIncomplete('thesis');
     updateProgress();
 
     setTimeout(() => UIContainer.hideProgress(), 600);
@@ -707,6 +732,24 @@ function renderOutput(md) {
   dom.resultMd.innerHTML = Markdown.render(md);
   dom.resultEmpty.classList.add('hidden');
   dom.resultContent.classList.remove('hidden');
+}
+
+function validateTaskbookResult(text, { refs, template }) {
+  if (!text) throw new Error('开题报告内容为空，请重新生成');
+  if (/待补充|具体数据以实际调研为准|本节为示意性梳理|\bXXX\b/i.test(text)) {
+    throw new Error('开题报告仍含待补充或示意性文字，请重新生成');
+  }
+  if (!refs.length && (/\[\d+\]/.test(text) || /^#{1,3}\s+.*参考文献/m.test(text))) {
+    throw new Error('未提供真实文献，但结果中出现了引用或参考文献，请重新生成');
+  }
+  if (template?.aiChapters?.length) {
+    const missing = template.aiChapters
+      .map(chapter => chapter.title?.trim())
+      .filter(Boolean)
+      .filter(title => !text.includes(title));
+    if (missing.length) throw new Error(`结果未完整覆盖模板章节：${missing.slice(0, 3).join('、')}`);
+  }
+  return text.trim();
 }
 
 // === 工具栏 ===
@@ -776,6 +819,7 @@ function onResetResult() {
   Storage.Shared.setFuncs([]);   // 【v15.9.3】清 shared.funcs
   Storage.Shared.markIncomplete('taskbook');
   Storage.Shared.clearMeta();        // 【v15.9.2】清上游 meta
+  Storage.Shared.clearProjectContext();
   Storage.remove('taskbook.lastInput');  // 【v15.9.2】清 taskbook 自己的输入缓存
   Storage.remove('taskbook.lastResult');  // 【v15.9.5】清生成结果缓存
   updateProgress();
@@ -815,7 +859,7 @@ function onNextStep() {
     return;
   }
   // 取旧 meta（如果有）并合并
-  const oldMeta = Storage.Shared.getMeta() || {};
+  const oldMeta = Storage.Shared.getProjectContext() || Storage.Shared.getMeta() || {};
   // 【v15.9.2】复用 onGenerate 暂存的 lastMeta，优先使用最新手动修改后的值
   const latest = state.lastMeta || {};
   const newMeta = {
@@ -827,7 +871,13 @@ function onNextStep() {
     updatedAt: new Date().toISOString(),
     generatorVersion: 'v15.9.2',
   };
-  Storage.Shared.setMeta(newMeta);
+  Storage.Shared.setProjectContext({
+    ...newMeta,
+    scheme: oldMeta.scheme || Storage.Shared.getScheme(),
+    kaiti: state.lastResult,
+    refs: Format.textToLines(dom.refs.value),
+    source: 'taskbook',
+  });
   // 跳论文页
   UIContainer.toast('已保存最新数据，跳到论文生成...', 'info', 1500);
   setTimeout(() => {

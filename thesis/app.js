@@ -9,7 +9,7 @@
  * - 中央进度遮罩（与 topic / taskbook 一致）
  * ============================================================ */
 
-import { callMinimax, extractFromDocx, countCnChars, getHardcodedApiKey, aiParsePlan } from './thesis-helpers.js';
+import { callOpenAI, extractFromDocx, countCnChars, aiParsePlan } from './thesis-helpers.js';
 import { exportPaperDocx } from '../shared/thesis-docx-export.js';
 import UIContainer from '../shared/ui-kit.js';
 import Storage from '../shared/storage.js';
@@ -36,6 +36,7 @@ const state = {
   stats: { words: 0, figs: 0, refs: 0, indent: 0 },
   generating: false,
   upstreamMeta: null,
+  upstreamContext: null,
   startTs: null,
 };
 
@@ -291,12 +292,6 @@ async function aiPolishInputs() {
     return;
   }
 
-  const apiKey = getHardcodedApiKey();
-  if (!apiKey) {
-    toast('API 未初始化', 'error');
-    return;
-  }
-
   if (dom['btn-ai-polish']) {
     dom['btn-ai-polish'].disabled = true;
     dom['btn-ai-polish'].textContent = '⏳ AI 整理中...';
@@ -335,7 +330,7 @@ async function aiPolishInputs() {
       '}',
     ].join('\n');
     const userMsg = `【当前题目】\n${topicVal || '（空）'}\n\n【当前器件】\n${devicesVal || '（空）'}\n\n【当前功能】\n${funcsVal || '（空）'}`;
-    const result = await callMinimax(apiKey, [
+    const result = await callOpenAI([
       { role: 'system', content: sys },
       { role: 'user', content: userMsg },
     ], { temperature: 0.3, max_tokens: 1500 });
@@ -393,7 +388,7 @@ async function aiPolishInputs() {
 function loadFromStorage() {
   let meta = null;
   try {
-    meta = Storage.Shared.getMeta();
+    meta = Storage.Shared.getProjectContext() || Storage.Shared.getMeta();
   } catch (e) {
     console.warn('Storage.Shared not ready', e);
   }
@@ -404,15 +399,18 @@ function loadFromStorage() {
     log('未检测到上游数据，可手动输入或上传文档', 'info');
   } else {
     state.upstreamMeta = meta;
+    state.upstreamContext = meta;
     state.topic = meta.topic || '';
 
     // 【关键】统一为 string[] 格式：支持 string[]、[{model,role}]、[{text}] 三种入参
     state.devices = normalizeToStringArray(meta.devices, 'model');
     state.funcs = normalizeToStringArray(meta.funcs, 'text');
+    state.refs = normalizeToStringArray(meta.refs, 'text');
 
     dom['input-topic'].value = state.topic;
     dom['input-devices'].value = state.devices.join('、');
     dom['input-funcs'].value = state.funcs.join('\n');
+    if (state.refs.length && dom['input-refs']) dom['input-refs'].value = state.refs.join('\n');
 
     refreshSourceBanner();
     updateCounts();
@@ -422,7 +420,11 @@ function loadFromStorage() {
   // 【v15.9.5】恢复上次生成结果（即使没上游数据，也能从自己的缓存恢复）
   try {
     const saved = Storage.Shared.getThesis();
-    if (saved && saved.chapters && Object.keys(saved.chapters).length) {
+    const currentRevision = state.upstreamContext?.revision || '';
+    const sameProject = !currentRevision
+      || saved?.projectRevision === currentRevision
+      || (!saved?.projectRevision && saved?.topic === state.topic);
+    if (saved && sameProject && saved.chapters && Object.keys(saved.chapters).length) {
       state.chapters = saved.chapters;
       state.abstractCn = saved.abstractCn || '';
       state.abstractEn = saved.abstractEn || '';
@@ -446,6 +448,7 @@ function loadFromStorage() {
       dom['result-status'].style.color = 'var(--color-success)';
       log('从 Storage 恢复上次生成结果', 'info');
     }
+    if (saved && !sameProject) log('检测到上游项目已更新，未恢复旧论文结果', 'info');
   } catch (e) {
     console.warn('Failed to restore thesis from storage', e);
   }
@@ -483,6 +486,20 @@ function normalizeToStringArray(arr, objectKey) {
     }
     return '';
   }).filter(Boolean);
+}
+
+function parseDeviceInput(text) {
+  const seen = new Set();
+  return String(text || '')
+    .split(/\r?\n|[、，,；;]+/)
+    .map(item => item.trim())
+    .filter(item => {
+      if (!item) return false;
+      const key = item.toLowerCase().replace(/\s+/g, '');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 function escapeHtml(s) {
@@ -544,11 +561,7 @@ async function handleFileUpload(e) {
       throw new Error('文档内容为空或过短');
     }
 
-    const apiKey = getHardcodedApiKey();
-    if (!apiKey) {
-      throw new Error('初始化失败，请联系维护者');
-    }
-    const parsed = await aiParsePlan(apiKey, text);
+    const parsed = await aiParsePlan(text);
 
     if (!parsed.topic && parsed.devices.length === 0 && parsed.funcs.length === 0) {
       throw new Error('AI 未拆解出题目/器件/功能');
@@ -887,10 +900,18 @@ async function startGeneration() {
 
   // 同步到 state
   state.topic = topic;
-  state.devices = devices.split(/[、,，\s\n]+/).filter(Boolean);
+  state.devices = parseDeviceInput(devices);
   state.funcs = funcs.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   state.outline = (dom['input-outline']?.value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   state.refs = (dom['input-refs']?.value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  state.upstreamContext = Storage.Shared.setProjectContext({
+    ...(state.upstreamContext || {}),
+    topic: state.topic,
+    devices: state.devices,
+    funcs: state.funcs,
+    refs: state.refs,
+    source: state.upstreamContext?.source || 'thesis',
+  });
 
   // 2. 切换 UI
   dom['result-empty'].classList.add('hidden');
@@ -1043,14 +1064,24 @@ function updateChapterStatus(ch_id, status, words) {
 async function generateChapter(ch_id, ch_title, target, signal) {
   const systemPrompt = buildSystemPrompt();
   const userPrompt = buildChapterPrompt(ch_id, ch_title, target);
-  const apiKey = getHardcodedApiKey();
-
-  const result = await callMinimax(apiKey, [
+  let result = await callOpenAI([
     { role: 'system', content: systemPrompt },
     { role: 'user', content: userPrompt },
   ], { temperature: 0.6, max_tokens: 8000, signal });  // 【v15.9.5】传 signal 支持取消
 
-  return cleanChapterContent(result.text, ch_id);
+  let content = cleanChapterContent(result.text, ch_id);
+  let issues = auditChapter(content, ch_id, target);
+  if (issues.length) {
+    log(`Ch${ch_id} 质量复核发现 ${issues.length} 项问题，自动修订一次`, 'warning');
+    result = await callOpenAI([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `${userPrompt}\n\n【质量复核未通过】\n${issues.map((issue, index) => `${index + 1}. ${issue}`).join('\n')}\n\n【待修订草稿】\n${content}\n\n请完整重写本章并修复全部问题，只输出修订后的章节正文。` },
+    ], { temperature: 0.3, max_tokens: 8000, signal });
+    content = cleanChapterContent(result.text, ch_id);
+    issues = auditChapter(content, ch_id, target);
+  }
+  if (issues.length) throw new Error(`章节质量检查未通过：${issues.slice(0, 2).join('；')}`);
+  return content;
 }
 
 
@@ -1071,6 +1102,8 @@ async function generateChapter(ch_id, ch_title, target, signal) {
 function buildSystemPrompt() {
   const devices = state.devices.join('、');
   const funcs = state.funcs.join('\n');
+  const scheme = state.upstreamContext?.scheme?.slice(0, 5000) || '';
+  const kaiti = state.upstreamContext?.kaiti?.slice(0, 8000) || '';
 
   // 【真的传到 prompt】模板格式要求
   let formatSection = '';
@@ -1104,6 +1137,13 @@ ${devices}
 【功能清单】
 ${funcs}
 
+${scheme ? `【上游确认方案】（用于保持术语、器件和功能一致）
+${scheme}
+
+` : ''}${kaiti ? `【上游开题报告】（用于保持研究目标、技术路线和章节叙事一致）
+${kaiti}
+
+` : ''}
 ${state.outline.length ? `【参考目录】🗂️ 学校论文目录，请严格按此章节顺序与名称生成：
 ${state.outline.join('\n')}
 
@@ -1114,30 +1154,26 @@ ${state.refs.join('\n')}
 1. 器件型号必须严格使用上面清单中的，不允许编造（如 SHT30 / MQ-4 / BH1750 等禁止出现）
 2. 引脚编号 / 寄存器地址 / 代码片段不要写具体值
 3. 不要写电路原理图内容（占位符 [待插入图：fig-x-x 人类语言] 代替）
-4. 论文段落要严谨、有数据支撑、避免口语化
-5. Ch1 绪论是唯一允许出现 [n] 参考文献标记的章节（Ch2-6 严禁 [n]）
+4. 论文段落要严谨、避免口语化；只有用户提供的数据才能作为实验或性能数据
+5. 仅当用户提供真实参考文献时，Ch1 绪论才允许出现 [n] 引用标记；Ch2-6 一律禁止
 6. 段落首行缩进 2 字符（在 .docx 中会自动处理，正文无需自己写空格）
 
 【【v15.10.0】全章节禁捏造约束】
 7. 严禁编造任何代码细节：函数名、变量名、寄存器名、参数值、时序数值、通信协议字段名，只能引用实际代码中出现的
 8. 严禁虚构库函数调用：如未提供代码中明确出现，不得引用 HAL_I2C_Master_Transmit、HAL_SPI_Transmit 等具体 API
 9. 器件顺序引脚编号不得确定：未提供代码时只能说"与主控通过 UART 通信"，不得写"PA2/PA3"
-10. 测试数据不得捏造：未提供测试数据时只能说"经过多轮测试系统稳定运行"，不得编造具体表格
+10. 测试数据不得捏造：未提供测试数据时只能写测试方案、步骤、指标和验收条件，不得声称已经测试通过或系统稳定运行
 
-【【v15.10.5】排版约束】
-11. 术语（如 STM32、WiFi 模块、主控制器）可以用两个星号包起来实现加粗
-12. 严禁整句、整段加粗（加粗内容应为 2-6 个汉字的术语，不是一整句话）
-13. 一段内加粗术语不超过 2 个
-14. 普通描述不要用任何加粗，直接平铺文字
-15. 章节标题不要加粗（H1 / H2 / H3 标题样式已自带加粗，不要再手动加星号）
+【排版与标题约束】
+11. 当前调用只生成一个章节的正文，不要输出 H1；导出器会自动生成章标题
+12. 只输出带完整编号的 H2 / H3：\`## X.Y 子标题\`、\`### X.Y.Z 三级标题\`
+13. 标题编号必须属于当前章节，不得漏号、跳号或重复
+14. 输出中不得出现 \`**\` 加粗标记，不要手写首行空格
 
-【【v15.10.7】标题编号与层级要求】
-16. **每个章节必须有编号标题**：H1 写 \`# X 章节名\`（X 为 1-6 阿拉伯数字），H2 写 \`## X.Y 子标题\`，H3 写 \`### X.Y.Z 三级标题\`。
-17. **不得省略编号**：不能写 \`# 绪论\`、\`## 研究背景\`（必須 \`# 1 绪论\`、\`## 1.1 研究背景\`）。
-18. **不得重复标题**：你输出的章节内容里不要写 H1（导出器会按章节号自动生成“1 绪论”等）；只输出 H2 / H3 / 正文。
-19. **标题层级区分明显**：H1 = 32（三号）·居中·黑体；H2 = 28（小三）·左对齐·黑体；H3 = 24（小四）·左对齐·黑体。正文 = 24（小四）·首行缩进 2 字符·宋体。加粗一律不要。
-
-20. **不要加粗**：v15.10.7 已全面去除加粗（导出器不再处理 \`**xxx**\`）。输出里不许出现 \`**术语**\` 字样，包了也会被原样保留为“\**术语**\”字面字符串。
+【跨章节一致性】
+15. 题目、器件、功能以上述锁定清单为准，上游方案与开题报告只用于补充叙事，不得改变事实清单
+16. 同一器件、功能、阈值和术语在所有章节中保持相同名称与含义
+17. 无真实文献、代码、原理图或测试数据时，必须保守描述，绝不补写看似专业但无法核验的细节
 `;
 }
 
@@ -1147,26 +1183,28 @@ function buildChapterPrompt(ch_id, ch_title, target) {
   const isCh4 = ch_id === 4;
 
   const chapterGuidance = {
-    1: '绪论：研究背景与意义、国内外研究现状、研究内容与章节安排。本章允许出现 [n] 引用标记（如 [1][2]）。',
+    1: `绪论：研究背景与意义、国内外研究现状、研究内容与章节安排。${state.refs.length ? '可使用用户提供文献对应的 [n] 引用。' : '未提供真实文献，不得出现引用标记或虚构文献。'}`,
     2: '系统总体设计：项目需求分析、总体架构设计、模块划分、器件选型说明。',
     3: '硬件设计：主控电路、各传感器电路、执行器电路、电源电路。器件必须严格按锁定清单。配 [待插入图：fig-3-x 人类语言描述] 占位符。',
-    4: '软件设计：主程序流程图、子程序流程图（5 张 ASCII + Mermaid 双轨流程图）、关键算法设计。',
-    5: '系统测试：硬件测试、软件测试、联调测试、测试结果分析。',
-    6: '项目总结：完成情况、存在问题、改进方向、项目心得（是"项目"总结，不是"论文"总结）。',
+    4: '软件设计：主程序流程、子程序流程（仅 ASCII 流程图）和关键算法设计。',
+    5: '系统测试：写硬件、软件和联调的测试方案、测试步骤、验收指标；未提供实测数据时不得声称测试已通过。',
+    6: '项目总结：总结设计内容、限制条件和可执行的改进方向；不得虚构已经完成的测试成果。',
   };
 
   // 检查目录里有没有该章节对应的内容
-  let outlineHint = '';
-  if (state.outline.length) {
-    outlineHint = '\n【参考目录要求】\n学校目录提供了具体章节顺序和小节，论文章节要严格按照目录结构来组织内容。\n';
-  }
+  const outlineLines = getOutlineForChapter(ch_id);
+  const outlineHint = outlineLines.length
+    ? `\n【本章学校目录】（标题名称、顺序和层级必须逐项对应）\n${outlineLines.join('\n')}\n`
+    : '';
+  const continuity = buildContinuityContext(ch_id);
 
   return `请生成论文第 ${ch_id} 章《${ch_title}》，目标 ${target} 字。
 
 【章节要求】
 ${chapterGuidance[ch_id] || ''}
 ${outlineHint}
-${isCh1 ? '\n【重要】本章是唯一允许写 [n] 参考文献的位置，其他章禁止。\n' : ''}
+${continuity}
+${isCh1 && state.refs.length ? '\n【重要】引用编号只能对应用户提供的真实参考文献，不得新增来源。\n' : ''}
 ${isCh3 ? buildCh3PromptAddition() : ''}
 ${isCh4 ? buildCh4PromptAddition() : ''}
 
@@ -1178,6 +1216,23 @@ ${isCh4 ? buildCh4PromptAddition() : ''}
 - 不要加粗（v15.10.7 已去除）
 
 直接输出章节内容即可。`;
+}
+
+function getOutlineForChapter(ch_id) {
+  if (!state.outline.length) return [];
+  const pattern = new RegExp(`^#{0,3}\\s*(?:第\\s*)?${ch_id}(?:\\s*章|[.、\\s])`);
+  return state.outline.filter(line => pattern.test(line.trim()));
+}
+
+function buildContinuityContext(ch_id) {
+  const previous = Object.entries(state.chapters)
+    .filter(([id, content]) => Number(id) < ch_id && content)
+    .map(([id, content]) => `第${id}章已确认内容片段：\n${String(content).slice(0, 900)}`)
+    .join('\n\n')
+    .slice(0, 4500);
+  return previous
+    ? `\n【前文章节连续性】\n${previous}\n\n沿用前文术语和事实，不要重复大段内容，也不要改变已有结论。\n`
+    : '';
 }
 
 // 【v15.10.0】Ch4 软件设计专用 prompt 拼接：有代码则强约束贴代码，无代码则保守描述
@@ -1207,47 +1262,73 @@ function buildCh4PromptAddition() {
 
 function cleanChapterContent(text, ch_id) {
   text = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  text = text.replace(/^#\s+.+\r?\n+/m, '');
+  text = text.replace(/\*\*/g, '');
   return text.trim();
+}
+
+function auditChapter(text, ch_id, target) {
+  const issues = [];
+  const cnChars = countCnChars(text);
+  if (cnChars < target * 0.55) issues.push(`正文过短，目标约${target}字，当前约${cnChars}字`);
+  if (/^#\s+/m.test(text)) issues.push('包含不应输出的一级标题');
+  if (/\*\*/.test(text)) issues.push('包含禁止的加粗标记');
+  const h2Lines = text.match(/^##\s+.+$/gm) || [];
+  if (!h2Lines.length) issues.push('缺少带编号的二级标题');
+  if (h2Lines.some(line => !new RegExp(`^##\\s+${ch_id}\\.\\d+`).test(line))) {
+    issues.push(`二级标题未统一使用 ${ch_id}.X 编号`);
+  }
+  if (ch_id !== 1 && /\[\d+\]/.test(text)) issues.push('非绪论章节出现参考文献引用标记');
+  if (!state.refs.length && /\[\d+\]/.test(text)) issues.push('未提供真实文献却出现引用标记');
+  if (state.refs.length) {
+    const invalidCitation = [...text.matchAll(/\[(\d+)\]/g)]
+      .map(match => Number(match[1]))
+      .find(index => index < 1 || index > state.refs.length);
+    if (invalidCitation) issues.push(`出现不存在的参考文献编号 [${invalidCitation}]`);
+  }
+  if (/待补充|本节为示意|具体数据以实际调研为准|\bXXX\b|作为AI/i.test(text)) {
+    issues.push('包含占位或写作过程提示语');
+  }
+  if (ch_id === 5 && /测试结果表明|经(?:过)?测试[^。；\n]{0,30}(?:稳定|通过|达到)|准确率\s*[为达]?\s*\d|通过率\s*[为达]?\s*\d/.test(text)) {
+    issues.push('在没有实测数据的情况下声称已有测试结果');
+  }
+  return issues;
 }
 
 // ===== 附加章节（摘要 / 致谢 / 参考文献） =====
 async function generateExtras(signal) {
-  const apiKey = getHardcodedApiKey();
   const devices = state.devices.join('、');
+  const chapterDigest = Object.entries(state.chapters)
+    .map(([id, content]) => `第${id}章：${String(content).slice(0, 700)}`)
+    .join('\n')
+    .slice(0, 5000);
+  const abstractRules = `只能依据给定题目、器件、功能和论文正文概括，不得新增功能、器件、实验数据或性能结论。未提供实测数据时，用“完成设计”“构建方案”等客观表述，不得写准确率、误差率、响应时间或“测试表明”。`;
 
-  const cnAbstract = await callMinimax(apiKey, [
-    { role: 'system', content: '你是单片机论文写作助手。生成 200-300 字中文摘要。' },
-    { role: 'user', content: `题目：${state.topic}\n器件：${devices}\n功能：${state.funcs.join('；')}\n请生成论文中文摘要，包含：研究目的、方法、主要成果、结论。` },
-  ], { temperature: 0.5, max_tokens: 1200, signal });
+  const cnAbstract = await callOpenAI([
+    { role: 'system', content: `你是单片机本科论文摘要编辑。${abstractRules}` },
+    { role: 'user', content: `题目：${state.topic}\n器件：${devices}\n功能：${state.funcs.join('；')}\n论文内容摘要：\n${chapterDigest}\n\n生成200-300字中文摘要，包含研究目的、设计方法、实现内容和保守结论。只输出摘要正文，不写标题。` },
+  ], { temperature: 0.3, max_tokens: 1200, signal });
   state.abstractCn = cleanText(cnAbstract.text);
 
-  const enAbstract = await callMinimax(apiKey, [
-    { role: 'system', content: '你是单片机论文写作助手。生成 200-300 字英文摘要（Abstract）。' },
-    { role: 'user', content: `Title: ${state.topic}\nDevices: ${devices}\nFunctions: ${state.funcs.join('; ')}\n\nGenerate the English Abstract (200-300 words) for the thesis.` },
-  ], { temperature: 0.5, max_tokens: 1200, signal });
+  const enAbstract = await callOpenAI([
+    { role: 'system', content: `You edit undergraduate embedded-systems abstracts. Use only the supplied facts. Do not invent components, functions, measurements, test results, performance figures, or claims.` },
+    { role: 'user', content: `Title: ${state.topic}\nDevices: ${devices}\nFunctions: ${state.funcs.join('; ')}\nPaper digest:\n${chapterDigest}\n\nWrite a 200-300 word English abstract consistent with the Chinese paper. Output only the abstract body.` },
+  ], { temperature: 0.3, max_tokens: 1200, signal });
   state.abstractEn = cleanText(enAbstract.text);
 
-  const ack = await callMinimax(apiKey, [
+  const ack = await callOpenAI([
     { role: 'system', content: '你是单片机论文写作助手。生成 150 字致谢。' },
     { role: 'user', content: `为论文《${state.topic}》写一段致谢，感谢指导老师、同学、家人。` },
   ], { temperature: 0.7, max_tokens: 800, signal });
   state.ack = cleanText(ack.text);
 
-  // 参考文献：优先用用户输入的
-  if (state.refs.length) {
-    state.referencesText = state.refs.join('\n');
-  } else {
-    const refs = await callMinimax(apiKey, [
-      { role: 'system', content: '你是单片机论文写作助手。生成 15 条参考文献（GB/T 7714 格式）。' },
-      { role: 'user', content: `为论文《${state.topic}》生成 15 条参考文献，使用 GB/T 7714 格式。包含：STM32 技术手册、单片机教材、相关传感器数据手册、WiFi 通信论文、嵌入式系统设计书籍、IoT / 智能家居领域期刊论文、传感器应用论文、程序设计书籍等。` },
-    ], { temperature: 0.5, max_tokens: 2500, signal });
-    state.referencesText = cleanText(refs.text);
-  }
+  // 参考文献只使用用户提供的真实条目，绝不由模型编造。
+  state.referencesText = state.refs.length ? state.refs.join('\n') : '';
 
   dom['abstract-cn'].textContent = state.abstractCn;
   dom['abstract-en'].textContent = state.abstractEn;
   dom['acknowledgment'].textContent = state.ack;
-  dom['references'].textContent = state.referencesText;
+  dom['references'].textContent = state.referencesText || '未提供真实参考文献，本次未生成参考文献条目。';
   dom['extras-section'].classList.remove('hidden');
 
   const ch1 = state.chapters[1] || '';
@@ -1279,7 +1360,7 @@ function computeQualityStats() {
   dom['q-words'].textContent = totalWords;
   dom['q-figs'].textContent = totalFigs;
   dom['q-refs'].textContent = state.stats.refs;
-  dom['q-indent'].textContent = '95%+';
+  dom['q-indent'].textContent = '导出自动处理';
   dom['quality-stats'].classList.remove('hidden');
 }
 
@@ -1299,6 +1380,7 @@ function saveToStorage() {
       ack: state.ack,
       references: state.referencesText,
       stats: state.stats,
+      projectRevision: state.upstreamContext?.revision || '',
       generatedAt: new Date().toISOString(),
     });
     Storage.Shared.markComplete('thesis');

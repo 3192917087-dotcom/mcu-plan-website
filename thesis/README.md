@@ -103,7 +103,7 @@ shared/
 | 维度 | 前端 (thesis/) | Python (backend/) |
 |---|---|---|
 | **执行环境** | 浏览器 | 命令行 |
-| **API 调用** | fetch (用户填 key) | urllib (key in api.js) |
+| **API 调用** | 本机 Node 代理（服务端固定 key） | urllib（旧后端） |
 | **生成 6 章** | 串行 + UI 进度 | 串行 + 进度（命令行） |
 | **.docx 输出** | JSZip (浏览器) | python-docx (python) |
 | **首行缩进** | XML 注入 | post-process |
@@ -137,7 +137,7 @@ shared/
 ```
 1. 打开 mcu-plan-website 主页
 2. 点 "📄 论文生成"
-3. 粘贴 API Key（来自 api.js 第 11 行）
+3. 首次使用时，在项目根目录的 `.env.local` 配置服务端 API Key
 4. 拖入方案文档（.docx）
 5. 校对提取的题目/器件/功能
 6. 选字数（10000/15000/20000）

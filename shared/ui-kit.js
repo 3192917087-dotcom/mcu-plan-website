@@ -235,7 +235,27 @@ const UIContainer = (() => {
     else if (err.message) msg = err.message;
     else if (err.error) msg = err.error;
     console.error(err);
-    toast(msg, 'error', 5000);
+    toast(toFriendlyError(msg, err), 'error', 6000);
+  }
+
+  function toFriendlyError(message, err = {}) {
+    if (err?.name === 'AbortError' || message === 'USER_CANCELLED') return '已取消本次生成。';
+    const text = String(message || '').toLowerCase();
+    if (/401|unauthorized|authentication|invalid.*(?:key|token)|令牌.*(?:过期|不正确)/i.test(text)) {
+      return 'DeepSeek API 密钥无效或已失效，请更新本机后台密钥。';
+    }
+    if (/402|no credits|insufficient.*(?:balance|quota)|余额不足|欠费/i.test(text)) {
+      return 'DeepSeek API 账户余额不足，请充值后再试。';
+    }
+    if (/429|too many requests|rate.?limit|请求.*频繁|额度限制/i.test(text)) {
+      return '请求过于频繁或已达到额度限制，请稍后重试。';
+    }
+    if (/failed to fetch|networkerror|无法连接/i.test(text)) {
+      return '无法连接本机 AI 服务，请确认网站后台正在运行。';
+    }
+    if (/timeout|timed out|超时/i.test(text)) return 'AI 响应超时，请稍后重试。';
+    if (/invalid temperature|temperature/i.test(text)) return '当前模型参数不兼容，请刷新页面后重试。';
+    return message || '发生未知错误';
   }
 
   return {
@@ -247,6 +267,7 @@ const UIContainer = (() => {
     toggleTheme,
     initTheme,
     showError,
+    toFriendlyError,
   };
 })();
 

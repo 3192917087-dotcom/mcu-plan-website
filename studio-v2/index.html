@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f6f8f7">
+  <title>单片机方案与论文工作台 V2</title>
+  <link rel="stylesheet" href="styles.css?v=20260824-17">
+</head>
+<body>
+  <a class="skip-link" href="#workspace-main">跳到主要内容</a>
+  <div class="app-shell">
+    <header class="topbar">
+      <button class="brand" type="button" data-route="projects" aria-label="返回项目库">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M7 3h8l4 4v14H7z"/><path d="M15 3v5h5M10 12h6M10 16h6"/></svg>
+        </span>
+        <span><strong>研作台</strong><small>单片机方案与论文</small></span>
+      </button>
+
+      <nav class="main-nav" aria-label="主要功能">
+        <button class="nav-item is-active" type="button" data-route="projects">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg><span>项目</span>
+        </button>
+        <button class="nav-item" type="button" data-route="scheme">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 4 7v10l8 4 8-4V7z"/><path d="m4 7 8 4 8-4M12 11v10"/></svg><span>方案</span>
+        </button>
+        <button class="nav-item" type="button" data-route="paper">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v5h5M9 12h7M9 16h7"/></svg><span>论文</span>
+        </button>
+      </nav>
+
+      <div class="topbar-actions">
+        <button class="api-connection-pill is-checking" id="api-connection-status" type="button" aria-label="默认API连接状态：正在检测" title="点击打开API设置">
+          <span class="api-state-dot" aria-hidden="true"></span><span id="api-connection-text">默认API 检测中</span>
+        </button>
+        <label class="project-switcher" for="active-project-select">
+          <span class="sr-only">当前项目</span>
+          <select id="active-project-select" aria-label="切换项目"></select>
+        </label>
+        <button class="icon-button" id="btn-open-settings" type="button" aria-label="API设置">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/><path d="M4.9 19.1 6 17.4a8 8 0 0 1-1-2.4l-2-.3v-2.4l2-.3a8 8 0 0 1 1-2.4L4.9 7.9l1.7-1.7L8.3 7a8 8 0 0 1 2.4-1l.3-2h2.4l.3 2a8 8 0 0 1 2.4 1l1.7-.8 1.7 1.7-1 1.7a8 8 0 0 1 1 2.4l2 .3v2.4l-2 .3a8 8 0 0 1-1 2.4l1 1.7-1.7 1.7-1.7-.8a8 8 0 0 1-2.4 1l-.3 2H11l-.3-2a8 8 0 0 1-2.4-1l-1.7.8z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main id="workspace-main" tabindex="-1">
+      <section class="route-view is-active" id="view-projects" data-view="projects" aria-labelledby="projects-title">
+        <div class="page-head compact-head">
+          <div>
+            <p class="eyebrow">工作项目</p>
+            <h1 id="projects-title">从上次的位置继续</h1>
+          </div>
+          <div class="head-actions">
+            <label class="button button-secondary" for="project-import-file">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg>导入项目
+            </label>
+            <input class="sr-only" id="project-import-file" type="file" accept="application/json,.json">
+            <button class="button button-primary" id="btn-new-project" type="button">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新建项目
+            </button>
+          </div>
+        </div>
+
+        <div class="project-summary" id="project-summary" aria-live="polite"></div>
+        <div class="project-grid" id="project-grid"></div>
+        <div class="empty-state" id="projects-empty" hidden>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/><path d="M12 10v6M9 13h6"/></svg>
+          <h2>还没有项目</h2>
+          <p>新建项目后，方案和论文可以分别使用。</p>
+          <button class="button button-primary" type="button" data-action="new-project">新建第一个项目</button>
+        </div>
+      </section>
+
+      <section class="route-view" id="view-scheme" data-view="scheme" aria-labelledby="scheme-title">
+        <div class="workspace-page">
+          <aside class="context-rail">
+            <button class="back-link" type="button" data-route="projects">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>项目库
+            </button>
+            <div class="rail-project">
+              <span>当前项目</span>
+              <strong data-current-project-name>未命名项目</strong>
+            </div>
+            <div class="rail-nav" aria-label="方案步骤">
+              <button class="rail-step is-active" type="button" data-scheme-step="input"><span>1</span>填写题目</button>
+              <button class="rail-step" type="button" data-scheme-step="result"><span>2</span>方案结果</button>
+            </div>
+            <div class="rail-note"><strong>生成规则</strong><p>附加要求优先，器件与功能必须一一对应。</p></div>
+          </aside>
+
+          <div class="workspace-content">
+            <div class="page-head">
+              <div><p class="eyebrow">方案设计</p><h1 id="scheme-title">快速确定制作方案</h1><p>只需题目，附加要求可以留空。</p></div>
+            </div>
+
+            <section class="step-panel is-active" id="scheme-input-panel" data-scheme-panel="input">
+              <form id="scheme-form" class="focus-form">
+                <label class="field field-large" for="scheme-title-input"><span>项目题目 <b>必填</b></span><input id="scheme-title-input" name="scheme-title" required placeholder="例如：基于STM32的智能鱼缸控制系统"></label>
+                <label class="field" for="scheme-requirements"><span>附加要求 <small>可选，填写内容优先</small></span><textarea id="scheme-requirements" rows="6" placeholder="例如：必须使用STM32F103C8T6，需要手机远程查看；也可以填写客户提出的具体功能"></textarea></label>
+                <fieldset class="field-group inline-options">
+                  <legend>功能数量</legend>
+                  <label><input type="radio" name="scheme-count-mode" value="random" checked><span>根据题目随机确定</span></label>
+                  <label><input type="radio" name="scheme-count-mode" value="custom"><span>自定义数量</span></label>
+                  <label class="count-field" id="scheme-count-wrap" hidden><span class="sr-only">功能数量</span><input id="scheme-count" type="number" min="3" max="20" value="8"></label>
+                </fieldset>
+                <section class="scheme-preferences" aria-labelledby="scheme-preferences-title">
+                  <div class="section-title compact-section-title"><span>可选约束</span><h2 id="scheme-preferences-title">指定项目常用配置</h2><p>不选择时由系统按题目确定；已选择内容和附加要求优先。</p></div>
+                  <div class="preference-grid">
+                    <label class="field" for="scheme-controller"><span>主控</span><select id="scheme-controller"><option value="auto">自动选择</option><option>STM32F103C8T6</option><option>STM32F407ZGT6</option><option>STC89C52RC</option><option>AT89C52</option><option>ESP32</option></select></label>
+                    <label class="field" for="scheme-display"><span>屏幕</span><select id="scheme-display"><option value="auto">自动选择</option><option value="none">不使用屏幕</option><option>0.96寸OLED</option><option>LCD1602</option><option>2.8寸TFT</option><option>数码管</option></select></label>
+                    <details class="multi-select" data-multi-select="programmingSoftware"><summary><span>编程软件</span><strong data-multi-summary>自动选择</strong></summary><div class="multi-select-panel"><label><input type="checkbox" value="Keil 5">Keil 5</label><label><input type="checkbox" value="STM32CubeMX">STM32CubeMX</label><label><input type="checkbox" value="IAR">IAR</label><label><input type="checkbox" value="Arduino IDE">Arduino IDE</label></div></details>
+                    <details class="multi-select" data-multi-select="appSoftware"><summary><span>APP设计软件</span><strong data-multi-summary>不指定</strong></summary><div class="multi-select-panel"><label><input type="checkbox" value="MIT App Inventor">MIT App Inventor</label><label><input type="checkbox" value="Android Studio">Android Studio</label><label><input type="checkbox" value="微信小程序">微信小程序</label></div></details>
+                    <details class="multi-select" data-multi-select="cloudPlatforms"><summary><span>云平台</span><strong data-multi-summary>不使用</strong></summary><div class="multi-select-panel"><label><input type="checkbox" value="OneNET">OneNET</label><label><input type="checkbox" value="阿里云IoT">阿里云IoT</label><label><input type="checkbox" value="巴法云">巴法云</label><label><input type="checkbox" value="私有物联网服务器">私有物联网服务器</label></div></details>
+                  </div>
+                </section>
+                <div class="form-footer"><span class="autosave-note"><span class="save-dot" aria-hidden="true"></span>自动保存</span><button class="button button-primary button-large" type="submit">生成方案</button></div>
+              </form>
+            </section>
+
+            <section class="step-panel" id="scheme-result-panel" data-scheme-panel="result">
+              <div class="result-toolbar">
+                <div><span class="status-badge" id="scheme-status">等待生成</span><h2>方案内容</h2></div>
+                <div class="toolbar-actions"><button class="button button-secondary" id="btn-copy-scheme" type="button">复制文本</button><button class="button button-primary" id="btn-download-scheme" type="button">下载Word</button></div>
+              </div>
+              <article class="document-preview" id="scheme-preview"><p class="placeholder-copy">方案生成后会显示在这里。</p></article>
+              <div class="panel-footer"><button class="button button-secondary" type="button" data-scheme-step="input">修改条件</button><button class="button button-quiet" id="btn-regenerate-scheme" type="button">重新生成</button></div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="route-view" id="view-paper" data-view="paper" aria-labelledby="paper-title">
+        <div class="workspace-page">
+          <aside class="context-rail paper-rail">
+            <button class="back-link" type="button" data-route="projects"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>项目库</button>
+            <div class="rail-project"><span>当前项目</span><strong data-current-project-name>未命名项目</strong></div>
+            <div class="rail-nav" id="paper-step-nav" aria-label="论文步骤">
+              <button class="rail-step is-active" type="button" data-paper-step="materials"><span>1</span>论文资料</button>
+              <button class="rail-step" type="button" data-paper-step="pins"><span>2</span>器件与引脚</button>
+              <button class="rail-step" type="button" data-paper-step="generate"><span>3</span>生成下载</button>
+            </div>
+            <div class="rail-note"><strong>资料不全也可以</strong><p>只有题目也能开始，系统会把建议内容单独列出供确认。</p></div>
+          </aside>
+
+          <div class="workspace-content paper-content">
+            <div class="page-head paper-head">
+              <div><p class="eyebrow">论文写作</p><h1 id="paper-title">准备论文资料</h1><p id="paper-step-description">题目必填，其他资料按实际情况提供。</p></div>
+              <button class="button button-secondary draft-download" id="btn-download-draft-top" type="button" disabled>下载当前稿</button>
+            </div>
+
+            <section class="step-panel is-active" data-paper-panel="materials">
+              <form id="paper-materials-form">
+                <section class="scheme-import-card" aria-labelledby="scheme-import-title">
+                  <div class="scheme-import-heading">
+                    <span class="scheme-import-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3h8l4 4v14H7z"/><path d="M15 3v5h5M10 12h6M10 16h4"/></svg></span>
+                    <div><span class="section-kicker">快捷填写</span><h2 id="scheme-import-title">导入已有方案</h2><p>复制题目、器件和功能，导入后仍可修改。</p></div>
+                  </div>
+                  <div class="scheme-import-actions">
+                    <label class="field" for="paper-scheme-source"><span class="sr-only">选择已生成方案</span><select id="paper-scheme-source" aria-describedby="paper-scheme-import-note"></select></label>
+                    <button class="button button-secondary" id="btn-import-scheme" type="button">导入所选方案</button>
+                  </div>
+                  <small id="paper-scheme-import-note">没有方案时可直接在下方填写。</small>
+                  <div class="scheme-source-divider"><span>或粘贴、导入外部方案</span></div>
+                  <div class="scheme-source-input">
+                    <label class="field" for="paper-scheme-text"><span>方案文本</span><textarea id="paper-scheme-text" rows="5" placeholder="粘贴题目、器件、功能或完整设计方案"></textarea></label>
+                    <div class="scheme-file-actions">
+                      <label class="button button-secondary" for="paper-scheme-file">选择方案文件</label>
+                      <input class="sr-only" id="paper-scheme-file" type="file" accept=".docx,.txt,.md,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+                      <small id="scheme-file-summary">支持 DOCX、TXT、MD</small>
+                      <button class="button button-primary" id="btn-analyze-scheme-source" type="button">AI分析并填入资料</button>
+                    </div>
+                  </div>
+                </section>
+
+                <div class="form-section essential-section">
+                  <div class="section-title"><span>必填</span><h2>论文题目</h2></div>
+                  <div class="field-grid title-target-grid">
+                    <label class="field field-large" for="paper-title-input"><span class="sr-only">论文题目</span><input id="paper-title-input" required placeholder="输入完整论文题目"></label>
+                    <label class="field target-length-field" for="paper-target-chars"><span>正文目标字数</span><input id="paper-target-chars" type="number" min="18000" max="40000" step="1000" value="18000"><small>最低18000字，系统据此规划目录和各章篇幅</small></label>
+                  </div>
+                </div>
+
+                <div class="form-section">
+                  <div class="section-title"><span>建议填写</span><h2>器件与功能</h2><p>不了解的内容可以留空，下一步会结合题目补全建议。</p></div>
+                  <div class="field-grid">
+                    <label class="field" for="paper-devices"><span>器件清单</span><textarea id="paper-devices" rows="6" placeholder="每行一个，例如：STM32F103C8T6（主控）"></textarea></label>
+                    <label class="field" for="paper-functions"><span>功能要求</span><textarea id="paper-functions" rows="6" placeholder="每行一项功能"></textarea></label>
+                  </div>
+                </div>
+
+                <details class="advanced-section">
+                  <summary><span>补充资料</span><small>程序、参考文献、测试、照片和学校要求</small><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg></summary>
+                  <div class="advanced-content field-grid">
+                    <div class="field field-wide">
+                      <span>程序文件夹 <small>读取其中的 .c 和 .h 文件</small></span>
+                      <label class="file-drop" for="paper-code-folder"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/><path d="M12 10v6M9 13h6"/></svg><strong>选择程序文件夹</strong><small id="code-file-summary">尚未选择</small></label>
+                      <input class="sr-only" id="paper-code-folder" type="file" webkitdirectory multiple accept=".c,.h,text/plain">
+                    </div>
+                    <div class="field field-wide outline-reference-field">
+                      <span>参考目录 <small>可选，AI会参考结构后生成一版项目目录</small></span>
+                      <textarea id="paper-outline-reference" rows="7" placeholder="可粘贴学校目录或往届论文目录；不提供时按本科论文六章职责规划"></textarea>
+                      <div class="scheme-file-actions compact-file-actions">
+                        <label class="button button-secondary" for="paper-outline-file">导入目录文件</label>
+                        <input class="sr-only" id="paper-outline-file" type="file" accept=".docx,.txt,.md,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+                        <small id="outline-file-summary">支持 DOCX、TXT、MD</small>
+                      </div>
+                    </div>
+                    <label class="field field-wide" for="paper-references"><span>参考文献 <small>用 [1]、[2] 区分；填写后将直接使用</small></span><textarea id="paper-references" rows="7" placeholder="[1] 作者. 题名[J]. 期刊名, 年, 卷(期): 页码.&#10;[2] 作者. 题名[D]. 城市: 学位授予单位, 年."></textarea></label>
+                    <label class="field" for="paper-test-info"><span>测试记录</span><textarea id="paper-test-info" rows="5" placeholder="已有测试数据、操作步骤或测试条件"></textarea></label>
+                    <label class="field" for="paper-tools"><span>调试工具</span><textarea id="paper-tools" rows="5" placeholder="例如：Keil、示波器、万用表、串口助手"></textarea></label>
+                    <label class="field" for="paper-photo-notes"><span>实物与照片说明</span><textarea id="paper-photo-notes" rows="4" placeholder="已有实物图、需要预留的展示图"></textarea></label>
+                    <label class="field" for="paper-source-notes"><span>其他说明</span><textarea id="paper-source-notes" rows="4" placeholder="任务书、学校要求或实际制作情况"></textarea></label>
+                  </div>
+                </details>
+
+                <div class="form-footer"><span class="autosave-note"><span class="save-dot" aria-hidden="true"></span>资料保存在当前项目</span><button class="button button-primary button-large" type="submit">下一步：分析器件</button></div>
+              </form>
+            </section>
+
+            <section class="step-panel" data-paper-panel="pins">
+              <div class="result-toolbar">
+                <div><span class="status-badge" id="pin-status">等待分析</span><h2>确认器件并选择引脚</h2><p>系统按器件通信方式给出可选引脚，逐项确认即可。</p></div>
+                <button class="button button-secondary" id="btn-reanalyze-pins" type="button">重新分析</button>
+              </div>
+              <div class="fact-strip" id="hardware-fact-strip"></div>
+              <div class="conflict-summary" id="pin-conflict-summary" hidden></div>
+              <div class="pin-table-wrap"><table class="pin-table"><thead><tr><th>器件</th><th>接口</th><th>信号</th><th>引脚</th><th>状态</th><th><span class="sr-only">操作</span></th></tr></thead><tbody id="pin-mapping-body"></tbody></table></div>
+              <button class="inline-add" id="btn-add-mapping" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>添加遗漏的器件或信号</button>
+              <details class="compact-details"><summary>供电与固定通信说明</summary><div id="hardware-notes"></div></details>
+              <div class="panel-footer"><button class="button button-secondary" type="button" data-paper-step="materials">返回资料</button><button class="button button-primary" id="btn-confirm-pins" type="button">确认并进入论文生成</button></div>
+            </section>
+
+            <section class="step-panel" data-paper-panel="generate">
+              <div class="generation-header">
+                <div><span class="status-badge" id="generation-status">尚未开始</span><h2 id="generation-title">准备生成论文</h2><p id="generation-message">点击开始后，系统会先根据字数、器件和功能规划目录，再逐章写作并保存。</p></div>
+                <div class="generation-time"><span>已用时间</span><strong id="generation-elapsed">00:00</strong></div>
+              </div>
+
+              <div class="progress-track" aria-label="论文生成进度"><span id="generation-progress" style="width:0%"></span></div>
+              <div class="phase-line" id="generation-phases"></div>
+              <div class="chapter-list" id="chapter-list"></div>
+
+              <div class="quality-panel" id="quality-panel" hidden>
+                <header><h3>检查结果</h3><span id="quality-summary"></span></header>
+                <div id="quality-issues"></div>
+              </div>
+
+              <div class="generation-actions">
+                <button class="button button-secondary" id="btn-download-draft" type="button" disabled>下载当前稿</button>
+                <button class="button button-quiet" id="btn-pause-generation" type="button" hidden>暂停</button>
+                <button class="button button-primary button-large" id="btn-start-generation" type="button">开始生成论文</button>
+              </div>
+              <p class="download-note">DOCX使用“标题1/2/3、正文、论文图题、论文表题”等样式，在WPS修改“正文”样式即可统一更新正文格式。</p>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="dialog" id="new-project-dialog" aria-labelledby="new-project-title">
+    <form method="dialog" id="new-project-form">
+      <header><div><p class="eyebrow">新项目</p><h2 id="new-project-title">准备从哪里开始？</h2></div><button class="icon-button" type="button" data-close-dialog aria-label="关闭"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+      <label class="field" for="new-project-name"><span>项目名称</span><input id="new-project-name" required placeholder="可以先用论文题目"></label>
+      <fieldset class="start-choice"><legend>开始位置</legend><label><input type="radio" name="new-project-start" value="paper" checked><span><strong>论文写作</strong><small>只有题目、部分资料或完整资料都可以</small></span></label><label><input type="radio" name="new-project-start" value="scheme"><span><strong>方案设计</strong><small>先确定器件和功能方案</small></span></label></fieldset>
+      <footer><button class="button button-secondary" value="cancel" type="button" data-close-dialog>取消</button><button class="button button-primary" value="default" type="submit">创建项目</button></footer>
+    </form>
+  </dialog>
+
+  <dialog class="dialog" id="mapping-dialog" aria-labelledby="mapping-title">
+    <form method="dialog" id="mapping-form">
+      <header><div><p class="eyebrow">补充连接</p><h2 id="mapping-title">添加器件信号</h2></div><button class="icon-button" type="button" data-close-dialog aria-label="关闭"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+      <div class="field-grid"><label class="field"><span>器件型号</span><input id="mapping-device" required></label><label class="field"><span>接口类型</span><select id="mapping-interface"><option>GPIO</option><option>I2C</option><option>UART</option><option>SPI</option><option>ADC</option><option>1-Wire</option><option>PWM</option></select></label><label class="field field-wide"><span>信号名称</span><input id="mapping-signal" required placeholder="例如：SCL、DATA、CTRL"></label></div>
+      <footer><button class="button button-secondary" type="button" data-close-dialog>取消</button><button class="button button-primary" type="submit">添加</button></footer>
+    </form>
+  </dialog>
+
+  <dialog class="dialog settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
+    <form method="dialog" id="settings-form">
+      <header><div><p class="eyebrow">生成服务</p><h2 id="settings-title">API设置</h2></div><button class="icon-button" type="button" data-close-dialog aria-label="关闭"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+      <div class="settings-mode"><label><input type="radio" name="api-mode" value="default" checked><span><strong>使用默认API</strong><small>无需设置</small></span></label><label><input type="radio" name="api-mode" value="custom"><span><strong>更换厂家API</strong><small>保存在当前浏览器</small></span></label></div>
+      <div class="custom-api-fields" id="custom-api-fields" hidden>
+        <label class="field"><span>厂家</span><select id="api-provider"><option value="deepseek">DeepSeek</option><option value="zhipu">智谱GLM</option><option value="moonshot">Kimi / Moonshot</option><option value="openai">OpenAI</option><option value="compatible">其他兼容接口</option></select></label>
+        <label class="field"><span>API地址</span><input id="api-url" type="url"></label>
+        <label class="field"><span>API Key</span><span class="secret-input"><input id="api-key" type="password" autocomplete="off"><button id="btn-toggle-api-key" type="button" aria-label="显示API Key">显示</button></span></label>
+        <div class="field-grid"><label class="field"><span>写作模型</span><input id="api-chat-model"></label><label class="field"><span>推理模型</span><input id="api-reasoning-model"></label></div>
+      </div>
+      <div class="api-test-row"><span id="api-test-status">尚未测试</span><button class="button button-secondary" id="btn-test-api" type="button">测试连接</button></div>
+      <footer><button class="button button-secondary" type="button" data-close-dialog>取消</button><button class="button button-primary" type="submit">保存设置</button></footer>
+    </form>
+  </dialog>
+
+  <div class="toast-region" id="toast-region" role="status" aria-live="polite"></div>
+
+  <div class="generation-screen-notice" id="generation-screen-notice" role="status" aria-atomic="true" hidden>
+    <span class="screen-notice-spinner" aria-hidden="true"></span>
+    <div><strong id="screen-notice-title">正在生成论文</strong><span id="screen-notice-message">已完成内容会自动保存</span></div>
+    <b id="screen-notice-progress">0%</b>
+  </div>
+
+  <script src="github-config.js?v=20260824-1"></script>
+  <script src="vendor/mammoth.browser.min.js"></script>
+  <script src="vendor/docx.umd.js"></script>
+  <script src="docx-export.js?v=20260824-14"></script>
+  <script type="module" src="app.js?v=20260824-17"></script>
+</body>
+</html>

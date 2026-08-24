@@ -1302,3 +1302,63 @@ body {
 [data-theme="dark"] .modal-footer {
   border-color: #334155;
 }
+
+/* === v15.11 thesis UI refinement === */
+.pane-input .card:nth-child(1) {
+  border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+}
+
+.pane-input .card:nth-child(1) .source-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.level-card {
+  min-height: 62px;
+  border-radius: 10px;
+}
+
+.level-card:hover {
+  border-color: var(--color-primary);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(99, 102, 241, 0.08);
+}
+
+.level-card.active {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 34%, transparent), 0 8px 18px rgba(99, 102, 241, 0.1);
+}
+
+.schematic-preview,
+.code-preview,
+.import-preview {
+  background: color-mix(in srgb, var(--color-surface) 88%, var(--color-primary-light));
+}
+
+.chapter-list,
+.extras-section,
+.quality-stats,
+.log-panel {
+  border-left: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+}
+
+.chapter-item {
+  border-radius: 10px;
+}
+
+.chapter-item.generating {
+  box-shadow: 0 8px 18px rgba(99, 102, 241, 0.1);
+}
+
+.quality-grid .q-item {
+  border-radius: 10px;
+}
+
+.result-toolbar {
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+}

@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="version" content="v15.10.5">
+<meta name="version" content="v16.1.0">
 <title>论文生成 · 雄鸡助手</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%90%93%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="../shared/design-tokens.css?v=1595">
-<link rel="stylesheet" href="../topic/style.css?v=1595">
-<link rel="stylesheet" href="style.css?v=1595">
+<link rel="stylesheet" href="../shared/design-tokens.css?v=1600">
+<link rel="stylesheet" href="../topic/style.css?v=1511">
+<link rel="stylesheet" href="style.css?v=1511">
 </head>
 <body>
 
@@ -513,28 +513,15 @@
 <script src="../shared/vendor/jszip.min.js?v=1595"></script>
 <!-- mammoth.js（本地） -->
 <script src="../shared/vendor/mammoth.browser.min.js?v=1595"></script>
-<!-- AI helper library -->
-<script src="api.js?v=1595"></script>
-
 <!-- ES Modules -->
 <script type="module">
 import UIContainer from '../shared/ui-kit.js';
 import NavJump from '../shared/nav.js';
 import ThemeToggle from '../shared/theme-toggle.js';
-import { initApp } from './app.js';
+import { initApp } from './app.js?v=1610';
 
 NavJump.init('thesis/');
 initApp();
-
-// 【v15.9.5】诊断 console（主题不能切换时 F12 查看）
-window.addEventListener('DOMContentLoaded', () => {
-  console.log('[thesis v15.9.5] 页面已加载');
-  console.log('  UIContainer.initTheme:', typeof UIContainer?.initTheme);
-  console.log('  UIContainer.toggleTheme:', typeof UIContainer?.toggleTheme);
-  console.log('  ThemeToggle.init:', typeof ThemeToggle?.init);
-  console.log('  data-theme:', document.documentElement.getAttribute('data-theme'));
-  console.log('  #theme-toggle button:', !!document.getElementById('theme-toggle'));
-});
 </script>
 
 

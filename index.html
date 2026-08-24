@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="version" content="v15.10.5">
+<meta name="version" content="v16.1.0">
 <title>雄鸡助手 · 主页</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F90%93%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="shared/design-tokens.css">
+<link rel="stylesheet" href="shared/design-tokens.css?v=1600">
 <style>
 body {
   min-height: 100vh;
@@ -22,11 +22,28 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
+  position: relative;
+  isolation: isolate;
 }
 
 .dashboard-header {
   text-align: center;
   animation: fadeInUp var(--duration-slow) var(--ease-out);
+}
+
+.dashboard-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 var(--space-3);
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 26%, var(--color-border));
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-surface) 86%, var(--color-primary-light));
+  color: var(--color-primary-hover);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: .04em;
 }
 
 .dashboard-emoji {
@@ -61,7 +78,7 @@ body {
   position: relative;
   padding: var(--space-6);
   background: var(--color-surface);
-  border: 2px solid var(--color-border);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   cursor: pointer;
   text-decoration: none;
@@ -90,9 +107,9 @@ body {
 }
 
 .feature-card:hover {
-  border-color: var(--color-primary);
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-lg);
+  border-color: color-mix(in srgb, var(--color-primary) 50%, var(--color-border));
+  transform: translateY(-5px);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .feature-card:hover::before {
@@ -146,6 +163,16 @@ body {
   font-size: var(--font-size-sm);
 }
 
+.dashboard::before {
+  content: '';
+  position: absolute;
+  inset: 104px 0 auto;
+  height: 360px;
+  background: radial-gradient(ellipse at 50% 0%, var(--color-page-glow), transparent 68%);
+  pointer-events: none;
+  z-index: -1;
+}
+
 .dashboard-nav {
   position: absolute;
   top: var(--space-4);
@@ -189,8 +216,9 @@ body {
 <main class="dashboard">
   <header class="dashboard-header">
     <span class="dashboard-emoji">🐓</span>
+    <p class="dashboard-kicker">AI 贯穿方案到论文的完整流程</p>
     <h1 class="dashboard-title">雄鸡助手</h1>
-    <p class="dashboard-subtitle">单片机项目方案 · 一站式生成</p>
+    <p class="dashboard-subtitle">单片机方案、开题报告与毕业论文一站式生成</p>
   </header>
 
   <div class="dashboard-grid">
@@ -224,7 +252,7 @@ body {
   </div>
 
   <footer class="dashboard-footer">
-    <p>v15.10.5 · 论文导出（去加粗前）</p>
+    <p>v16.1 · 上下游事实一致 · 生成规则保持稳定</p>
   </footer>
 </main>
 
