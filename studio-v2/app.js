@@ -1,6 +1,6 @@
 import * as Store from './storage.js?v=20260824-1';
 import * as Prompts from './prompts.js?v=20260825-1';
-import { compatiblePins, validateMappings } from './pin-data.js?v=20260824-1';
+import { allPins, compatiblePins, validateMappings } from './pin-data.js?v=20260824-2';
 import * as Rules from '../studio-next/rules.js?v=20260824-6';
 
 const PAGE_CONFIG = globalThis.MCU_PAGE_CONFIG || {};
@@ -1490,6 +1490,8 @@ async function analyzeHardware(event) {
       userConnections: materials.connectionsText || '用户无需填写，请根据器件通信方式和主控可用资源提出待确认的引脚建议',
       sourceCodeOrLogic: String(materials.codeText || '未提供').slice(0, 30000),
       otherNotes: materials.sourceNotes || '未提供',
+      schematicFilename: materials.schematicFilename || '',
+      schematicText: String(materials.schematicText || '').slice(0, 100000),
     }), { reasoning: false, maxTokens: 7000, jsonMode: true, signal: requestController.signal, requestLabel: '器件与引脚分析', timeoutMs: 100000 });
     const result = await parseAiJson(raw, { signal: requestController.signal, requestLabel: '器件与引脚分析', maxTokens: 7000 });
     const aiDevices = (Array.isArray(result.devices) ? result.devices : []).map((item, index) => ({
@@ -1525,7 +1527,13 @@ async function analyzeHardware(event) {
       const suggested = String(item.pin || '').trim().toUpperCase();
       const alternatives = unique(Array.isArray(item.alternatives) ? item.alternatives.map(pin => String(pin).toUpperCase()) : []);
       const allowed = compatiblePins(controller, signal, interfaceType);
-      const proposed = allowed.includes(suggested) ? suggested : alternatives.find(pin => allowed.includes(pin)) || allowed[0] || suggested || '待确认';
+      const controllerPins = allPins(controller).map(pin => String(pin).toUpperCase());
+      // AI或原理图明确给出的真实GPIO优先保留；能力表只用于排序建议，不能把真实连接替换掉。
+      const proposed = allowed.includes(suggested)
+        ? suggested
+        : controllerPins.includes(suggested)
+          ? suggested
+          : alternatives.find(pin => allowed.includes(pin)) || alternatives.find(pin => controllerPins.includes(pin)) || allowed[0] || suggested || '待确认';
       const mapping = {
         id: item.id || `mapping-${index + 1}-${Math.random().toString(36).slice(2, 7)}`,
         device, interfaceType, signal, pin: proposed, alternatives,
@@ -2390,8 +2398,8 @@ function localQualityIssues() {
     if (/\S[ \t]*【非正文/.test(text) || /【非正文(?:·[^】]*)?】[ \t]*\S/.test(text)) issues.push({ id: `artifact-line-${chapter.id}`, severity: 'warning', chapterId: chapter.id, message: `第${chapter.id}章存在未单独成行的图表提示` });
     tableRowGroups(text).forEach((table, index) => {
       const columns = table[0]?.split('|').filter(Boolean).length || 0;
-      if (columns > 5) issues.push({ id: `table-column-${chapter.id}-${index}`, severity: 'warning', chapterId: chapter.id, message: `第${chapter.id}章有表格超过5列，建议按指标拆分` });
-      if (table.length > 12) issues.push({ id: `table-row-${chapter.id}-${index}`, severity: 'warning', chapterId: chapter.id, message: `第${chapter.id}章有表格超过10行数据，建议按功能拆分` });
+      if (columns > 5) issues.push({ id: `table-column-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message: `第${chapter.id}章有表格超过5列，必须按指标拆分` });
+      if (table.length > 12) issues.push({ id: `table-row-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message: `第${chapter.id}章有表格超过10行数据，必须按功能或模块拆分` });
     });
   });
 
@@ -2534,7 +2542,7 @@ async function repairChapterBlockingIssues(chapter, problems, signal) {
       role: 'system',
       content: `你是单片机本科论文重点问题修复编辑。只修复problems列出的重点问题，保持本章全部有效正文、目录标题顺序、确认器件、引脚和功能不变，输出修复后的完整本章正文，不输出章标题、解释或评价。
 
-必须执行：删除重复和系统未完成式表述；修复与确认事实矛盾的硬件描述；任意图/表之间补入不少于80字的实质分析段落；器件图、电路图、实物图和功能图只保留独占一行的“【非正文·插图位置：图名】”和下一行“【非正文结束】”；框架图、结构图和流程图直接使用简洁Mermaid，流程图同时具有“开始”“结束”节点；引脚关系表不得有“信号方向”列；测试必须有量化表格。除51单片机外主控按最小系统开发板描述，5V输入经板载稳压得到3.3V，所有模块共地，凡上拉电阻统一10 kΩ，TFT统一1.8寸。禁止新增标题、器件、引脚、功能或文献。`,
+必须执行：删除重复和系统未完成式表述；修复与确认事实矛盾的硬件描述；任意图/表之间补入不少于80字的实质分析段落；器件图、电路图、实物图和功能图只保留独占一行的“【非正文·插图位置：图名】”和下一行“【非正文结束】”；框架图、结构图和流程图直接使用简洁Mermaid，流程图同时具有“开始”“结束”节点；引脚关系表不得有“信号方向”列；测试必须有量化表格；超过5列或10行数据的表格必须按功能或模块拆分成多张表，并保持每张表前后有正文分析。除51单片机外主控按最小系统开发板描述，5V输入经板载稳压得到3.3V，所有模块共地，凡上拉电阻统一10 kΩ，TFT统一1.8寸。禁止新增标题、器件、引脚、功能或文献。`,
     },
     { role: 'user', content: JSON.stringify({ title: project.title, chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections }, responsibility: Prompts.chapterResponsibilities?.(chapter.kind) || '', problems, confirmedFacts: project.paper.factSheet, artifacts: (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id), references: chapter.kind === 'introduction' ? project.paper.referenceRecords : [], existingChapter: before }, null, 2) },
   ], { reasoning: false, maxTokens: 16000, signal, requestLabel: `自动修复第${chapter.id}章重点问题`, timeoutMs: 150000 });

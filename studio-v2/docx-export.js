@@ -494,14 +494,6 @@ function documentStyles() {
     },
     paragraphStyles: [
       {
-        id: 'Normal',
-        name: '正文',
-        next: 'Normal',
-        quickFormat: true,
-        run: { font: FONT_BODY, size: 24, color: '000000', language: { value: 'zh-CN', eastAsia: 'zh-CN' } },
-        paragraph: { alignment: AlignmentType.JUSTIFIED, indent: { firstLine: BODY_FIRST_LINE }, spacing: { before: 0, after: 0, line: BODY_LINE, lineRule: LineRuleType.AUTO }, widowControl: true },
-      },
-      {
         id: 'ThesisBodyNoIndent',
         name: '正文无缩进',
         basedOn: 'Normal',
