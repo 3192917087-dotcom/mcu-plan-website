@@ -20,7 +20,7 @@ const API_PRESETS = Object.freeze({
   zhipu: { apiUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', chatModel: 'glm-5.2', reasoningModel: 'glm-5.2' },
   moonshot: { apiUrl: 'https://api.moonshot.cn/v1/chat/completions', chatModel: 'kimi-k3', reasoningModel: 'kimi-k3' },
   openai: { apiUrl: 'https://api.openai.com/v1/chat/completions', chatModel: 'gpt-5.6-terra', reasoningModel: 'gpt-5.6-sol' },
-  newapi9898: { apiUrl: 'https://www.9898.ai/v1', chatModel: 'gpt-5.2', reasoningModel: 'gpt-5.2' },
+  newapi9898: { apiUrl: 'https://www.9898.ai/v1', chatModel: 'gpt-5.4', reasoningModel: 'gpt-5.4' },
   compatible: { apiUrl: '', chatModel: '', reasoningModel: '' },
 });
 let activeApiConfig = { ...DEFAULT_API };
@@ -591,7 +591,7 @@ function classifyApiFailure(message, status = 0) {
   if (status === 402 || /no credits|balance|余额|额度/i.test(text)) return 'API账户余额不足';
   if (status === 413 || /context|too long|文本过长|token.*limit/i.test(text)) return '本次输入超过模型长度限制';
   if (status === 429) return '请求过于频繁，请稍后继续';
-  if (status >= 500) return 'AI服务暂时异常';
+  if (status >= 500) return `AI服务暂时异常（${status}）：${text.slice(0, 180) || '请检查中转站模型名称和上游状态'}`;
   return text || `API请求失败（${status}）`;
 }
 
