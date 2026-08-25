@@ -20,6 +20,7 @@ const assertions = [
   ['插图占位与正文区分', prompts.includes('【非正文·插图位置：图名】') && docx.includes("name: '论文插图提示'")],
   ['引脚表不含信号方向列', prompts.includes('外设、外设信号、主控引脚、说明') && prompts.includes('禁止“信号方向”列')],
   ['默认硬件规则完整', prompts.includes('最小系统开发板') && prompts.includes('10 kΩ') && prompts.includes('1.8寸')],
+  ['9898中转站专用预设', app.includes('newapi9898') && html.includes('9898.ai 中转站（GPT）') && app.includes('https://www.9898.ai/v1')],
 ];
 const failedAssertions = assertions.filter(([, passed]) => !passed).map(([name]) => name);
 

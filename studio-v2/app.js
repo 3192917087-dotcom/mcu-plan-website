@@ -20,6 +20,7 @@ const API_PRESETS = Object.freeze({
   zhipu: { apiUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', chatModel: 'glm-5.2', reasoningModel: 'glm-5.2' },
   moonshot: { apiUrl: 'https://api.moonshot.cn/v1/chat/completions', chatModel: 'kimi-k3', reasoningModel: 'kimi-k3' },
   openai: { apiUrl: 'https://api.openai.com/v1/chat/completions', chatModel: 'gpt-5.6-terra', reasoningModel: 'gpt-5.6-sol' },
+  newapi9898: { apiUrl: 'https://www.9898.ai/v1', chatModel: 'gpt-5.2', reasoningModel: 'gpt-5.2' },
   compatible: { apiUrl: '', chatModel: '', reasoningModel: '' },
 });
 let activeApiConfig = { ...DEFAULT_API };
@@ -754,7 +755,7 @@ function updateApiConnectionStatus(state = 'checking', message = '') {
   const textNode = $('api-connection-text');
   if (!button || !textNode) return;
   const config = loadApiSettings();
-  const providerLabels = { deepseek: 'DeepSeek', zhipu: '智谱GLM', moonshot: 'Kimi', openai: 'OpenAI', compatible: '自定义API' };
+  const providerLabels = { deepseek: 'DeepSeek', zhipu: '智谱GLM', moonshot: 'Kimi', openai: 'OpenAI', newapi9898: '9898.ai', compatible: '自定义API' };
   const label = providerLabels[config.provider] || 'API';
   const missing = !config.apiKey;
   const stateLabel = missing ? '未设置' : state === 'success' ? '已连接' : state === 'error' ? '连接失败' : '检测中';
