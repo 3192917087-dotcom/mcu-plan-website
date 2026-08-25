@@ -223,9 +223,15 @@ function bodyParagraph(text, options = {}) {
 }
 
 function annotationParagraph(text) {
+  const clean = cleanText(text, 1000)
+    .replace(/^【非正文·插图位置[：:]\s*/, '插图位置：')
+    .replace(/^【非正文·(?:Mermaid图|Mermaid流程图)[：:]\s*/, 'Mermaid绘图代码：')
+    .replace(/^【非正文·?/, '')
+    .replace(/】$/, '')
+    .trim();
   return new Paragraph({
-    style: 'ThesisFigureNote',
-    children: [bodyRun(text)],
+    style: 'ThesisFigurePlaceholder',
+    children: [bodyRun(`${clean}（非正文）`)],
   });
 }
 
@@ -380,6 +386,10 @@ function contentBlocks(content) {
     if (ordered || bullet) {
       flushParagraph();
       blocks.push(listParagraph((ordered || bullet)[1].trim(), Boolean(ordered)));
+      continue;
+    }
+    if (/^【非正文结束】/.test(line)) {
+      flushParagraph();
       continue;
     }
     if (/^【非正文/.test(line)) {
@@ -566,13 +576,13 @@ function documentStyles() {
         quickFormat: true,
       },
       {
-        id: 'ThesisFigureNote',
-        name: '论文图表待补说明',
+        id: 'ThesisFigurePlaceholder',
+        name: '论文插图提示',
         basedOn: 'ThesisBodyNoIndent',
         next: 'Normal',
         quickFormat: true,
-        run: { font: FONT_BODY, size: 21, color: '666666' },
-        paragraph: { alignment: AlignmentType.LEFT, indent: { firstLine: 0 }, spacing: { before: 60, after: 60, line: 300, lineRule: LineRuleType.AUTO }, shading: { fill: 'F2F2F2' } },
+        run: { font: FONT_BODY, size: 21, bold: true, color: '2F6757' },
+        paragraph: { alignment: AlignmentType.CENTER, indent: { firstLine: 0 }, spacing: { before: 120, after: 120, line: 300, lineRule: LineRuleType.AUTO }, shading: { fill: 'EAF3EF' }, border: { top: { style: BorderStyle.DASHED, size: 6, color: '8DB4A6' }, bottom: { style: BorderStyle.DASHED, size: 6, color: '8DB4A6' }, left: { style: BorderStyle.DASHED, size: 6, color: '8DB4A6' }, right: { style: BorderStyle.DASHED, size: 6, color: '8DB4A6' } } },
       },
       {
         id: 'ThesisMermaidCode',

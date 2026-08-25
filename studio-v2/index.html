@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f6f8f7">
   <title>单片机方案与论文工作台 V2</title>
-  <link rel="stylesheet" href="styles.css?v=20260824-17">
+  <link rel="stylesheet" href="styles.css?v=20260825-2">
 </head>
 <body>
   <a class="skip-link" href="#workspace-main">跳到主要内容</a>
@@ -31,16 +31,16 @@
       </nav>
 
       <div class="topbar-actions">
-        <button class="api-connection-pill is-checking" id="api-connection-status" type="button" aria-label="默认API连接状态：正在检测" title="点击打开API设置">
-          <span class="api-state-dot" aria-hidden="true"></span><span id="api-connection-text">默认API 检测中</span>
+        <div class="operation-status" id="operation-status" role="status" aria-live="polite" hidden>
+          <span class="operation-spinner" aria-hidden="true"></span><span id="operation-status-text">正在处理</span>
+        </div>
+        <button class="api-connection-pill is-error" id="api-connection-status" type="button" aria-label="API未设置，点击设置" title="点击填写或更换API">
+          <span class="api-state-dot" aria-hidden="true"></span><span id="api-connection-text">API 未设置</span>
         </button>
         <label class="project-switcher" for="active-project-select">
           <span class="sr-only">当前项目</span>
           <select id="active-project-select" aria-label="切换项目"></select>
         </label>
-        <button class="icon-button" id="btn-open-settings" type="button" aria-label="API设置">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/><path d="M4.9 19.1 6 17.4a8 8 0 0 1-1-2.4l-2-.3v-2.4l2-.3a8 8 0 0 1 1-2.4L4.9 7.9l1.7-1.7L8.3 7a8 8 0 0 1 2.4-1l.3-2h2.4l.3 2a8 8 0 0 1 2.4 1l1.7-.8 1.7 1.7-1 1.7a8 8 0 0 1 1 2.4l2 .3v2.4l-2 .3a8 8 0 0 1-1 2.4l1 1.7-1.7 1.7-1.7-.8a8 8 0 0 1-2.4 1l-.3 2H11l-.3-2a8 8 0 0 1-2.4-1l-1.7.8z"/></svg>
-        </button>
       </div>
     </header>
 
@@ -108,7 +108,7 @@
                   <div class="section-title compact-section-title"><span>可选约束</span><h2 id="scheme-preferences-title">指定项目常用配置</h2><p>不选择时由系统按题目确定；已选择内容和附加要求优先。</p></div>
                   <div class="preference-grid">
                     <label class="field" for="scheme-controller"><span>主控</span><select id="scheme-controller"><option value="auto">自动选择</option><option>STM32F103C8T6</option><option>STM32F407ZGT6</option><option>STC89C52RC</option><option>AT89C52</option><option>ESP32</option></select></label>
-                    <label class="field" for="scheme-display"><span>屏幕</span><select id="scheme-display"><option value="auto">自动选择</option><option value="none">不使用屏幕</option><option>0.96寸OLED</option><option>LCD1602</option><option>2.8寸TFT</option><option>数码管</option></select></label>
+                    <label class="field" for="scheme-display"><span>屏幕</span><select id="scheme-display"><option value="auto">自动选择</option><option value="none">不使用屏幕</option><option>0.96寸OLED</option><option>LCD1602</option><option>1.8寸TFT</option><option>数码管</option></select></label>
                     <details class="multi-select" data-multi-select="programmingSoftware"><summary><span>编程软件</span><strong data-multi-summary>自动选择</strong></summary><div class="multi-select-panel"><label><input type="checkbox" value="Keil 5">Keil 5</label><label><input type="checkbox" value="STM32CubeMX">STM32CubeMX</label><label><input type="checkbox" value="IAR">IAR</label><label><input type="checkbox" value="Arduino IDE">Arduino IDE</label></div></details>
                     <details class="multi-select" data-multi-select="appSoftware"><summary><span>APP设计软件</span><strong data-multi-summary>不指定</strong></summary><div class="multi-select-panel"><label><input type="checkbox" value="MIT App Inventor">MIT App Inventor</label><label><input type="checkbox" value="Android Studio">Android Studio</label><label><input type="checkbox" value="微信小程序">微信小程序</label></div></details>
                     <details class="multi-select" data-multi-select="cloudPlatforms"><summary><span>云平台</span><strong data-multi-summary>不使用</strong></summary><div class="multi-select-panel"><label><input type="checkbox" value="OneNET">OneNET</label><label><input type="checkbox" value="阿里云IoT">阿里云IoT</label><label><input type="checkbox" value="巴法云">巴法云</label><label><input type="checkbox" value="私有物联网服务器">私有物联网服务器</label></div></details>
@@ -214,7 +214,7 @@
                   </div>
                 </details>
 
-                <div class="form-footer"><span class="autosave-note"><span class="save-dot" aria-hidden="true"></span>资料保存在当前项目</span><button class="button button-primary button-large" type="submit">下一步：分析器件</button></div>
+                <div class="form-footer"><span class="inline-task-status" id="hardware-analysis-status" role="status" aria-live="polite">等待分析</span><button class="button button-primary button-large" type="submit">下一步：分析器件</button></div>
               </form>
             </section>
 
@@ -262,7 +262,7 @@
   <dialog class="dialog" id="new-project-dialog" aria-labelledby="new-project-title">
     <form method="dialog" id="new-project-form">
       <header><div><p class="eyebrow">新项目</p><h2 id="new-project-title">准备从哪里开始？</h2></div><button class="icon-button" type="button" data-close-dialog aria-label="关闭"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-      <label class="field" for="new-project-name"><span>项目名称</span><input id="new-project-name" required placeholder="可以先用论文题目"></label>
+      <label class="field" for="new-project-name"><span>项目名称 <small>可选</small></span><input id="new-project-name" placeholder="留空后根据项目题目自动命名"></label>
       <fieldset class="start-choice"><legend>开始位置</legend><label><input type="radio" name="new-project-start" value="paper" checked><span><strong>论文写作</strong><small>只有题目、部分资料或完整资料都可以</small></span></label><label><input type="radio" name="new-project-start" value="scheme"><span><strong>方案设计</strong><small>先确定器件和功能方案</small></span></label></fieldset>
       <footer><button class="button button-secondary" value="cancel" type="button" data-close-dialog>取消</button><button class="button button-primary" value="default" type="submit">创建项目</button></footer>
     </form>
@@ -279,12 +279,12 @@
   <dialog class="dialog settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
     <form method="dialog" id="settings-form">
       <header><div><p class="eyebrow">生成服务</p><h2 id="settings-title">API设置</h2></div><button class="icon-button" type="button" data-close-dialog aria-label="关闭"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-      <div class="settings-mode"><label><input type="radio" name="api-mode" value="default" checked><span><strong>使用默认API</strong><small>无需设置</small></span></label><label><input type="radio" name="api-mode" value="custom"><span><strong>更换厂家API</strong><small>保存在当前浏览器</small></span></label></div>
-      <div class="custom-api-fields" id="custom-api-fields" hidden>
-        <label class="field"><span>厂家</span><select id="api-provider"><option value="deepseek">DeepSeek</option><option value="zhipu">智谱GLM</option><option value="moonshot">Kimi / Moonshot</option><option value="openai">OpenAI</option><option value="compatible">其他兼容接口</option></select></label>
-        <label class="field"><span>API地址</span><input id="api-url" type="url"></label>
-        <label class="field"><span>API Key</span><span class="secret-input"><input id="api-key" type="password" autocomplete="off"><button id="btn-toggle-api-key" type="button" aria-label="显示API Key">显示</button></span></label>
-        <div class="field-grid"><label class="field"><span>写作模型</span><input id="api-chat-model"></label><label class="field"><span>推理模型</span><input id="api-reasoning-model"></label></div>
+      <p class="settings-intro">首次使用请填写API。设置只保存在当前浏览器，更换厂家时会自动带入常用地址和模型。</p>
+      <div class="custom-api-fields" id="custom-api-fields">
+        <label class="field" for="api-provider"><span>厂家</span><select id="api-provider" required><option value="deepseek">DeepSeek</option><option value="zhipu">智谱GLM</option><option value="moonshot">Kimi / Moonshot</option><option value="openai">OpenAI</option><option value="compatible">其他兼容接口</option></select></label>
+        <label class="field" for="api-url"><span>API地址</span><input id="api-url" type="url" required placeholder="https://.../v1 或完整 chat/completions 地址"><small>中转站请选择“其他兼容接口”，填写服务商提供的地址。</small></label>
+        <label class="field" for="api-key"><span>API Key</span><span class="secret-input"><input id="api-key" type="password" autocomplete="off" required placeholder="sk-..."><button id="btn-toggle-api-key" type="button" aria-label="显示API Key">显示</button></span></label>
+        <div class="field-grid"><label class="field" for="api-chat-model"><span>写作模型</span><input id="api-chat-model" required><small>必须使用中转站模型列表中的准确名称。</small></label><label class="field" for="api-reasoning-model"><span>推理模型</span><input id="api-reasoning-model" required><small>不确定时可与写作模型相同。</small></label></div>
       </div>
       <div class="api-test-row"><span id="api-test-status">尚未测试</span><button class="button button-secondary" id="btn-test-api" type="button">测试连接</button></div>
       <footer><button class="button button-secondary" type="button" data-close-dialog>取消</button><button class="button button-primary" type="submit">保存设置</button></footer>
@@ -302,7 +302,7 @@
   <script src="github-config.js?v=20260824-1"></script>
   <script src="vendor/mammoth.browser.min.js"></script>
   <script src="vendor/docx.umd.js"></script>
-  <script src="docx-export.js?v=20260824-14"></script>
-  <script type="module" src="app.js?v=20260824-17"></script>
+  <script src="docx-export.js?v=20260825-2"></script>
+  <script type="module" src="app.js?v=20260825-2"></script>
 </body>
 </html>

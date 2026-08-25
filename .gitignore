@@ -46,6 +46,7 @@ _backup_*
 
 # 本地测试页
 test.html
+studio-v2/tests/output/
 
 # === v15.10.6-L · 2026-07-18 · sensitive (NEVER push) ===
 docs/

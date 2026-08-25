@@ -1,5 +1,5 @@
 import * as Store from './storage.js?v=20260824-1';
-import * as Prompts from './prompts.js?v=20260824-17';
+import * as Prompts from './prompts.js?v=20260825-1';
 import { compatiblePins, validateMappings } from './pin-data.js?v=20260824-1';
 import * as Rules from '../studio-next/rules.js?v=20260824-6';
 
@@ -8,10 +8,10 @@ const APP_TITLE = '单片机方案与论文工作台 V2';
 const API_SETTINGS_KEY = 'mcu-paper-studio-v2.api-settings';
 const MIN_BODY_CHARS = 18000;
 const DEFAULT_API = Object.freeze({
-  mode: 'default',
+  mode: 'user',
   provider: 'deepseek',
   apiUrl: String(PAGE_CONFIG.apiUrl || 'https://api.deepseek.com/chat/completions'),
-  apiKey: String(PAGE_CONFIG.apiKey || '').trim(),
+  apiKey: '',
   chatModel: String(PAGE_CONFIG.chatModel || 'deepseek-v4-pro'),
   reasoningModel: String(PAGE_CONFIG.reasoningModel || PAGE_CONFIG.chatModel || 'deepseek-v4-pro'),
 });
@@ -19,7 +19,7 @@ const API_PRESETS = Object.freeze({
   deepseek: { apiUrl: 'https://api.deepseek.com/chat/completions', chatModel: 'deepseek-v4-pro', reasoningModel: 'deepseek-v4-pro' },
   zhipu: { apiUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', chatModel: 'glm-5.2', reasoningModel: 'glm-5.2' },
   moonshot: { apiUrl: 'https://api.moonshot.cn/v1/chat/completions', chatModel: 'kimi-k3', reasoningModel: 'kimi-k3' },
-  openai: { apiUrl: 'https://api.openai.com/v1/chat/completions', chatModel: 'gpt-5.2', reasoningModel: 'gpt-5.2' },
+  openai: { apiUrl: 'https://api.openai.com/v1/chat/completions', chatModel: 'gpt-5.6-terra', reasoningModel: 'gpt-5.6-sol' },
   compatible: { apiUrl: '', chatModel: '', reasoningModel: '' },
 });
 let activeApiConfig = { ...DEFAULT_API };
@@ -45,6 +45,7 @@ let requestTask = '';
 let saveTimer = null;
 let saveQueue = Promise.resolve();
 let generationClock = null;
+let operationStatusTimer = null;
 
 function nowIso() { return new Date().toISOString(); }
 function makeId(prefix = 'item') {
@@ -57,7 +58,8 @@ function unique(values) { return [...new Set((values || []).map(value => String(
 function sanitizeTechnicalText(value) {
   return String(value || '')
     .replace(/ESP\s*[-_]?\s*8266/gi, 'ESP-01S')
-    .replace(/(^|[^\d.])96\s*寸\s*OLED/gi, '$10.96寸OLED');
+    .replace(/(^|[^\d.])96\s*寸\s*OLED/gi, '$10.96寸OLED')
+    .replace(/2\.8\s*寸\s*TFT/gi, '1.8寸TFT');
 }
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
@@ -84,6 +86,24 @@ function toast(message, type = 'info') {
   node.textContent = message;
   $('toast-region')?.append(node);
   setTimeout(() => node.remove(), 4200);
+}
+
+function setOperationStatus(state = 'idle', label = '') {
+  const status = $('operation-status');
+  const textNode = $('operation-status-text');
+  if (!status || !textNode) return;
+  clearTimeout(operationStatusTimer);
+  if (state === 'idle' || !label) {
+    status.hidden = true;
+    status.className = 'operation-status';
+    textNode.textContent = '';
+    return;
+  }
+  status.hidden = false;
+  status.className = `operation-status is-${state}`;
+  status.setAttribute('aria-busy', state === 'busy' ? 'true' : 'false');
+  textNode.textContent = label;
+  if (state !== 'busy') operationStatusTimer = setTimeout(() => setOperationStatus('idle'), state === 'error' ? 9000 : 4500);
 }
 function parseJsonResponse(value) {
   const text = String(value || '').replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
@@ -122,7 +142,7 @@ function createBlankProject(name = '未命名项目', start = 'paper') {
   const title = name === '未命名项目' ? '' : name;
   const outline = [];
   return {
-    schemaVersion: 24,
+    schemaVersion: 25,
     id: makeId('project'),
     name,
     title,
@@ -241,7 +261,7 @@ function normalizeProject(source, options = {}) {
     if (duplicate || imported) normalized.id = makeId('project');
     if (duplicate) normalized.name = `${normalized.name || normalized.title || '项目'} 副本`;
     normalized.paper.materials.targetBodyChars = Math.max(MIN_BODY_CHARS, Math.min(40000, Number(normalized.paper.materials.targetBodyChars) || MIN_BODY_CHARS));
-    normalized.schemaVersion = 24;
+    normalized.schemaVersion = 25;
     normalized.updatedAt = nowIso();
     normalized.createdAt = duplicate || imported ? nowIso() : normalized.createdAt || nowIso();
     if (normalized.paper.generation.status === 'running') {
@@ -308,17 +328,14 @@ function loadApiSettings() {
 function loadStoredCustomApiSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem(API_SETTINGS_KEY) || 'null');
-    return saved?.mode === 'custom' ? { ...DEFAULT_API, ...saved, mode: 'custom' } : null;
+    return saved?.apiKey ? { ...DEFAULT_API, ...saved, mode: 'user' } : null;
   } catch (error) { return null; }
 }
 
 function saveApiSettings(settings) {
-  if (settings.mode === 'custom') {
-    localStorage.setItem(API_SETTINGS_KEY, JSON.stringify(settings));
-    activeApiConfig = { ...DEFAULT_API, ...settings, mode: 'custom' };
-    return;
-  }
-  activeApiConfig = { ...DEFAULT_API };
+  const normalized = { ...DEFAULT_API, ...settings, mode: 'user' };
+  localStorage.setItem(API_SETTINGS_KEY, JSON.stringify(normalized));
+  activeApiConfig = normalized;
 }
 
 async function persistProject({ immediate = false } = {}) {
@@ -373,11 +390,16 @@ function invalidateOutlinePlan(reason = '参考目录已修改') {
 
 function updateProjectNameFromTitle() {
   if (!project?.title) return;
-  if (!project.name || project.name === '未命名项目' || project.name === '旧版迁移项目') project.name = project.title;
+  if (!project.name || project.name === '未命名项目' || project.name === '旧版迁移项目') {
+    project.name = project.title;
+    qsa('[data-current-project-name]').forEach(node => { node.textContent = project.name; });
+    const activeOption = $('active-project-select')?.selectedOptions?.[0];
+    if (activeOption) activeOption.textContent = project.name;
+  }
 }
 
 async function init() {
-  activeApiConfig = { ...DEFAULT_API };
+  activeApiConfig = loadStoredCustomApiSettings() || { ...DEFAULT_API };
   bindEvents();
   try {
     projects = await Store.listProjects();
@@ -501,12 +523,8 @@ function openNewProjectDialog(start = 'paper') {
 
 async function createProjectFromDialog(event) {
   event.preventDefault();
-  const name = $('new-project-name').value.trim();
+  const name = $('new-project-name').value.trim() || '未命名项目';
   const start = qs('input[name="new-project-start"]:checked')?.value || 'paper';
-  if (!name) {
-    $('new-project-name').focus();
-    return;
-  }
   project = createBlankProject(name, start);
   projects.unshift(clone(project));
   Store.setActiveProjectId(project.id);
@@ -584,34 +602,65 @@ async function wait(milliseconds, signal) {
   });
 }
 
-async function callAi(messages, { reasoning = false, maxTokens = 8192, jsonMode = false, signal, requestLabel = '生成内容', configOverride = null } = {}) {
+function extractAiContent(data, { jsonMode = false } = {}) {
+  const message = data?.choices?.[0]?.message || data?.message || {};
+  const flatten = value => {
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) return value.map(item => typeof item === 'string' ? item : item?.text || item?.content || '').filter(Boolean).join('\n');
+    return value?.text || value?.content || '';
+  };
+  const direct = [flatten(message.content), flatten(data?.output_text), flatten(data?.result), flatten(data?.content)].find(value => String(value || '').trim());
+  if (direct) return String(direct);
+  if (Array.isArray(data?.output)) {
+    const output = data.output.flatMap(item => item?.content || []).map(item => item?.text || item?.content || '').filter(Boolean).join('\n');
+    if (output.trim()) return output;
+  }
+  const reasoningText = flatten(message.reasoning_content || message.reasoning || data?.reasoning_content);
+  if (jsonMode && /[\[{]/.test(reasoningText)) {
+    try { parseJsonResponse(reasoningText); return reasoningText; } catch (error) {}
+  }
+  return '';
+}
+
+async function callAi(messages, { reasoning = false, maxTokens = 8192, jsonMode = false, signal, requestLabel = '生成内容', configOverride = null, timeoutMs = 0 } = {}) {
   const config = configOverride || loadApiSettings();
-  if (!config.apiUrl || !config.apiKey || !config.chatModel) throw new Error('API设置不完整，请在右上角设置中检查');
+  if (!config.apiUrl || !config.apiKey || !config.chatModel) throw new Error('尚未填写API，请点击右上角“API未设置”完成配置');
   const isDeepSeek = config.provider === 'deepseek' || /api\.deepseek\.com/i.test(config.apiUrl);
-  const payload = {
+  const basePayload = {
     model: reasoning ? (config.reasoningModel || config.chatModel) : config.chatModel,
     messages,
     stream: false,
     max_tokens: Math.min(Math.max(256, Number(maxTokens) || 8192), 32768),
   };
   if (isDeepSeek) {
-    payload.thinking = { type: reasoning ? 'enabled' : 'disabled' };
-    if (!reasoning) payload.temperature = 0.35;
-    if (jsonMode) payload.response_format = { type: 'json_object' };
+    basePayload.thinking = { type: reasoning ? 'enabled' : 'disabled' };
+    if (!reasoning) basePayload.temperature = 0.35;
+    if (jsonMode) basePayload.response_format = { type: 'json_object' };
   } else if (config.provider === 'moonshot' || config.provider === 'zhipu') {
-    payload.temperature = 1;
-    if (reasoning && config.provider === 'zhipu') payload.thinking = { type: 'enabled' };
+    basePayload.temperature = 1;
+    if (reasoning && config.provider === 'zhipu') basePayload.thinking = { type: 'enabled' };
+    if (jsonMode && config.provider === 'zhipu') basePayload.response_format = { type: 'json_object' };
   } else if (config.provider === 'openai') {
-    delete payload.max_tokens;
-    payload.max_completion_tokens = Math.min(Math.max(256, Number(maxTokens) || 8192), 32768);
-  } else if (!reasoning) payload.temperature = 0.35;
+    delete basePayload.max_tokens;
+    basePayload.max_completion_tokens = Math.min(Math.max(256, Number(maxTokens) || 8192), 32768);
+    if (jsonMode) basePayload.response_format = { type: 'json_object' };
+  } else if (!reasoning) basePayload.temperature = 0.35;
 
-  const timeouts = reasoning ? [4 * 60 * 1000, 2 * 60 * 1000] : [3 * 60 * 1000, 90 * 1000];
+  const firstTimeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : reasoning ? 4 * 60 * 1000 : 3 * 60 * 1000;
+  const timeouts = [firstTimeout, Math.max(45 * 1000, Math.min(2 * 60 * 1000, Math.round(firstTimeout * 0.72)))];
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    const payload = clone(basePayload);
+    if (attempt > 0) {
+      payload.model = config.chatModel;
+      if (payload.thinking) payload.thinking = { type: 'disabled' };
+      if (isDeepSeek) payload.temperature = 0.25;
+      payload.messages = [...messages, { role: 'user', content: jsonMode ? '上次没有得到最终结果。请跳过推理过程，直接返回完整、合法的JSON。' : '上次没有得到最终正文。请跳过推理过程，直接返回完整最终内容。' }];
+    }
     const controller = new AbortController();
     const forwardAbort = () => controller.abort(signal?.reason || new DOMException('已暂停', 'AbortError'));
     signal?.addEventListener('abort', forwardAbort, { once: true });
     const timeout = setTimeout(() => controller.abort(new DOMException(`${requestLabel}等待超时`, 'TimeoutError')), timeouts[attempt]);
+    setOperationStatus('busy', `${requestLabel}${attempt ? '正在自动重试' : '进行中'}`);
     if (project?.paper?.generation && requestTask === 'paper-generation') {
       project.paper.generation.activeRequestLabel = `${requestLabel}${attempt ? '（重试）' : ''}`;
       project.paper.generation.updatedAt = nowIso();
@@ -629,6 +678,11 @@ async function callAi(messages, { reasoning = false, maxTokens = 8192, jsonMode 
       try { data = raw ? JSON.parse(raw) : {}; } catch (error) {}
       if (!response.ok) {
         const message = data?.error?.message || data?.message || raw.slice(0, 300);
+        if (attempt === 0 && response.status === 400 && /temperature/i.test(message)) {
+          delete basePayload.temperature;
+          await wait(300, signal);
+          continue;
+        }
         const retryable = [408, 425, 429, 500, 502, 503, 504].includes(response.status);
         if (retryable && attempt === 0) {
           await wait(1800, signal);
@@ -636,24 +690,63 @@ async function callAi(messages, { reasoning = false, maxTokens = 8192, jsonMode 
         }
         throw new Error(classifyApiFailure(message, response.status));
       }
-      const content = data?.choices?.[0]?.message?.content ?? data?.output_text ?? '';
-      if (!String(content).trim()) throw new Error('AI没有返回正文内容');
+      const content = extractAiContent(data, { jsonMode });
+      if (!String(content).trim()) {
+        const emptyError = new Error('AI没有返回最终文本');
+        emptyError.code = 'EMPTY_AI_CONTENT';
+        throw emptyError;
+      }
+      setOperationStatus('success', `${requestLabel}已完成`);
       return sanitizeTechnicalText(String(content).replace(/<think>[\s\S]*?<\/think>/gi, '').trim());
     } catch (error) {
-      if (signal?.aborted) throw signal.reason || new DOMException('已暂停', 'AbortError');
+      if (signal?.aborted) {
+        setOperationStatus('idle');
+        throw signal.reason || new DOMException('已暂停', 'AbortError');
+      }
       const timeoutError = error?.name === 'TimeoutError' || controller.signal.aborted;
-      if ((timeoutError || error instanceof TypeError) && attempt === 0) {
+      if ((timeoutError || error instanceof TypeError || error?.code === 'EMPTY_AI_CONTENT') && attempt === 0) {
         await wait(1200, signal);
         continue;
       }
-      if (timeoutError) throw new Error(`${requestLabel}等待时间过长，已保留当前进度`);
+      if (timeoutError) {
+        setOperationStatus('error', `${requestLabel}超时`);
+        throw new Error(`${requestLabel}等待时间过长，已保留当前进度`);
+      }
+      if (error instanceof TypeError) {
+        setOperationStatus('error', `${requestLabel}连接失败`);
+        throw new Error('浏览器无法连接该API。请检查接口地址、网络以及厂家是否允许网页跨域调用（CORS）');
+      }
+      setOperationStatus('error', `${requestLabel}失败`);
       throw error;
     } finally {
       clearTimeout(timeout);
       signal?.removeEventListener('abort', forwardAbort);
     }
   }
+  setOperationStatus('error', `${requestLabel}失败`);
   throw new Error(`${requestLabel}失败，请稍后继续`);
+}
+
+async function parseAiJson(raw, { signal, requestLabel = '整理数据', maxTokens = 7000 } = {}) {
+  try {
+    return parseJsonResponse(raw);
+  } catch (firstError) {
+    const repairedRaw = await callAi([
+      {
+        role: 'system',
+        content: '你是JSON格式修复器。将用户提供的不完整或夹杂说明的内容整理成一个完整、合法的JSON对象。保持原有字段和信息，不补写解释，不使用Markdown代码块，只返回JSON。',
+      },
+      {
+        role: 'user',
+        content: `原返回内容：\n${String(raw || '').slice(0, 48000)}\n\n原解析错误：${firstError.message}`,
+      },
+    ], { reasoning: false, maxTokens, jsonMode: true, signal, requestLabel: `${requestLabel}格式修复`, timeoutMs: 80000 });
+    try {
+      return parseJsonResponse(repairedRaw);
+    } catch (secondError) {
+      throw new Error(`${requestLabel}返回格式不完整，系统已自动重试但仍无法识别`);
+    }
+  }
 }
 
 function updateApiConnectionStatus(state = 'checking', message = '') {
@@ -661,16 +754,22 @@ function updateApiConnectionStatus(state = 'checking', message = '') {
   const textNode = $('api-connection-text');
   if (!button || !textNode) return;
   const config = loadApiSettings();
-  const label = config.mode === 'custom' ? '自定义API' : '默认API';
-  const stateLabel = state === 'success' ? '已连接' : state === 'error' ? '连接失败' : '检测中';
-  textNode.textContent = `${label} ${stateLabel}`;
-  button.className = `api-connection-pill is-${state}`;
+  const providerLabels = { deepseek: 'DeepSeek', zhipu: '智谱GLM', moonshot: 'Kimi', openai: 'OpenAI', compatible: '自定义API' };
+  const label = providerLabels[config.provider] || 'API';
+  const missing = !config.apiKey;
+  const stateLabel = missing ? '未设置' : state === 'success' ? '已连接' : state === 'error' ? '连接失败' : '检测中';
+  textNode.textContent = missing ? 'API 未设置' : `${label} ${stateLabel}`;
+  button.className = `api-connection-pill is-${missing ? 'error' : state}`;
   const detail = message ? `：${message}` : '';
   button.title = `${label}${detail || `：${stateLabel}`}，点击打开API设置`;
   button.setAttribute('aria-label', `${label}连接状态：${stateLabel}${detail}`);
 }
 
 async function checkActiveApiConnection({ silent = false } = {}) {
+  if (!loadApiSettings().apiKey) {
+    updateApiConnectionStatus('error', '请填写API Key');
+    return false;
+  }
   updateApiConnectionStatus('checking');
   try {
     await callAi([{ role: 'user', content: '只回复OK' }], { maxTokens: 32, requestLabel: 'API连接检测', configOverride: loadApiSettings() });
@@ -685,10 +784,7 @@ async function checkActiveApiConnection({ silent = false } = {}) {
 }
 
 function openSettings() {
-  const active = loadApiSettings();
-  const formConfig = active.mode === 'custom' ? active : loadStoredCustomApiSettings() || active;
-  qsa('input[name="api-mode"]').forEach(input => { input.checked = input.value === (active.mode === 'custom' ? 'custom' : 'default'); });
-  $('custom-api-fields').hidden = active.mode !== 'custom';
+  const formConfig = loadStoredCustomApiSettings() || loadApiSettings();
   $('api-provider').value = formConfig.provider || 'deepseek';
   $('api-url').value = formConfig.apiUrl || '';
   $('api-key').value = formConfig.apiKey || '';
@@ -699,10 +795,13 @@ function openSettings() {
 }
 
 function apiConfigFromForm() {
-  const mode = qs('input[name="api-mode"]:checked')?.value || 'default';
-  if (mode === 'default') return { ...DEFAULT_API };
+  const provider = $('api-provider').value;
+  let apiUrl = $('api-url').value.trim().replace(/\/$/, '');
+  let apiKey = $('api-key').value.trim();
+  if (provider === 'deepseek' && /^[a-f0-9]{32}$/i.test(apiKey)) apiKey = 'sk-' + apiKey;
+  if (apiUrl && !/\/chat\/completions(?:\?|$)/i.test(apiUrl) && /\/v\d+$/i.test(apiUrl)) apiUrl += '/chat/completions';
   return {
-    mode: 'custom', provider: $('api-provider').value, apiUrl: $('api-url').value.trim(), apiKey: $('api-key').value.trim(),
+    mode: 'user', provider, apiUrl, apiKey,
     chatModel: $('api-chat-model').value.trim(), reasoningModel: $('api-reasoning-model').value.trim() || $('api-chat-model').value.trim(),
   };
 }
@@ -718,7 +817,13 @@ async function testApiConnection() {
   const button = $('btn-test-api');
   const status = $('api-test-status');
   const config = apiConfigFromForm();
+  if (!config.apiUrl || !config.apiKey || !config.chatModel) {
+    status.textContent = '请先完整填写API地址、Key和写作模型';
+    $('api-key').focus();
+    return;
+  }
   button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
   status.textContent = '正在测试连接';
   try {
     await callAi([{ role: 'user', content: '只回复OK' }], { maxTokens: 32, requestLabel: 'API测试', configOverride: config });
@@ -727,19 +832,21 @@ async function testApiConnection() {
   } catch (error) {
     status.textContent = `连接失败：${error.message}`;
     toast(`API测试失败：${error.message}`, 'error');
-  } finally { button.disabled = false; }
+  } finally { button.disabled = false; button.removeAttribute('aria-busy'); }
 }
 
 function submitApiSettings(event) {
   event.preventDefault();
   const config = apiConfigFromForm();
-  if (config.mode === 'custom' && (!config.apiUrl || !config.apiKey || !config.chatModel)) {
+  if (!config.apiUrl || !config.apiKey || !config.chatModel) {
     toast('请填写API地址、Key和模型名称', 'error');
+    $('api-test-status').textContent = '设置未完成：请检查必填项';
+    $('api-key').focus();
     return;
   }
   saveApiSettings(config);
   $('settings-dialog').close();
-  toast(config.mode === 'custom' ? '已切换为自定义API' : '已恢复默认API', 'success');
+  toast('API设置已保存到当前浏览器', 'success');
   void checkActiveApiConnection({ silent: true });
 }
 
@@ -844,13 +951,14 @@ async function generateScheme(event) {
   renderSchemePreview();
   const submit = qs('#scheme-form button[type="submit"]');
   submit.disabled = true;
+  submit.setAttribute('aria-busy', 'true');
   submit.textContent = '正在生成方案';
   try {
     const functionCount = project.scheme.countMode === 'custom'
       ? project.scheme.functionCount
       : Math.max(5, Math.min(12, 5 + Math.floor(Math.random() * 6)));
     const raw = await callAi(Prompts.buildSchemeMessages({ title: project.scheme.title, requirements: project.scheme.requirements, functionCount, preferences: project.scheme.preferences }), { reasoning: false, maxTokens: 5000, jsonMode: true, signal: requestController.signal, requestLabel: '方案生成' });
-    const result = parseJsonResponse(raw);
+    const result = await parseAiJson(raw, { signal: requestController.signal, requestLabel: '方案生成', maxTokens: 5000 });
     const devices = (Array.isArray(result.devices) ? result.devices : []).map(item => typeof item === 'string'
       ? { model: sanitizeTechnicalText(item.replace(/[（(].*$/, '').trim()), role: item.match(/[（(]([^）)]+)[）)]/)?.[1] || '外设' }
       : { model: sanitizeTechnicalText(String(item.model || item.name || '').trim()), role: sanitizeTechnicalText(String(item.role || item.purpose || '外设').trim()) }).filter(item => item.model);
@@ -866,11 +974,14 @@ async function generateScheme(event) {
     toast('方案已生成', 'success');
   } catch (error) {
     project.scheme.status = project.scheme.structured ? 'stale' : 'empty';
+    $('scheme-status').textContent = '生成失败';
+    $('scheme-status').className = 'status-badge is-danger';
     toast(error.message || '方案生成失败', 'error');
   } finally {
     requestController = null;
     requestTask = '';
     submit.disabled = false;
+    submit.removeAttribute('aria-busy');
     submit.textContent = '生成方案';
     renderSchemePreview();
   }
@@ -1017,12 +1128,13 @@ async function analyzeImportedScheme() {
   requestController = new AbortController();
   requestTask = 'scheme-import-analysis';
   button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
   button.textContent = '正在分析方案';
   try {
     const raw = await callAi(Prompts.buildSchemeMaterialImportMessages({ rawText, currentTitle: project.title }), {
       reasoning: false, maxTokens: 6500, jsonMode: true, signal: requestController.signal, requestLabel: '方案资料分析',
     });
-    const result = parseJsonResponse(raw);
+    const result = await parseAiJson(raw, { signal: requestController.signal, requestLabel: '方案资料分析', maxTokens: 6500 });
     const devices = (Array.isArray(result.devices) ? result.devices : []).map((item, index) => typeof item === 'string'
       ? deviceFromLine(sanitizeTechnicalText(item), index)
       : { id: `device-import-${index + 1}`, model: sanitizeTechnicalText(item.model || item.name || '').trim(), role: sanitizeTechnicalText(item.role || item.purpose || '').trim() }).filter(item => item.model);
@@ -1047,6 +1159,7 @@ async function analyzeImportedScheme() {
     requestController = null;
     requestTask = '';
     button.disabled = false;
+    button.removeAttribute('aria-busy');
     button.textContent = 'AI分析并填入资料';
   }
 }
@@ -1183,6 +1296,58 @@ function deviceFromLine(value, index = 0) {
 
 function mappingKey(item) { return `${String(item.device || '').toLowerCase()}|${String(item.signal || '').toLowerCase()}`; }
 
+function is51Controller(controller = '') {
+  return /(?:STC|AT89|89C5|51\s*单片机)/i.test(String(controller));
+}
+
+function inferController(title = '', devices = []) {
+  const explicit = devices.find(item => /主控|单片机|STM32|STC|AT89|ESP32|Arduino/i.test(`${item.role || ''} ${item.model || ''}`))?.model;
+  if (explicit) return explicit;
+  const source = String(title || '');
+  if (/ESP32/i.test(source)) return 'ESP32';
+  if (/AT89C?52|AT89/i.test(source)) return 'AT89C52';
+  if (/51\s*单片机|STC/i.test(source)) return 'STC89C52RC';
+  return 'STM32F103C8T6';
+}
+
+function fallbackMappings(controller, devices = []) {
+  const used = new Set();
+  const mappings = [];
+  const signalsFor = device => {
+    const source = `${device.interfaceType || ''} ${device.model || ''} ${device.role || ''}`;
+    if (/I2C|OLED|SHT3|BH1750/i.test(source)) return ['SCL', 'SDA'];
+    if (/UART|串口|ESP-01S|蓝牙|GPS|GSM|4G/i.test(source)) return ['TX', 'RX'];
+    if (/SPI|TFT|RFID|LoRa|NRF24/i.test(source)) return ['SCK', 'MISO', 'MOSI', 'CS'];
+    if (/1-Wire|单总线|DHT|DS18/i.test(source)) return ['DATA'];
+    if (/ADC|模拟|MQ-|光敏|土壤/i.test(source)) return ['AO'];
+    return ['CTRL'];
+  };
+  devices.filter(device => !/主控|单片机|电源|稳压|晶振|复位|下载|调试/.test(`${device.role || ''} ${device.model || ''}`)).forEach(device => {
+    const signals = signalsFor(device);
+    const interfaceType = String(device.interfaceType || (/OLED/i.test(device.model) ? 'I2C' : 'GPIO'));
+    signals.forEach(signal => {
+      const choices = compatiblePins(controller, signal, interfaceType);
+      const sharedBus = /I2C/i.test(interfaceType);
+      const pin = sharedBus && mappings.some(item => item.signal === signal && item.busGroup === 'I2C1')
+        ? mappings.find(item => item.signal === signal && item.busGroup === 'I2C1').pin
+        : choices.find(choice => !used.has(choice)) || choices[0] || '待确认';
+      if (!sharedBus && pin !== '待确认') used.add(pin);
+      mappings.push({ id: makeId('mapping'), device: device.model, interfaceType, signal, pin, alternatives: choices.slice(1, 5), busGroup: sharedBus ? 'I2C1' : '', shareAllowed: sharedBus, source: 'ai' });
+    });
+  });
+  return mappings;
+}
+
+function hardwareDefaults(controller, powerNotes = [], fixedFacts = []) {
+  const defaults = is51Controller(controller)
+    ? ['51单片机采用独立最小系统电路，系统各模块必须共地。']
+    : [`${controller}按最小系统开发板使用，开发板接收5V DC输入并通过板载稳压获得3.3V，5V与3.3V外设共地。`];
+  return {
+    powerNotes: unique([...powerNotes.map(sanitizeTechnicalText), ...defaults]),
+    fixedFacts: unique([...fixedFacts.map(sanitizeTechnicalText), '凡电路需要上拉电阻时统一使用10 kΩ。', 'TFT彩屏统一使用1.8寸规格，不使用2.8寸TFT。']),
+  };
+}
+
 async function analyzeHardware(event) {
   event?.preventDefault();
   if (requestController) return toast('当前还有任务正在运行', 'info');
@@ -1196,8 +1361,10 @@ async function analyzeHardware(event) {
   requestTask = 'pin-analysis';
   const submit = qs('#paper-materials-form button[type="submit"]');
   const reanalyze = $('btn-reanalyze-pins');
-  if (submit) { submit.disabled = true; submit.textContent = '正在分析器件'; }
+  const inlineStatus = $('hardware-analysis-status');
+  if (submit) { submit.disabled = true; submit.setAttribute('aria-busy', 'true'); submit.textContent = '正在分析器件'; }
   if (reanalyze) reanalyze.disabled = true;
+  if (inlineStatus) { inlineStatus.textContent = '正在识别器件、通信方式和可用引脚，空结果会自动重试'; inlineStatus.className = 'inline-task-status is-busy'; }
   project.paper.factSheet.analyzedAt = '';
   $('pin-status').textContent = '正在分析';
   try {
@@ -1209,8 +1376,8 @@ async function analyzeHardware(event) {
       userConnections: materials.connectionsText || '用户无需填写，请根据器件通信方式和主控可用资源提出待确认的引脚建议',
       sourceCodeOrLogic: String(materials.codeText || '未提供').slice(0, 30000),
       otherNotes: materials.sourceNotes || '未提供',
-    }), { reasoning: true, maxTokens: 9000, jsonMode: true, signal: requestController.signal, requestLabel: '器件与引脚分析' });
-    const result = parseJsonResponse(raw);
+    }), { reasoning: false, maxTokens: 7000, jsonMode: true, signal: requestController.signal, requestLabel: '器件与引脚分析', timeoutMs: 100000 });
+    const result = await parseAiJson(raw, { signal: requestController.signal, requestLabel: '器件与引脚分析', maxTokens: 7000 });
     const aiDevices = (Array.isArray(result.devices) ? result.devices : []).map((item, index) => ({
       id: item.id || `device-ai-${index + 1}`,
       model: sanitizeTechnicalText(String(item.model || item.name || '').trim()),
@@ -1229,14 +1396,15 @@ async function analyzeHardware(event) {
       name: sanitizeTechnicalText(String(typeof item === 'string' ? item : item.name || item.description || '').trim()),
       deviceModels: Array.isArray(item.deviceModels) ? item.deviceModels.map(String) : [],
     })).filter(item => item.name);
-    const functions = lines(materials.functionsText).map((name, index) => ({ id: `function-user-${index + 1}`, name, deviceModels: [] }));
-    aiFunctions.forEach(item => {
-      if (!functions.some(func => func.name === item.name)) functions.push(item);
-    });
-    const controller = sanitizeTechnicalText(String(result.controller || devices.find(item => /STM32|STC|ESP32|Arduino|AT89/i.test(item.model))?.model || '').trim());
-    if (!controller) throw new Error('没有识别到主控型号，请在器件清单中补充主控后重试');
+    const userFunctionLines = lines(materials.functionsText);
+    // 用户填写内容是事实源。只有用户未提供功能时才采用AI建议，避免同义功能被追加成两份。
+    const functions = userFunctionLines.length
+      ? userFunctionLines.map((name, index) => ({ id: `function-user-${index + 1}`, name, deviceModels: [] }))
+      : aiFunctions;
+    const controller = sanitizeTechnicalText(String(result.controller || inferController(project.title, devices)).trim());
+    if (!devices.some(item => item.model.toLowerCase() === controller.toLowerCase())) devices.unshift({ id: makeId('device'), model: controller, role: is51Controller(controller) ? '主控单片机' : '主控最小系统开发板', interfaceType: 'GPIO' });
     const previousMappings = new Map((project.paper.factSheet.mappings || []).filter(item => item.source === 'user').map(item => [mappingKey(item), item]));
-    const mappings = (Array.isArray(result.mappings) ? result.mappings : []).map((item, index) => {
+    let mappings = (Array.isArray(result.mappings) ? result.mappings : []).map((item, index) => {
       const device = String(item.device || item.deviceModel || '').trim();
       const interfaceType = String(item.interfaceType || item.interface || 'GPIO').trim();
       const signal = String(item.signal || item.connection || 'CTRL').trim().toUpperCase();
@@ -1252,15 +1420,16 @@ async function analyzeHardware(event) {
       const userMapping = previousMappings.get(mappingKey(mapping));
       return userMapping ? { ...mapping, pin: userMapping.pin, source: 'user' } : mapping;
     }).filter(item => item.device && item.signal);
-    if (!mappings.length && devices.length > 1) throw new Error('AI没有返回外设连接信号，请重新分析');
+    if (!mappings.length && devices.length > 1) mappings = fallbackMappings(controller, devices);
+    const defaults = hardwareDefaults(controller, Array.isArray(result.powerNotes) ? result.powerNotes : [], Array.isArray(result.fixedFacts) ? result.fixedFacts : []);
     project.factRevision = `facts-${Date.now()}`;
     project.paper.factSheet = {
       controller,
       devices,
       functions,
       mappings,
-      powerNotes: unique(Array.isArray(result.powerNotes) ? result.powerNotes : []),
-      fixedFacts: unique(Array.isArray(result.fixedFacts) ? result.fixedFacts : []),
+      powerNotes: defaults.powerNotes,
+      fixedFacts: defaults.fixedFacts,
       conflicts: unique(Array.isArray(result.conflicts) ? result.conflicts : []),
       conflictsAcknowledged: false,
       analyzedAt: nowIso(),
@@ -1279,13 +1448,15 @@ async function analyzeHardware(event) {
     renderPaper();
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }));
     toast('器件和引脚建议已整理，请核对红色项目', 'success');
+    if (inlineStatus) { inlineStatus.textContent = '分析完成，已生成器件清单和引脚建议'; inlineStatus.className = 'inline-task-status is-success'; }
   } catch (error) {
     toast(error.message || '器件与引脚分析失败', 'error');
+    if (inlineStatus) { inlineStatus.textContent = `分析失败：${error.message || '请检查API后重试'}`; inlineStatus.className = 'inline-task-status is-error'; }
     renderPins();
   } finally {
     requestController = null;
     requestTask = '';
-    if (submit) { submit.disabled = false; submit.textContent = '下一步：分析器件'; }
+    if (submit) { submit.disabled = false; submit.removeAttribute('aria-busy'); submit.textContent = '下一步：分析器件'; }
     if (reanalyze) reanalyze.disabled = false;
   }
 }
@@ -1398,7 +1569,12 @@ function artifactPlanKey(item) {
 }
 
 function mergeRequiredArtifacts(outline, planned = []) {
-  const baseline = Prompts.buildArtifactPlan({ outline, devices: project.paper.factSheet.devices, functions: project.paper.factSheet.functions });
+  const facts = project.paper.factSheet;
+  const devices = [...(facts.devices || [])];
+  if (facts.controller && !devices.some(device => String(device.model || '').toLowerCase() === String(facts.controller).toLowerCase())) {
+    devices.unshift({ id: `device-controller-${facts.controller}`, model: facts.controller, role: is51Controller(facts.controller) ? '主控单片机' : '主控最小系统开发板', interfaceType: 'GPIO' });
+  }
+  const baseline = Prompts.buildArtifactPlan({ outline, devices, functions: facts.functions });
   const merged = [];
   [...planned, ...baseline].forEach(item => {
     const sourceIds = unique(item.sourceFactIds || []);
@@ -1440,7 +1616,7 @@ function outlinePlanIssues(plan) {
     const h2 = (chapter.sections || []).filter(section => new RegExp(`^${chapter.id}\\.\\d+\\s+`).test(section));
     const h3 = (chapter.sections || []).filter(section => new RegExp(`^${chapter.id}\\.\\d+\\.\\d+\\s+`).test(section));
     if (h2.length < 2) errors.push(`第${chapter.id}章至少需要两个二级标题`);
-    if (chapter.id !== '6' && !h3.length) errors.push(`第${chapter.id}章需要结合内容设置三级标题`);
+    if (h3.length > 10) errors.push(`第${chapter.id}章三级标题过多，应归纳同类内容`);
     h3.forEach(section => {
       const parent = section.match(/^(\d+\.\d+)\./)?.[1];
       if (parent && !h2.some(item => item.startsWith(`${parent} `))) errors.push(`${section}缺少父级二级标题${parent}`);
@@ -1468,8 +1644,10 @@ function generationArtifactPlanIssues(artifacts = []) {
   if (!hasType('software-architecture', '4') || !hasType('flowchart', '4')) errors.push('第四章缺少软件结构图或流程图');
   if (!hasType('test-table', '5') || !hasType('result-image', '5')) errors.push('第五章缺少量化测试表或功能展示图');
   if (!hasType('formula')) errors.push('论文生成规则至少需要一个与真实计算或测试分析相关的公式');
-  const externalDevices = (project.paper.factSheet.devices || []).filter(device => !/主控|单片机|电源|晶振|复位|下载|调试/.test(`${device.role || ''} ${device.model || ''}`));
-  externalDevices.forEach(device => {
+  const actualDevices = [...(project.paper.factSheet.devices || [])];
+  const controller = project.paper.factSheet.controller;
+  if (controller && !actualDevices.some(device => String(device.model || '').toLowerCase() === String(controller).toLowerCase())) actualDevices.unshift({ id: `device-controller-${controller}`, model: controller, role: '主控' });
+  actualDevices.forEach(device => {
     if (!artifacts.some(item => item.type === 'device-image' && (item.sourceFactIds || []).includes(device.id))) errors.push(`${device.model}缺少第二章器件图计划`);
     if (!artifacts.some(item => item.type === 'circuit' && (item.sourceFactIds || []).includes(device.id))) errors.push(`${device.model}缺少第三章电路图计划`);
   });
@@ -1478,7 +1656,7 @@ function generationArtifactPlanIssues(artifacts = []) {
     if (!artifacts.some(item => item.type === 'result-image' && (item.sourceFactIds || []).includes(func.id))) errors.push(`功能“${func.name}”缺少第五章展示图计划`);
   });
   artifacts.filter(item => item.required).forEach(item => {
-    if (String(item.instruction || '').length < 28) errors.push(`${item.title}的插入或绘制说明过于简略`);
+    if (String(item.instruction || '').length < 12) errors.push(`${item.title}的生成要求缺失`);
   });
   return unique(errors);
 }
@@ -1657,7 +1835,13 @@ function normalizeChapterText(value, chapter) {
     .replace(/[ \t]*(【非正文(?:·[^】]*)?】)[ \t]*/g, '\n\n$1\n\n')
     .replace(/[ \t]*(【非正文结束】)[ \t]*/g, '\n\n$1\n\n')
     .replace(/(^|\n)(表\s*\d+\s*[-－—.]\s*\d+\s+[^\n|]+)[ \t]*(?=\n\|)/g, '$1$2\n')
+    .replace(/上拉电阻(?:阻值|取值|采用|选用|为|是|\s|：|:)*\d+(?:\.\d+)?\s*k(?:Ω|欧姆)?/gi, '上拉电阻统一采用10 kΩ')
+    .replace(/\d+(?:\.\d+)?\s*k(?:Ω|欧姆)?(?:的)?上拉电阻/gi, '10 kΩ上拉电阻')
+    .replace(/【非正文·图[^】]*(?:待插入|插入)[：:]?\s*([^】]+)】/g, '【非正文·插图位置：$1】')
+    .replace(/【非正文·(?:待插入|此处插入)[：:]?\s*([^】]+)】/g, '【非正文·插图位置：$1】')
+    .replace(/(【非正文·插图位置：[^】]+】)[\s\S]*?【非正文结束】/g, '$1\n【非正文结束】')
     .replace(/\n{3,}/g, '\n\n');
+  if (chapter.kind !== 'introduction') text = text.replace(/\[(\d+)\]/g, '');
   return text.trim();
 }
 
@@ -1690,11 +1874,70 @@ function mermaidFlowIssues(block, artifactTitle = '流程图') {
   const nodeIds = new Set([...code.matchAll(/\b([A-Za-z][A-Za-z0-9_]*)\s*(?=[\[({])/g)].map(item => item[1]));
   const issues = [];
   if (!/^flowchart\s+TD\s*$/im.test(code)) issues.push(`${artifactTitle}必须使用flowchart TD`);
+  if (!/开始/.test(code) || !/结束/.test(code)) issues.push(`${artifactTitle}必须同时包含“开始”和“结束”节点`);
   if (nodeIds.size < 5) issues.push(`${artifactTitle}少于5个有效节点`);
   if (nodeIds.size > 10 || lines.length > 18) issues.push(`${artifactTitle}过于复杂，应精简到10个节点以内`);
   if (!/\{[^{}]+\}/.test(code) || !/(?:--\s*(?:是|否)\s*-->|-->\|(?:是|否)\|)/.test(code)) issues.push(`${artifactTitle}缺少简洁的是/否判断分支`);
   if (/\b(?:subgraph|classDef|style|click)\b|<\/?[A-Za-z][^>]*>/i.test(code)) issues.push(`${artifactTitle}包含不必要的样式、子图或HTML语法`);
   return issues;
+}
+
+function mermaidStructureIssues(block, artifactTitle = '结构图') {
+  const match = String(block || '').match(/```mermaid\s*\n([\s\S]*?)```/i);
+  if (!match) return [`${artifactTitle}缺少可复制的Mermaid代码块`];
+  const code = match[1].trim();
+  const nodeIds = new Set([...code.matchAll(/\b([A-Za-z][A-Za-z0-9_]*)\s*(?=[\[({])/g)].map(item => item[1]));
+  const issues = [];
+  if (!/^flowchart\s+(?:TD|LR)\s*$/im.test(code)) issues.push(`${artifactTitle}必须使用flowchart TD或flowchart LR`);
+  if (nodeIds.size < 4) issues.push(`${artifactTitle}少于4个有效节点`);
+  if (nodeIds.size > 10) issues.push(`${artifactTitle}过于复杂，应精简到10个节点以内`);
+  if (/\b(?:subgraph|classDef|style|click)\b|<\/?[A-Za-z][^>]*>/i.test(code)) issues.push(`${artifactTitle}包含不必要的样式、子图或HTML语法`);
+  return issues;
+}
+
+function mermaidTimingIssues(block, artifactTitle = '时序图') {
+  const match = String(block || '').match(/```mermaid\s*\n([\s\S]*?)```/i);
+  if (!match) return [`${artifactTitle}缺少可复制的Mermaid代码块`];
+  const code = match[1].trim();
+  const issues = [];
+  if (!/^sequenceDiagram\s*$/im.test(code)) issues.push(`${artifactTitle}必须使用sequenceDiagram`);
+  if ((code.match(/->>|-->>|->|-->/g) || []).length < 3) issues.push(`${artifactTitle}缺少完整的发起、应答和数据传输过程`);
+  return issues;
+}
+
+function visualContentBlocks(content = '') {
+  const text = String(content || '');
+  const blocks = [];
+  const artifactPattern = /【非正文(?:·[^】]*)?】[\s\S]*?【非正文结束】/g;
+  for (const match of text.matchAll(artifactPattern)) blocks.push({ start: match.index, end: match.index + match[0].length, type: 'figure' });
+  let offset = 0;
+  const linesWithOffsets = text.split('\n').map(line => {
+    const item = { line, start: offset, end: offset + line.length };
+    offset += line.length + 1;
+    return item;
+  });
+  for (let index = 0; index < linesWithOffsets.length; index += 1) {
+    if (!/^\s*\|.*\|\s*$/.test(linesWithOffsets[index].line)) continue;
+    const startIndex = index > 0 && /^\s*表\s*\d+\s*[-－—.]\s*\d+/.test(linesWithOffsets[index - 1].line) ? index - 1 : index;
+    let endIndex = index;
+    while (endIndex + 1 < linesWithOffsets.length && /^\s*\|.*\|\s*$/.test(linesWithOffsets[endIndex + 1].line)) endIndex += 1;
+    blocks.push({ start: linesWithOffsets[startIndex].start, end: linesWithOffsets[endIndex].end, type: 'table' });
+    index = endIndex;
+  }
+  return blocks.sort((left, right) => left.start - right.start).filter((block, index, list) => !index || block.start >= list[index - 1].end);
+}
+
+function consecutiveVisualIssues(content = '') {
+  const blocks = visualContentBlocks(content);
+  const issues = [];
+  for (let index = 1; index < blocks.length; index += 1) {
+    const between = String(content).slice(blocks[index - 1].end, blocks[index].start)
+      .replace(/^\s*\d+(?:\.\d+){1,2}\s+[^\n]+$/gm, '')
+      .replace(/\s+/g, '');
+    const substantive = (between.match(/[\u3400-\u9fffA-Za-z0-9]/g) || []).length;
+    if (substantive < 60) issues.push(`存在连续的${blocks[index - 1].type === 'figure' ? '图' : '表'}与${blocks[index].type === 'figure' ? '图' : '表'}，中间缺少实质正文段落`);
+  }
+  return unique(issues);
 }
 
 function artifactDetailIssues(content, artifacts = []) {
@@ -1707,14 +1950,12 @@ function artifactDetailIssues(content, artifacts = []) {
     }
     if (artifact.type === 'flowchart') {
       issues.push(...mermaidFlowIssues(block, artifact.title));
-    } else if (artifact.type === 'device-image' || artifact.type === 'result-image') {
-      if (!/(?:插入位置|插在)/.test(block) || !/(?:拍摄|截图|取景)/.test(block) || !/(?:画面|展示|清晰)/.test(block) || !/图题/.test(block)) issues.push(`${artifact.title}缺少插入位置、画面内容、拍摄取景或图题说明`);
-    } else if (artifact.type === 'circuit') {
-      if (!/引脚/.test(block) || !/(?:供电|电压)/.test(block) || !/共地/.test(block) || !/(?:信号方向|网络名|上拉|下拉|驱动)/.test(block)) issues.push(`${artifact.title}缺少引脚、供电共地或信号方向说明`);
+    } else if (artifact.type === 'device-image' || artifact.type === 'result-image' || artifact.type === 'circuit') {
+      if (!/待插入|此处插入/.test(block)) issues.push(`${artifact.title}缺少简短插图提示`);
     } else if (['system-framework', 'hardware-block', 'software-architecture'].includes(artifact.type)) {
-      if (!/(?:方框|模块)/.test(block) || !/(?:箭头|流向|连接线)/.test(block) || !/(?:位置|布局|层)/.test(block)) issues.push(`${artifact.title}缺少模块位置、连接箭头或整体布局说明`);
+      issues.push(...mermaidStructureIssues(block, artifact.title));
     } else if (artifact.type === 'timing') {
-      if (!/(?:横轴|时间)/.test(block) || !/信号/.test(block) || !/(?:起始|空闲|应答|采样)/.test(block)) issues.push(`${artifact.title}缺少信号线、关键阶段或时间参数说明`);
+      issues.push(...mermaidTimingIssues(block, artifact.title));
     } else if (['comparison-table', 'pin-table', 'test-table'].includes(artifact.type)) {
       const aroundTitle = String(content || '').slice(Math.max(0, String(content || '').indexOf(artifact.title) - 200), String(content || '').indexOf(artifact.title) + 3500);
       if (!/^\s*\|.*\|\s*$/m.test(aroundTitle) || !/^\s*\|\s*:?-{3,}/m.test(aroundTitle)) issues.push(`${artifact.title}尚未生成可用的Markdown数据表格`);
@@ -1732,19 +1973,19 @@ async function ensureChapterStructureAndArtifacts(chapter, content, signal) {
   for (let pass = 0; pass < 2; pass += 1) {
     const missingHeadings = missingRequiredHeadings(chapter, bestContent);
     const detailIssues = artifactDetailIssues(bestContent, chapterArtifacts);
-    const duplicateIssues = unique([...internalDuplicateIssues(bestContent), ...crossChapterDuplicateIssues(chapter.id, bestContent)]);
+    const duplicateIssues = unique([...internalDuplicateIssues(bestContent), ...crossChapterDuplicateIssues(chapter.id, bestContent), ...consecutiveVisualIssues(bestContent)]);
     if (!missingHeadings.length && !detailIssues.length && !duplicateIssues.length) return bestContent;
     const raw = await callAi([
       {
         role: 'system',
         content: `你是本科论文章节质量补强编辑。请在不删减有效正文、不改变确认事实、不增加新器件/引脚/功能的前提下，修复指定章节的标题、图表说明和跨章重复问题。优先补齐problemsToRepair中列出的每一项图表、公式、表格或Mermaid流程图，不得遗漏。requiredSections中的二级、三级标题必须全部出现且顺序不变，三级标题数量以目录为准，不得擅自压缩。对标记为跨章重复的段落必须按照本章唯一职责重新组织：删除在前文已经完整介绍的参数、原理、接线或程序步骤，只保留一句必要衔接，再补入本章专属分析，禁止仅替换同义词。
 
-每个缺失或说明不足的图表都要放在对应正文之后。流程图必须改成简洁、可复制的Mermaid代码块：使用flowchart TD，主流程6至10个节点、单项功能5至8个节点，判断分支使用“是/否”短标签；禁止subgraph、style、classDef和HTML。代码块前写“【非正文·Mermaid流程图：准确图名】”，代码块后写“【非正文结束】”。器件图、功能展示图必须写清插入位置、画面对象/状态、拍摄或截图方法、取景范围和图题。电路图必须写清主控引脚、外设信号、供电、共地、阻容/驱动、网络名和信号方向。选型对比表、引脚表和测试表必须直接生成可用的Markdown表格并在表前后分析，不能只留占位；公式必须直接写出并解释变量、单位、参数来源和用途。所有图片类非正文提示各自单独成行并以“【非正文结束】”结束。只输出补强后的完整本章正文，不输出章标题、解释或质量评价。`,
+每个缺失或说明不足的图表都要放在对应正文之后。程序流程图使用flowchart TD并同时包含“开始”“结束”节点；框架图和结构图使用flowchart TD或LR；通信时序使用sequenceDiagram。所有Mermaid图保持简洁，禁止subgraph、style、classDef和HTML。器件图、电路图、实物图和功能展示图只保留独占一行的“【非正文·插图位置：图名】”以及下一行“【非正文结束】”，不得写拍摄、绘制、构图或取景说明。引脚表不得包含“信号方向”列。选型对比表、引脚表和测试表必须直接生成可用的Markdown表格并在表前后分析；公式必须直接写出并解释变量、单位、参数来源和用途。任意两张图或表之间必须补入不少于80字的实质正文段落，禁止连续图图、图表或表表。只输出补强后的完整本章正文，不输出章标题、解释或质量评价。`,
       },
       { role: 'user', content: JSON.stringify({ pass: pass + 1, chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections }, chapterResponsibility: Prompts.chapterResponsibilities?.(chapter.kind) || '', confirmedFacts: project.paper.factSheet, completedChapterLedger: completedDigest(), chapterArtifacts, problemsToRepair: [...missingHeadings.map(item => `缺少目录标题：${item}`), ...detailIssues, ...duplicateIssues], existingChapter: bestContent }, null, 2) },
     ], { reasoning: false, maxTokens: 16000, signal, requestLabel: `第${chapter.id}章内容质量补强${pass ? '复核' : ''}` });
     const revised = normalizeChapterText(raw, chapter);
-    const revisedProblems = missingRequiredHeadings(chapter, revised).length + artifactDetailIssues(revised, chapterArtifacts).length + internalDuplicateIssues(revised).length + crossChapterDuplicateIssues(chapter.id, revised).length;
+    const revisedProblems = missingRequiredHeadings(chapter, revised).length + artifactDetailIssues(revised, chapterArtifacts).length + internalDuplicateIssues(revised).length + crossChapterDuplicateIssues(chapter.id, revised).length + consecutiveVisualIssues(revised).length;
     const originalProblems = missingHeadings.length + detailIssues.length + duplicateIssues.length;
     if (countBodyChars(revised) < Math.max(700, Math.floor(countBodyChars(bestContent) * 0.72)) || revisedProblems >= originalProblems) break;
     bestContent = revised;
@@ -1911,6 +2152,11 @@ function abstractPolicyIssues(abstractCn = '', abstractEn = '') {
 
 function frontMatterPolicyIssues(result = {}) {
   const issues = abstractPolicyIssues(result.abstractCn, result.abstractEn);
+  const abstractCn = String(result.abstractCn || '').trim();
+  const abstractLength = abstractCn.replace(/\s+/g, '').length;
+  const abstractParagraphs = abstractCn.split(/\n\s*\n/).map(item => item.trim()).filter(Boolean);
+  if (abstractLength < 300 || abstractLength > 500) issues.push(`中文摘要应控制在300至500字，当前约${abstractLength}字`);
+  if (abstractParagraphs.length < 2 || abstractParagraphs.length > 3) issues.push('中文摘要应分为2至3个自然段');
   const titleEn = String(result.titleEn || '').trim();
   const keywordsCn = String(result.keywords || '').split(/[；;]/).map(item => item.trim()).filter(Boolean);
   const keywordsEn = String(result.keywordsEn || '').split(/[;；]/).map(item => item.trim()).filter(Boolean);
@@ -1926,17 +2172,17 @@ async function generateExtras(signal) {
   generation.message = '正在依据完整正文生成英文题目、中英文摘要、关键词和致谢';
   await saveGenerationCheckpoint();
   const raw = await callAi(Prompts.buildExtrasMessages(project), { reasoning: false, maxTokens: 5500, jsonMode: true, signal, requestLabel: '英文题目与中英文摘要' });
-  let result = parseJsonResponse(raw);
+  let result = await parseAiJson(raw, { signal, requestLabel: '摘要整理', maxTokens: 5500 });
   let policyIssues = frontMatterPolicyIssues(result);
   if (policyIssues.length) {
     generation.activeRequestLabel = '修正摘要表达';
     generation.message = '正在移除摘要中的具体型号和数据，保留全文概述';
     await saveGenerationCheckpoint();
     const repairedRaw = await callAi([
-      { role: 'system', content: '你是本科论文摘要编辑。请保持英文题目、中英文摘要、中英文关键词和致谢字段完整，只修复列出的问题。英文题目准确对应中文题目。中文摘要约500至700字，英文摘要语义一致。禁止具体器件型号、芯片料号、引脚、寄存器、函数名、阈值和任何带单位的具体测试数据；使用“微控制器、传感器、显示模块、无线通信模块”等类别名称。中英文关键词各3至5个且含义、顺序对应。不要引用文献、图表或章节。致谢不出现人名、学校名、单位名和模板化开头。只返回与原结构一致的JSON。' },
+      { role: 'system', content: '你是本科论文摘要编辑。请保持英文题目、中英文摘要、中英文关键词和致谢字段完整，只修复列出的问题。英文题目准确对应中文题目。中文摘要严格控制在300至500字并分为2至3个自然段，只概述研究目的、总体方法、主要功能、验证方式和结论，不展开器件选型、接线、程序步骤或调试过程；英文摘要语义一致。禁止具体器件型号、芯片料号、引脚、寄存器、函数名、阈值和任何带单位的具体测试数据；使用“微控制器、传感器、显示模块、无线通信模块”等类别名称。中英文关键词各3至5个且含义、顺序对应。不要引用文献、图表或章节。致谢不出现人名、学校名、单位名和模板化开头。只返回与原结构一致的JSON。' },
       { role: 'user', content: JSON.stringify({ problems: policyIssues, existing: result }, null, 2) },
     ], { reasoning: false, maxTokens: 5500, jsonMode: true, signal, requestLabel: '摘要质量补强' });
-    result = parseJsonResponse(repairedRaw);
+    result = await parseAiJson(repairedRaw, { signal, requestLabel: '摘要质量补强', maxTokens: 5500 });
     policyIssues = frontMatterPolicyIssues(result);
   }
   project.paper.titleEn = String(result.titleEn || project.paper.titleEn || '').trim();
@@ -1973,7 +2219,7 @@ async function runFinalAudit(signal) {
   await saveGenerationCheckpoint();
   try {
     const raw = await callAi(Prompts.buildAuditMessages(project), { reasoning: true, maxTokens: 9000, jsonMode: true, signal, requestLabel: '技术一致性复核' });
-    const audit = parseJsonResponse(raw);
+    const audit = await parseAiJson(raw, { signal, requestLabel: '技术一致性复核', maxTokens: 9000 });
     const issues = Array.isArray(audit.issues) ? audit.issues.slice(0, 16).map((item, index) => ({ id: `ai-audit-${index + 1}`, severity: item.severity === 'blocking' ? 'blocking' : 'warning', type: item.type || 'technical', chapterId: String(item.chapterId || ''), message: String(item.message || '').trim(), repairable: Boolean(item.repairable), find: String(item.find || ''), replace: String(item.replace || ''), source: 'ai' })).filter(item => item.message) : [];
     const repaired = applyAuditRepairs({ issues });
     project.paper.quality.aiSummary = String(audit.summary || '').trim();
@@ -2024,6 +2270,7 @@ function localQualityIssues() {
     if (/(?:尚未|未能|没有|并未)(?:完全)?(?:实现|完成|验证|测试)|功能未完成|系统未完成/.test(text)) issues.push({ id: `self-disclose-${chapter.id}`, severity: 'blocking', chapterId: chapter.id, message: `第${chapter.id}章出现系统未完成或未测试式表述` });
     internalDuplicateIssues(text).forEach((message, index) => issues.push({ id: `internal-duplicate-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message }));
     crossChapterDuplicateIssues(chapter.id, text).forEach((message, index) => issues.push({ id: `near-duplicate-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message }));
+    consecutiveVisualIssues(text).forEach((message, index) => issues.push({ id: `visual-spacing-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message }));
     const missingHeadings = missingRequiredHeadings(chapter, text);
     if (missingHeadings.length) issues.push({ id: `headings-missing-${chapter.id}`, severity: 'blocking', chapterId: chapter.id, message: `第${chapter.id}章缺少目录标题：${missingHeadings.join('、')}` });
     if (/\S[ \t]*【非正文/.test(text) || /【非正文(?:·[^】]*)?】[ \t]*\S/.test(text)) issues.push({ id: `artifact-line-${chapter.id}`, severity: 'warning', chapterId: chapter.id, message: `第${chapter.id}章存在未单独成行的图表提示` });
@@ -2042,7 +2289,7 @@ function localQualityIssues() {
   (project.paper.artifacts || []).filter(item => item.type === 'timing').forEach(item => {
     const text = String(chapters[item.chapterId]?.content || '');
     const block = artifactInstructionBlock(text, item);
-    if (!block || !/(?:横轴|时间)/.test(block) || !/信号/.test(block) || !/(?:起始|空闲|应答|采样)/.test(block)) issues.push({ id: `timing-${item.id}`, severity: 'warning', chapterId: item.chapterId, message: `${item.title}缺少信号线、关键阶段或时间参数说明` });
+    mermaidTimingIssues(block, item.title).forEach((message, index) => issues.push({ id: `timing-${item.id}-${index}`, severity: 'warning', chapterId: item.chapterId, message }));
   });
   (project.paper.artifacts || []).filter(item => ['device-image', 'result-image', 'circuit', 'system-framework', 'hardware-block', 'software-architecture', 'comparison-table', 'pin-table', 'test-table'].includes(item.type)).forEach(item => {
     const text = String(chapters[item.chapterId]?.content || '');
@@ -2066,6 +2313,19 @@ function localQualityIssues() {
     const text = String(chapters[testChapter.id]?.content || '');
     if (!/^\s*\|.*\|\s*$/m.test(text)) issues.push({ id: 'test-table', severity: 'blocking', chapterId: testChapter.id, message: '测试章节缺少量化数据表格' });
     if (!/\d+(?:\.\d+)?\s*(?:s|ms|%|℃|V|mA|次|h|小时|秒|毫秒)/i.test(text)) issues.push({ id: 'test-data', severity: 'blocking', chapterId: testChapter.id, message: '测试章节缺少响应时间、误差、成功率或稳定性等量化数据' });
+  }
+
+  const hardwareChapter = outline.find(item => item.kind === 'hardware');
+  if (hardwareChapter) {
+    const text = String(chapters[hardwareChapter.id]?.content || '');
+    if (/2\.8\s*寸\s*TFT/i.test(text)) issues.push({ id: 'hardware-tft-size', severity: 'blocking', chapterId: hardwareChapter.id, message: '硬件章节仍出现2.8寸TFT，应统一为1.8寸TFT' });
+    const pullupValues = [
+      ...[...text.matchAll(/上拉电阻[^。\n]{0,18}?(\d+(?:\.\d+)?)\s*k(?:Ω|欧姆)/gi)].map(match => Number(match[1])),
+      ...[...text.matchAll(/(\d+(?:\.\d+)?)\s*k(?:Ω|欧姆)[^。\n]{0,18}?上拉电阻/gi)].map(match => Number(match[1])),
+    ];
+    if (pullupValues.some(value => value !== 10)) issues.push({ id: 'hardware-pullup', severity: 'blocking', chapterId: hardwareChapter.id, message: '上拉电阻阻值没有统一为10 kΩ' });
+    if (!is51Controller(project.paper.factSheet.controller) && !/(?:5\s*V|5V).*(?:板载稳压|稳压).*(?:3\.3\s*V|3.3V)/s.test(text)) issues.push({ id: 'hardware-power-default', severity: 'blocking', chapterId: hardwareChapter.id, message: '硬件章节缺少开发板5V输入经板载稳压获得3.3V的供电说明' });
+    if (/\|[^\n|]*信号方向[^\n|]*\|/.test(text)) issues.push({ id: 'pin-table-direction', severity: 'blocking', chapterId: hardwareChapter.id, message: '引脚关系表不应包含“信号方向”列' });
   }
 
   const intro = outline.find(item => item.kind === 'introduction');
@@ -2092,7 +2352,13 @@ function localQualityIssues() {
   const keywordsCn = String(project.paper.keywords || '').split(/[；;]/).map(item => item.trim()).filter(Boolean);
   const keywordsEn = String(project.paper.keywordsEn || '').split(/[;；]/).map(item => item.trim()).filter(Boolean);
   if (keywordsCn.length && (keywordsCn.length < 3 || keywordsCn.length > 5 || keywordsEn.length !== keywordsCn.length)) issues.push({ id: 'keywords-pairing', severity: 'blocking', chapterId: '', message: '中英文关键词应各3至5个，并保持数量和顺序对应' });
-  abstractPolicyIssues(project.paper.abstractCn, project.paper.abstractEn).forEach((message, index) => issues.push({ id: `abstract-policy-${index}`, severity: 'blocking', chapterId: '', message }));
+  frontMatterPolicyIssues({
+    titleEn: project.paper.titleEn,
+    abstractCn: project.paper.abstractCn,
+    abstractEn: project.paper.abstractEn,
+    keywords: project.paper.keywords,
+    keywordsEn: project.paper.keywordsEn,
+  }).forEach((message, index) => issues.push({ id: `abstract-policy-${index}`, severity: 'blocking', chapterId: '', message }));
   if (/时光荏苒|光阴似箭|白驹过隙|感谢[^，。]{0,8}(?:老师|同学|家人)[^，。]{0,8}[A-Za-z\u4e00-\u9fa5]{2,4}(?:老师|同学)?/.test(project.paper.acknowledgment || '')) issues.push({ id: 'acknowledgment', severity: 'warning', chapterId: '', message: '致谢存在模板化开头或疑似人名' });
   return uniqueQualityIssues(issues);
 }
@@ -2114,6 +2380,94 @@ function runLocalQuality() {
   project.paper.quality.bodyChars = totalBodyChars();
   project.paper.quality.checkedAt = nowIso();
   return project.paper.quality;
+}
+
+function frontMatterSnapshot() {
+  return {
+    titleEn: project.paper.titleEn,
+    abstractCn: project.paper.abstractCn,
+    abstractEn: project.paper.abstractEn,
+    keywords: project.paper.keywords,
+    keywordsEn: project.paper.keywordsEn,
+    acknowledgment: project.paper.acknowledgment,
+  };
+}
+
+async function repairFrontMatterIssues(problems, signal) {
+  const before = frontMatterSnapshot();
+  const beforeCount = frontMatterPolicyIssues(before).length;
+  const raw = await callAi([
+    { role: 'system', content: '你是本科论文前置内容修复编辑。保持JSON字段完整。中文摘要严格300至500字并分2至3个自然段，只概述研究目的、总体方法、主要功能、验证方式和结论，不展开器件、接线、程序或调试细节；不得出现具体型号、引脚和带单位数据。英文摘要与中文摘要含义一致。英文题目准确，中英文关键词各3至5个且顺序对应。致谢不出现人名、学校名、单位名或模板化开头。只返回JSON。' },
+    { role: 'user', content: JSON.stringify({ title: project.title, problems, existing: before }, null, 2) },
+  ], { reasoning: false, maxTokens: 5200, jsonMode: true, signal, requestLabel: '自动修复摘要与关键词', timeoutMs: 100000 });
+  const result = await parseAiJson(raw, { signal, requestLabel: '摘要与关键词修复', maxTokens: 5200 });
+  const after = {
+    titleEn: String(result.titleEn || '').trim(), abstractCn: String(result.abstractCn || '').trim(), abstractEn: String(result.abstractEn || '').trim(),
+    keywords: String(result.keywords || '').trim(), keywordsEn: String(result.keywordsEn || '').trim(), acknowledgment: String(result.acknowledgment || '').trim(),
+  };
+  if (frontMatterPolicyIssues(after).length >= beforeCount) return false;
+  Object.assign(project.paper, after);
+  return true;
+}
+
+async function repairChapterBlockingIssues(chapter, problems, signal) {
+  const saved = project.paper.chapters[chapter.id];
+  if (!saved?.content) return false;
+  const before = saved.content;
+  const beforeCount = localQualityIssues().filter(issue => issue.severity === 'blocking' && issue.chapterId === chapter.id).length;
+  const raw = await callAi([
+    {
+      role: 'system',
+      content: `你是单片机本科论文重点问题修复编辑。只修复problems列出的重点问题，保持本章全部有效正文、目录标题顺序、确认器件、引脚和功能不变，输出修复后的完整本章正文，不输出章标题、解释或评价。
+
+必须执行：删除重复和系统未完成式表述；修复与确认事实矛盾的硬件描述；任意图/表之间补入不少于80字的实质分析段落；器件图、电路图、实物图和功能图只保留独占一行的“【非正文·插图位置：图名】”和下一行“【非正文结束】”；框架图、结构图和流程图直接使用简洁Mermaid，流程图同时具有“开始”“结束”节点；引脚关系表不得有“信号方向”列；测试必须有量化表格。除51单片机外主控按最小系统开发板描述，5V输入经板载稳压得到3.3V，所有模块共地，凡上拉电阻统一10 kΩ，TFT统一1.8寸。禁止新增标题、器件、引脚、功能或文献。`,
+    },
+    { role: 'user', content: JSON.stringify({ title: project.title, chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections }, responsibility: Prompts.chapterResponsibilities?.(chapter.kind) || '', problems, confirmedFacts: project.paper.factSheet, artifacts: (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id), references: chapter.kind === 'introduction' ? project.paper.referenceRecords : [], existingChapter: before }, null, 2) },
+  ], { reasoning: false, maxTokens: 16000, signal, requestLabel: `自动修复第${chapter.id}章重点问题`, timeoutMs: 150000 });
+  const candidate = normalizeChapterText(raw, chapter);
+  if (countBodyChars(candidate) < Math.max(700, Math.floor(countBodyChars(before) * 0.78))) return false;
+  saved.content = candidate;
+  const afterCount = localQualityIssues().filter(issue => issue.severity === 'blocking' && issue.chapterId === chapter.id).length;
+  if (afterCount > beforeCount) {
+    saved.content = before;
+    return false;
+  }
+  saved.updatedAt = nowIso();
+  return candidate !== before;
+}
+
+async function autoRepairImportantQuality(signal) {
+  let changedAny = false;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const quality = runLocalQuality();
+    const blockers = quality.issues.filter(issue => issue.severity === 'blocking');
+    if (!blockers.length) break;
+    const generation = project.paper.generation;
+    generation.phase = 'quality';
+    generation.activeRequestLabel = `自动修复重点问题（第${pass + 1}轮）`;
+    generation.message = `检测到${blockers.length}项重点问题，正在自动修复并复检`;
+    await saveGenerationCheckpoint();
+    let changedThisPass = false;
+    if (blockers.some(issue => issue.id === 'body-length')) {
+      const beforeChars = totalBodyChars();
+      await expandBodyIfNeeded(signal);
+      changedThisPass ||= totalBodyChars() > beforeChars;
+    }
+    const frontProblems = blockers.filter(issue => !issue.chapterId && /摘要|关键词|英文论文题目|致谢/.test(issue.message));
+    if (frontProblems.length) changedThisPass ||= await repairFrontMatterIssues(frontProblems.map(item => item.message), signal);
+    const chapterIds = unique(blockers.map(issue => issue.chapterId).filter(Boolean));
+    for (const chapterId of chapterIds) {
+      const chapter = project.paper.outline.find(item => item.id === chapterId);
+      if (!chapter) continue;
+      const problems = blockers.filter(issue => issue.chapterId === chapterId).map(item => item.message);
+      changedThisPass ||= await repairChapterBlockingIssues(chapter, problems, signal);
+      await saveGenerationCheckpoint();
+    }
+    changedAny ||= changedThisPass;
+    const remaining = runLocalQuality().issues.filter(issue => issue.severity === 'blocking').length;
+    if (!changedThisPass || remaining >= blockers.length) break;
+  }
+  return changedAny;
 }
 
 function renderQuality() {
@@ -2179,9 +2533,12 @@ async function generatePaper() {
     await generateExtras(requestController.signal);
     await runFinalAudit(requestController.signal);
     generation.phase = 'quality';
-    generation.activeRequestLabel = '检查标题、图表、引用与字数';
-    generation.message = '正在运行本地确定性检查';
+    generation.activeRequestLabel = '检查并自动修复重点问题';
+    generation.message = '正在检查标题、图表间距、硬件事实、摘要、引用与字数';
     await saveGenerationCheckpoint();
+    runLocalQuality();
+    const autoRepaired = await autoRepairImportantQuality(requestController.signal);
+    if (autoRepaired) await runFinalAudit(requestController.signal);
     runLocalQuality();
     generation.status = 'completed';
     generation.phase = 'export';
@@ -2189,7 +2546,8 @@ async function generatePaper() {
     generation.currentChapterId = '';
     generation.activeRequestLabel = '';
     generation.completedAt = nowIso();
-    generation.message = project.paper.quality.issues.length ? `论文已生成，另有${project.paper.quality.issues.length}项提醒可继续修改` : '论文已生成并完成检查';
+    const blockers = project.paper.quality.issues.filter(item => item.severity === 'blocking').length;
+    generation.message = blockers ? `论文已生成并自动修复，仍有${blockers}项需要根据实物确认` : project.paper.quality.issues.length ? `论文已生成并自动修复，另有${project.paper.quality.issues.length}项普通提醒` : '论文已生成并完成自动修复与复检';
     generation.lastError = '';
     await saveGenerationCheckpoint();
     toast('论文已生成，正在准备DOCX', 'success');
@@ -2285,7 +2643,6 @@ function bindEvents() {
   $('active-project-select').addEventListener('change', event => activateProject(event.target.value));
   $('project-import-file').addEventListener('change', importProject);
   $('new-project-form').addEventListener('submit', createProjectFromDialog);
-  $('btn-open-settings').addEventListener('click', openSettings);
   $('api-connection-status').addEventListener('click', openSettings);
   $('settings-form').addEventListener('submit', submitApiSettings);
   $('btn-test-api').addEventListener('click', testApiConnection);
@@ -2296,7 +2653,6 @@ function bindEvents() {
     $('btn-toggle-api-key').textContent = visible ? '显示' : '隐藏';
     $('btn-toggle-api-key').setAttribute('aria-label', visible ? '显示API Key' : '隐藏API Key');
   });
-  qsa('input[name="api-mode"]').forEach(input => input.addEventListener('change', () => { $('custom-api-fields').hidden = qs('input[name="api-mode"]:checked')?.value !== 'custom'; }));
   $('api-provider').addEventListener('change', applyProviderPreset);
 
   $('scheme-form').addEventListener('submit', generateScheme);
