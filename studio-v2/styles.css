@@ -554,6 +554,10 @@ svg {
 .file-drop svg { width: 25px; height: 25px; }
 .file-drop strong { color: inherit; font-size: 14px; }
 .file-drop small { max-width: 50ch; overflow-wrap: anywhere; }
+.selected-file-list { margin-top: 8px; display: grid; gap: 4px; max-height: 150px; overflow: auto; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); color: var(--muted); font-size: 12px; }
+.selected-file-list:empty { display: none; }
+.selected-file-list span { overflow-wrap: anywhere; }
+.selected-file-list strong { color: var(--text); font-weight: 650; }
 
 .fact-strip { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; margin-bottom: 18px; }
 .fact-cell { min-width: 0; padding: 15px 18px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-sm); }

@@ -20,7 +20,7 @@ const API_PRESETS = Object.freeze({
   zhipu: { apiUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', chatModel: 'glm-5.2', reasoningModel: 'glm-5.2' },
   moonshot: { apiUrl: 'https://api.moonshot.cn/v1/chat/completions', chatModel: 'kimi-k3', reasoningModel: 'kimi-k3' },
   openai: { apiUrl: 'https://api.openai.com/v1/chat/completions', chatModel: 'gpt-5.6-terra', reasoningModel: 'gpt-5.6-sol' },
-  newapi9898: { apiUrl: 'https://www.9898.ai/v1', chatModel: 'gpt-5.4', reasoningModel: 'gpt-5.4' },
+  newapi9898: { apiUrl: 'https://www.9898.ai/v1', chatModel: 'gpt-5.5', reasoningModel: 'gpt-5.5' },
   compatible: { apiUrl: '', chatModel: '', reasoningModel: '' },
 });
 let activeApiConfig = { ...DEFAULT_API };
@@ -166,7 +166,7 @@ function createBlankProject(name = '未命名项目', start = 'paper') {
       step: 'materials',
       materials: {
         schemeSourceId: '', schemeRawText: '', schemeFilename: '', devicesText: '', functionsText: '', connectionsText: '', codeText: '', referencesText: '',
-        testInfo: '', toolsText: '', photoNotes: '', sourceNotes: '', filenames: [], outlineReferenceText: '', outlineReferenceFilename: '', targetBodyChars: MIN_BODY_CHARS,
+        testInfo: '', toolsText: '', photoNotes: '', sourceNotes: '', filenames: [], schematicFilename: '', schematicText: '', outlineReferenceText: '', outlineReferenceFilename: '', targetBodyChars: MIN_BODY_CHARS,
       },
       factSheet: {
         controller: '', devices: [], functions: [], mappings: [], powerNotes: [], fixedFacts: [], conflicts: [], conflictsAcknowledged: false, analyzedAt: '', confirmedAt: '',
@@ -563,7 +563,8 @@ async function handleProjectAction(button) {
   if (action === 'delete') {
     if (!confirm(`确定删除“${target.name || target.title}”吗？建议先导出备份。`)) return;
     await Store.deleteProject(id);
-    projects = projects.filter(item => item.id !== id);
+    // 以数据库回读结果为准，避免旧版迁移项目或多个标签页造成列表残留。
+    projects = (await Store.listProjects()).filter(item => item.id !== id);
     if (project?.id === id) {
       project = projects[0] ? normalizeProject(projects[0]) : null;
       Store.setActiveProjectId(project?.id || '');
@@ -1235,6 +1236,10 @@ function renderPaper() {
   $('paper-scheme-text').value = materials.schemeRawText || '';
   $('scheme-file-summary').textContent = materials.schemeFilename ? `已读取：${materials.schemeFilename}` : materials.schemeRawText ? '已粘贴方案文本' : '支持 DOCX、TXT、MD';
   $('code-file-summary').textContent = materials.filenames?.length ? `已读取 ${materials.filenames.length} 个文件` : '尚未选择';
+  renderCodeFileList(materials.filenames || []);
+  $('schematic-file-summary').textContent = materials.schematicFilename
+    ? `已读取：${materials.schematicFilename}${materials.schematicText ? `（${materials.schematicText.length}字）` : ''}`
+    : '尚未选择';
   $('outline-file-summary').textContent = materials.outlineReferenceFilename ? `已读取：${materials.outlineReferenceFilename}` : materials.outlineReferenceText ? '已粘贴参考目录' : '支持 DOCX、TXT、MD';
   renderPins();
   renderGeneration();
@@ -1282,7 +1287,115 @@ async function readCodeFolder(event) {
   if (project.paper.factSheet.analyzedAt) bumpFactRevision('程序资料已修改');
   await persistProject({ immediate: true });
   $('code-file-summary').textContent = `已读取 ${files.length} 个文件`;
+  renderCodeFileList(project.paper.materials.filenames);
   toast(`已读取 ${files.length} 个程序文件`, 'success');
+}
+
+function renderCodeFileList(filenames = []) {
+  const target = $('code-file-list');
+  if (!target) return;
+  const names = filenames.map(name => String(name || '')).filter(Boolean);
+  if (!names.length) { target.innerHTML = ''; return; }
+  const visible = names.slice(0, 100);
+  const extra = names.length - visible.length;
+  target.innerHTML = `<strong>已选文件</strong>${visible.map(name => `<span>${escapeHtml(name)}</span>`).join('')}${extra > 0 ? `<span>其余 ${extra} 个文件已读取</span>` : ''}`;
+}
+
+function binaryString(bytes) {
+  let output = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) output += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  return output;
+}
+
+function decodePdfLiteral(value) {
+  return String(value || '')
+    .replace(/\\([\\()])/g, '$1')
+    .replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\t/g, '\t')
+    .replace(/\\(\d{1,3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)));
+}
+
+function decodePdfHex(value) {
+  const hex = String(value || '').replace(/\s+/g, '');
+  if (!hex || !/^[0-9a-f]+$/i.test(hex)) return '';
+  const normalized = hex.length % 2 ? `${hex}0` : hex;
+  let output = '';
+  for (let index = 0; index < normalized.length; index += 2) output += String.fromCharCode(parseInt(normalized.slice(index, index + 2), 16));
+  return output;
+}
+
+async function extractPdfTextFallback(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const source = binaryString(bytes);
+  const pageTexts = [];
+  const streamPattern = /<<(?:.|\n|\r)*?>>\s*stream\r?\n/g;
+  let match;
+  while ((match = streamPattern.exec(source))) {
+    const start = streamPattern.lastIndex;
+    const end = source.indexOf('endstream', start);
+    if (end < 0) break;
+    let streamBytes = bytes.subarray(start, end);
+    if (/\/FlateDecode/.test(match[0]) && globalThis.DecompressionStream) {
+      try {
+        const compressed = new Blob([streamBytes]).stream().pipeThrough(new DecompressionStream('deflate'));
+        streamBytes = new Uint8Array(await new Response(compressed).arrayBuffer());
+      } catch {
+        // 个别PDF使用原始deflate，保留未解压文本继续尝试。
+      }
+    }
+    const text = binaryString(streamBytes);
+    const fragments = [];
+    text.replace(/\(((?:\\.|[^\\)])*)\)\s*Tj/g, (_, value) => { fragments.push(decodePdfLiteral(value)); return _; });
+    text.replace(/<([0-9a-f\s]+)>\s*Tj/gi, (_, value) => { fragments.push(decodePdfHex(value)); return _; });
+    text.replace(/\[((?:.|\n|\r)*?)\]\s*TJ/g, (_, values) => {
+      const parts = [...values.matchAll(/\(((?:\\.|[^\\)])*)\)/g)].map(item => decodePdfLiteral(item[1]));
+      parts.push(...[...values.matchAll(/<([0-9a-f\s]+)>/gi)].map(item => decodePdfHex(item[1])));
+      if (parts.length) fragments.push(parts.join(''));
+      return _;
+    });
+    const cleaned = fragments.join(' ').replace(/\s+/g, ' ').trim();
+    if (cleaned) pageTexts.push(cleaned);
+    streamPattern.lastIndex = end + 'endstream'.length;
+  }
+  return pageTexts.join('\n').trim();
+}
+
+async function readSchematicFile(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file || !project) return;
+  if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') return toast('请选择PDF原理图文件', 'error');
+  try {
+    const buffer = await file.arrayBuffer();
+    let extracted = '';
+    let pageCount = 1;
+    if (globalThis.pdfjsLib?.getDocument) {
+      const loadingTask = globalThis.pdfjsLib.getDocument({ data: new Uint8Array(buffer), disableWorker: true });
+      const pdf = await loadingTask.promise;
+      pageCount = pdf.numPages;
+      const pages = [];
+      for (let index = 1; index <= Math.min(pdf.numPages, 30); index += 1) {
+        const page = await pdf.getPage(index);
+        const content = await page.getTextContent();
+        const text = content.items.map(item => item.str || '').join(' ').replace(/\s+/g, ' ').trim();
+        if (text) pages.push(`第${index}页：${text}`);
+      }
+      extracted = pages.join('\n').trim();
+    } else {
+      extracted = await extractPdfTextFallback(buffer);
+    }
+    if (!extracted) throw new Error('PDF没有提取到可读文字，可能是扫描图；请先OCR或粘贴原理图文字');
+    const materials = project.paper.materials;
+    materials.schematicFilename = file.name;
+    materials.schematicText = extracted.slice(0, 100000);
+    $('schematic-file-summary').textContent = `已读取：${file.name}（${materials.schematicText.length}字）`;
+    resetHardwareAnalysis('原理图资料已更新');
+    await persistProject({ immediate: true });
+    toast(`已提取 ${pageCount} 页原理图文字，下一步会交给AI核对器件和引脚`, 'success');
+  } catch (error) {
+    $('schematic-file-summary').textContent = '读取失败，请检查PDF';
+    toast(error.message || 'PDF原理图读取失败', 'error');
+  }
 }
 
 function deviceFromLine(value, index = 0) {
@@ -2676,6 +2789,7 @@ function bindEvents() {
     capturePaperMaterials({ invalidate: true });
   });
   $('paper-code-folder').addEventListener('change', readCodeFolder);
+  $('paper-schematic-file').addEventListener('change', readSchematicFile);
   $('btn-reanalyze-pins').addEventListener('click', analyzeHardware);
   $('pin-mapping-body').addEventListener('change', event => { if (event.target.matches('[data-mapping-pin]')) updateMappingPin(event.target); });
   $('pin-mapping-body').addEventListener('click', event => { const button = event.target.closest('[data-delete-mapping]'); if (button) deleteMapping(button); });

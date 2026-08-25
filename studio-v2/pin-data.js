@@ -22,8 +22,9 @@ const FAMILIES = Object.freeze({
     pins: STM32_GPIO,
     reserved: ['PA13', 'PA14'],
     capabilities: {
-      i2c_scl: ['PB6','PB8'],
-      i2c_sda: ['PB7','PB9'],
+      // STM32F103 的 I2C2 使用 PB10/PB11；不能只列 I2C1 的默认复用脚。
+      i2c_scl: ['PB6','PB8','PB10'],
+      i2c_sda: ['PB7','PB9','PB11'],
       uart_tx: ['PA2','PA9','PB10'],
       uart_rx: ['PA3','PA10','PB11'],
       spi_sck: ['PA5','PB3','PB13'],

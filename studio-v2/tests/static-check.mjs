@@ -20,7 +20,10 @@ const assertions = [
   ['插图占位与正文区分', prompts.includes('【非正文·插图位置：图名】') && docx.includes("name: '论文插图提示'")],
   ['引脚表不含信号方向列', prompts.includes('外设、外设信号、主控引脚、说明') && prompts.includes('禁止“信号方向”列')],
   ['默认硬件规则完整', prompts.includes('最小系统开发板') && prompts.includes('10 kΩ') && prompts.includes('1.8寸')],
-  ['9898中转站专用预设', app.includes('newapi9898') && app.includes('gpt-5.4') && html.includes('9898.ai 中转站（GPT）') && app.includes('https://www.9898.ai/v1')],
+  ['9898中转站专用预设', app.includes('newapi9898') && app.includes('gpt-5.5') && html.includes('9898.ai 中转站（GPT）') && app.includes('https://www.9898.ai/v1')],
+  ['PDF原理图读取入口', html.includes('id="paper-schematic-file"') && app.includes('extractPdfTextFallback') && prompts.includes('schematicText')],
+  ['STM32F103完整I2C复用脚', /i2c_scl:\s*\['PB6','PB8','PB10'\]/.test(await readFile(new URL('../pin-data.js', import.meta.url), 'utf8')) && /i2c_sda:\s*\['PB7','PB9','PB11'\]/.test(await readFile(new URL('../pin-data.js', import.meta.url), 'utf8'))],
+  ['程序文件显示具体名称', html.includes('id="code-file-list"') && app.includes('renderCodeFileList')],
 ];
 const failedAssertions = assertions.filter(([, passed]) => !passed).map(([name]) => name);
 

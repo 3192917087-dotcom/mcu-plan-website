@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f6f8f7">
   <title>单片机方案与论文工作台 V2</title>
-  <link rel="stylesheet" href="styles.css?v=20260825-2">
+  <link rel="stylesheet" href="styles.css?v=20260825-3">
 </head>
 <body>
   <a class="skip-link" href="#workspace-main">跳到主要内容</a>
@@ -196,6 +196,13 @@
                       <span>程序文件夹 <small>读取其中的 .c 和 .h 文件</small></span>
                       <label class="file-drop" for="paper-code-folder"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/><path d="M12 10v6M9 13h6"/></svg><strong>选择程序文件夹</strong><small id="code-file-summary">尚未选择</small></label>
                       <input class="sr-only" id="paper-code-folder" type="file" webkitdirectory multiple accept=".c,.h,text/plain">
+                      <div id="code-file-list" class="selected-file-list" aria-live="polite"></div>
+                    </div>
+                    <div class="field field-wide">
+                      <span>PDF原理图 <small>先提取可读文字，再由AI整理器件和引脚；扫描图需先转为可复制文字</small></span>
+                      <label class="file-drop file-drop-compact" for="paper-schematic-file"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v5h5M9 13h6M9 17h6"/></svg><strong>选择PDF原理图</strong><small id="schematic-file-summary">尚未选择</small></label>
+                      <input class="sr-only" id="paper-schematic-file" type="file" accept="application/pdf,.pdf">
+                      <textarea class="sr-only" id="paper-schematic-text" aria-label="原理图提取文字"></textarea>
                     </div>
                     <div class="field field-wide outline-reference-field">
                       <span>参考目录 <small>可选，AI会参考结构后生成一版项目目录</small></span>
@@ -284,7 +291,7 @@
         <label class="field" for="api-provider"><span>厂家</span><select id="api-provider" required><option value="deepseek">DeepSeek</option><option value="zhipu">智谱GLM</option><option value="moonshot">Kimi / Moonshot</option><option value="openai">OpenAI</option><option value="newapi9898">9898.ai 中转站（GPT）</option><option value="compatible">其他兼容接口</option></select></label>
         <label class="field" for="api-url"><span>API地址</span><input id="api-url" type="url" required placeholder="https://.../v1 或完整 chat/completions 地址"><small>中转站请选择“其他兼容接口”，填写服务商提供的地址。</small></label>
         <label class="field" for="api-key"><span>API Key</span><span class="secret-input"><input id="api-key" type="password" autocomplete="off" required placeholder="sk-..."><button id="btn-toggle-api-key" type="button" aria-label="显示API Key">显示</button></span></label>
-        <div class="field-grid"><label class="field" for="api-chat-model"><span>写作模型</span><input id="api-chat-model" required><small>9898.ai可优先尝试 gpt-5.4，也可改为后台实际模型名。</small></label><label class="field" for="api-reasoning-model"><span>推理模型</span><input id="api-reasoning-model" required><small>不确定时可与写作模型相同。</small></label></div>
+        <div class="field-grid"><label class="field" for="api-chat-model"><span>写作模型</span><input id="api-chat-model" required><small>9898.ai当前可尝试 gpt-5.5，也可改为后台实际模型名。</small></label><label class="field" for="api-reasoning-model"><span>推理模型</span><input id="api-reasoning-model" required><small>不确定时可与写作模型相同。</small></label></div>
       </div>
       <div class="api-test-row"><span id="api-test-status">尚未测试</span><button class="button button-secondary" id="btn-test-api" type="button">测试连接</button></div>
       <footer><button class="button button-secondary" type="button" data-close-dialog>取消</button><button class="button button-primary" type="submit">保存设置</button></footer>
@@ -301,8 +308,9 @@
 
   <script src="github-config.js?v=20260824-1"></script>
   <script src="vendor/mammoth.browser.min.js"></script>
+  <script src="vendor/pdf.min.js"></script>
   <script src="vendor/docx.umd.js"></script>
-  <script src="docx-export.js?v=20260825-2"></script>
-  <script type="module" src="app.js?v=20260825-2"></script>
+  <script src="docx-export.js?v=20260825-3"></script>
+  <script type="module" src="app.js?v=20260825-3"></script>
 </body>
 </html>
