@@ -27,6 +27,7 @@ const assertions = [
   ['程序文件显示具体名称', html.includes('id="code-file-list"') && app.includes('renderCodeFileList')],
   ['PDF worker已内置', html.includes('vendor/pdf.worker.min.js') && pdfWorker.includes('WorkerMessageHandler')],
   ['真实引脚优先保留', app.includes('allPins(controller)') && app.includes('真实GPIO优先保留')],
+  ['原理图引脚不被误判', app.includes("source: schematicPins.has(proposed) ? 'schematic' : 'ai'") && app.includes('原理图识别')],
   ['表格超长触发自动修复', app.includes('必须按功能或模块拆分') && prompts.includes('主动按功能、模块或测试项目拆成多张表')],
   ['正文使用内置Normal样式', docx.includes("style = options.style ||") && !docx.includes("id: 'Normal',")],
 ];

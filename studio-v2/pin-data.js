@@ -114,7 +114,7 @@ export function validateMappings(controller, mappings = []) {
       issues.push({ id: mapping.id, type: 'missing', message: `${mapping.device} 的 ${mapping.signal} 尚未选择引脚` });
       return;
     }
-    if (!pinIsCompatible(controller, pin, mapping.signal, mapping.interfaceType)) {
+    if (mapping.source !== 'schematic' && !pinIsCompatible(controller, pin, mapping.signal, mapping.interfaceType)) {
       issues.push({ id: mapping.id, type: 'incompatible', message: `${mapping.device} 的 ${mapping.signal} 与 ${pin} 不兼容` });
     }
     if (!pinGroups.has(pin)) pinGroups.set(pin, []);

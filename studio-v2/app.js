@@ -1520,6 +1520,8 @@ async function analyzeHardware(event) {
     const controller = sanitizeTechnicalText(String(result.controller || inferController(project.title, devices)).trim());
     if (!devices.some(item => item.model.toLowerCase() === controller.toLowerCase())) devices.unshift({ id: makeId('device'), model: controller, role: is51Controller(controller) ? '主控单片机' : '主控最小系统开发板', interfaceType: 'GPIO' });
     const previousMappings = new Map((project.paper.factSheet.mappings || []).filter(item => item.source === 'user').map(item => [mappingKey(item), item]));
+    const schematicPinText = String(materials.schematicText || '').toUpperCase();
+    const schematicPins = new Set(schematicPinText.match(/\b(?:P[A-G]\d{1,2}|GPIO\d{1,2}|P\d\.\d)\b/g) || []);
     let mappings = (Array.isArray(result.mappings) ? result.mappings : []).map((item, index) => {
       const device = String(item.device || item.deviceModel || '').trim();
       const interfaceType = String(item.interfaceType || item.interface || 'GPIO').trim();
@@ -1537,7 +1539,7 @@ async function analyzeHardware(event) {
       const mapping = {
         id: item.id || `mapping-${index + 1}-${Math.random().toString(36).slice(2, 7)}`,
         device, interfaceType, signal, pin: proposed, alternatives,
-        busGroup: String(item.busGroup || '').trim(), shareAllowed: Boolean(item.shareAllowed), source: 'ai',
+        busGroup: String(item.busGroup || '').trim(), shareAllowed: Boolean(item.shareAllowed), source: schematicPins.has(proposed) ? 'schematic' : 'ai',
       };
       const userMapping = previousMappings.get(mappingKey(mapping));
       return userMapping ? { ...mapping, pin: userMapping.pin, source: 'user' } : mapping;
@@ -1613,7 +1615,7 @@ function renderPins() {
   $('pin-mapping-body').innerHTML = mappings.length ? mappings.map(mapping => {
     const rowIssues = issuesById.get(mapping.id) || [];
     const options = pinChoices(mapping).map(pin => `<option value="${escapeHtml(pin)}" ${pin === mapping.pin ? 'selected' : ''}>${escapeHtml(pin)}</option>`).join('');
-    return `<tr data-mapping-id="${escapeHtml(mapping.id)}" class="${rowIssues.length ? 'has-issue' : ''}"><td><strong>${escapeHtml(mapping.device)}</strong></td><td>${escapeHtml(mapping.interfaceType)}</td><td>${escapeHtml(mapping.signal)}</td><td><select data-mapping-pin aria-label="${escapeHtml(mapping.device)} ${escapeHtml(mapping.signal)} 引脚">${options}</select></td><td class="pin-status-cell"><span class="mapping-state ${rowIssues.length ? 'is-error' : ''}" title="${escapeHtml(rowIssues.map(issue => issue.message).join('；'))}">${rowIssues.length ? '需处理' : mapping.source === 'user' ? '用户确认' : 'AI建议'}</span></td><td><button class="mapping-delete" type="button" data-delete-mapping aria-label="删除${escapeHtml(mapping.device)} ${escapeHtml(mapping.signal)}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg></button></td></tr>`;
+    return `<tr data-mapping-id="${escapeHtml(mapping.id)}" class="${rowIssues.length ? 'has-issue' : ''}"><td><strong>${escapeHtml(mapping.device)}</strong></td><td>${escapeHtml(mapping.interfaceType)}</td><td>${escapeHtml(mapping.signal)}</td><td><select data-mapping-pin aria-label="${escapeHtml(mapping.device)} ${escapeHtml(mapping.signal)} 引脚">${options}</select></td><td class="pin-status-cell"><span class="mapping-state ${rowIssues.length ? 'is-error' : ''}" title="${escapeHtml(rowIssues.map(issue => issue.message).join('；'))}">${rowIssues.length ? '需处理' : mapping.source === 'user' ? '用户确认' : mapping.source === 'schematic' ? '原理图识别' : 'AI建议'}</span></td><td><button class="mapping-delete" type="button" data-delete-mapping aria-label="删除${escapeHtml(mapping.device)} ${escapeHtml(mapping.signal)}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg></button></td></tr>`;
   }).join('') : '<tr><td colspan="6">尚未生成引脚建议，请返回资料页进行分析。</td></tr>';
   $('hardware-notes').innerHTML = [...(facts.powerNotes || []), ...(facts.fixedFacts || [])].length
     ? `<ul>${[...(facts.powerNotes || []), ...(facts.fixedFacts || [])].map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
