@@ -4,6 +4,7 @@ const app = await readFile(new URL('../app.js', import.meta.url), 'utf8');
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const prompts = await readFile(new URL('../prompts.js', import.meta.url), 'utf8');
 const docx = await readFile(new URL('../docx-export.js', import.meta.url), 'utf8');
+const storage = await readFile(new URL('../storage.js', import.meta.url), 'utf8');
 const pdfWorker = await readFile(new URL('../vendor/pdf.worker.min.js', import.meta.url), 'utf8');
 const referencedIds = [...app.matchAll(/\$\('([^']+)'\)/g)].map(match => match[1]);
 const htmlIds = [...html.matchAll(/id="([^"]+)"/g)].map(match => match[1]);
@@ -28,6 +29,8 @@ const assertions = [
   ['PDF worker已内置', html.includes('vendor/pdf.worker.min.js') && pdfWorker.includes('WorkerMessageHandler')],
   ['真实引脚优先保留', app.includes('allPins(controller)') && app.includes('真实GPIO优先保留')],
   ['原理图引脚不被误判', app.includes("source: schematicPins.has(proposed) ? 'schematic' : 'ai'") && app.includes('原理图识别')],
+  ['旧版项目只迁移一次', storage.includes('LEGACY_MIGRATION_KEY') && storage.includes('hasMigratedLegacyProject') && app.includes('!Store.hasMigratedLegacyProject()')],
+  ['删除最后项目清理旧版来源', app.includes('if (!projects.length) Store.clearLegacyProject()')],
   ['表格超长触发自动修复', app.includes('必须按功能或模块拆分') && prompts.includes('主动按功能、模块或测试项目拆成多张表')],
   ['正文使用内置Normal样式', docx.includes("style = options.style ||") && !docx.includes("id: 'Normal',")],
 ];

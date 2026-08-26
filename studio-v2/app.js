@@ -404,15 +404,16 @@ async function init() {
   bindEvents();
   try {
     projects = await Store.listProjects();
-    if (!projects.length) {
+    if (!projects.length && !Store.hasMigratedLegacyProject()) {
       const legacy = Store.readLegacyProject();
       if (legacy) {
         const migrated = normalizeProject(legacy, { imported: true });
         migrated.name = legacy.title || '旧版迁移项目';
         await Store.saveProject(migrated);
+        Store.clearLegacyProject();
         projects = [migrated];
         Store.setActiveProjectId(migrated.id);
-        toast('旧版项目已复制到新版项目库', 'success');
+        toast('旧版项目已迁移到新版项目库', 'success');
       }
     }
     const activeId = Store.getActiveProjectId();
@@ -565,6 +566,7 @@ async function handleProjectAction(button) {
     await Store.deleteProject(id);
     // 以数据库回读结果为准，避免旧版迁移项目或多个标签页造成列表残留。
     projects = (await Store.listProjects()).filter(item => item.id !== id);
+    if (!projects.length) Store.clearLegacyProject();
     if (project?.id === id) {
       project = projects[0] ? normalizeProject(projects[0]) : null;
       Store.setActiveProjectId(project?.id || '');

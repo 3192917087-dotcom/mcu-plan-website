@@ -3,6 +3,7 @@ const DB_VERSION = 1;
 const PROJECT_STORE = 'projects';
 const ACTIVE_PROJECT_KEY = 'mcu-paper-studio-v2.active-project';
 const LEGACY_PROJECT_KEY = 'mcu-paper-studio.project.v1';
+const LEGACY_MIGRATION_KEY = 'mcu-paper-studio-v2.legacy-migrated';
 
 let databasePromise;
 
@@ -100,6 +101,15 @@ export function readLegacyProject() {
   } catch (error) {
     return null;
   }
+}
+
+export function clearLegacyProject() {
+  localStorage.removeItem(LEGACY_PROJECT_KEY);
+  localStorage.setItem(LEGACY_MIGRATION_KEY, '1');
+}
+
+export function hasMigratedLegacyProject() {
+  return localStorage.getItem(LEGACY_MIGRATION_KEY) === '1';
 }
 
 export function downloadProjectBackup(project) {
