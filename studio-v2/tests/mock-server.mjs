@@ -26,6 +26,23 @@ function chapterText(id, title) {
 function mockResponse(messages) {
   const system = String(messages.find(item => item.role === 'system')?.content || '');
   const user = String(messages.findLast(item => item.role === 'user')?.content || '');
+  if (system.includes('参考文献筛选员')) {
+    let parsed = {};
+    try { parsed = JSON.parse(user); } catch {}
+    const candidates = parsed.candidateReferences || [];
+    const requested = Number(parsed.requestedCount) || 15;
+    const targets = parsed.languageTargets || { chinese: Math.round(requested * 0.7), foreign: requested - Math.round(requested * 0.7) };
+    const chosen = [
+      ...candidates.filter(item => item.language === '中文').slice(0, targets.chinese),
+      ...candidates.filter(item => item.language === '外文').slice(0, targets.foreign),
+    ];
+    candidates.forEach(item => { if (chosen.length < requested && !chosen.some(existing => existing.id === item.id)) chosen.push(item); });
+    const selected = chosen.slice(0, requested).map(item => ({
+      id: item.id,
+      reason: `题名与${parsed.title || '当前课题'}的研究方向相关`,
+    }));
+    return JSON.stringify({ selected, summary: '已根据题目、器件、功能和出版信息筛选' });
+  }
   if (system.includes('硬件事实整理工程师')) {
     return JSON.stringify({
       controller: 'STM32F103C8T6',

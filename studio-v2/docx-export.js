@@ -2,6 +2,7 @@
 
 const {
   AlignmentType,
+  Bookmark,
   BorderStyle,
   Document,
   Footer,
@@ -9,6 +10,8 @@ const {
   LevelFormat,
   LineRuleType,
   NumberFormat,
+  NumberedItemReference,
+  SimpleField,
   PageBreak,
   PageNumber,
   PageOrientation,
@@ -27,7 +30,7 @@ const {
   convertMillimetersToTwip,
 } = globalThis.docx || {};
 
-if (!Document || !Packer) {
+if (!Document || !Packer || !Bookmark || !NumberedItemReference || !SimpleField) {
   throw new Error('DOCX 浏览器组件加载失败');
 }
 
@@ -51,6 +54,7 @@ const FONT_BODY = { ascii: LATIN_FONT, hAnsi: LATIN_FONT, eastAsia: CN_BODY_FONT
 const FONT_HEADING = { ascii: LATIN_FONT, hAnsi: LATIN_FONT, eastAsia: CN_HEADING_FONT, cs: LATIN_FONT };
 const FONT_LATIN = { ascii: LATIN_FONT, hAnsi: LATIN_FONT, eastAsia: LATIN_FONT, cs: LATIN_FONT };
 const FONT_MONO = { ascii: 'Consolas', hAnsi: 'Consolas', eastAsia: '等线', cs: 'Consolas' };
+let ACTIVE_REFERENCE_BOOKMARKS = null;
 
 function cleanText(value, maxLength = 200000) {
   return String(value || '')
@@ -144,7 +148,7 @@ function normalizePayload(input = {}) {
       place: cleanText(reference?.place || reference?.publication?.place, 200),
       formatted: cleanText(reference?.formatted || reference?.formattedCitation || reference?.raw, 2000).replace(/^\s*\[\d+\]\s*/, ''),
     }))
-    .filter(reference => reference.authors || reference.title);
+    .filter(reference => reference.authors || reference.title || reference.formatted);
   return {
     title: cleanText(input.title || '单片机本科毕业论文', 300),
     titleEn: cleanText(input.titleEn, 500),
@@ -190,18 +194,34 @@ function bodyRun(text, options = {}) {
   if (options.size) run.size = options.size;
   if (options.bold) run.bold = true;
   if (options.italics) run.italics = true;
+  if (options.superScript) run.superScript = true;
   if (options.color) run.color = options.color;
   if (options.break) run.break = options.break;
   return new TextRun(run);
 }
 
+function referenceField(number) {
+  const bookmarkId = ACTIVE_REFERENCE_BOOKMARKS?.get(Number(number));
+  if (!bookmarkId) return null;
+  const field = new NumberedItemReference(bookmarkId, String(number), { hyperlink: true, referenceFormat: 'none' });
+  // 保留缓存值的上标样式；打开WPS后更新域时，Word会继续使用该结果格式。
+  if (Array.isArray(field.root) && field.root[1]) field.root[1] = bodyRun(String(number), { superScript: true, size: 24 });
+  return field;
+}
+
 function inlineRuns(text, options = {}) {
   const source = cleanText(text, 100000);
   if (!source) return [bodyRun('')];
-  const parts = source.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
-  return parts.map(part => {
+  const parts = source.split(/(\*\*[^*]+\*\*|\[\d+\])/g).filter(Boolean);
+  return parts.flatMap(part => {
     const bold = /^\*\*[^*]+\*\*$/.test(part);
-    return bodyRun(bold ? part.slice(2, -2) : part, { ...options, bold: options.bold || bold });
+    const citation = /^\[\d+\]$/.test(part);
+    if (citation) {
+      const number = part.match(/^\[(\d+)\]$/)?.[1];
+      const field = referenceField(number);
+      if (field) return [bodyRun('[', { superScript: true, size: 24 }), field, bodyRun(']', { superScript: true, size: 24 })];
+    }
+    return bodyRun(bold ? part.slice(2, -2) : part, { ...options, bold: options.bold || bold, superScript: options.superScript || citation, size: citation ? 24 : options.size });
   });
 }
 
@@ -216,6 +236,9 @@ function headingParagraph(text, level, { pageBreakBefore = false } = {}) {
 function bodyParagraph(text, options = {}) {
   const paragraph = {
     children: inlineRuns(text, { bold: options.bold, italics: options.italics }),
+    alignment: options.alignment || AlignmentType.JUSTIFIED,
+    indent: { firstLine: options.noIndent ? 0 : BODY_FIRST_LINE },
+    spacing: { before: 0, after: 0, line: BODY_LINE, lineRule: LineRuleType.AUTO },
   };
   const style = options.style || (options.noIndent ? 'ThesisBodyNoIndent' : options.font === FONT_LATIN ? 'ThesisBodyEnglish' : 'Normal');
   if (style) paragraph.style = style;
@@ -247,6 +270,14 @@ function captionParagraph(text) {
     style: /^表\s*\d/.test(text) ? 'ThesisTableCaption' : 'ThesisFigureCaption',
     children: [bodyRun(text)],
   });
+}
+
+function abstractParagraphs(text, options = {}) {
+  const source = cleanText(text, 20000);
+  if (!source) return [];
+  const paragraphs = source.split(/\n\s*\n/).map(item => item.trim()).filter(Boolean);
+  const normalized = paragraphs.length > 1 ? paragraphs : source.split(/\n/).map(item => item.trim()).filter(Boolean);
+  return normalized.map(item => bodyParagraph(item, options));
 }
 
 function listParagraph(text, ordered) {
@@ -465,10 +496,19 @@ function referenceParagraph(reference, index) {
     }
     entry = `${head}${tail ? `. ${tail}` : ''}.`.replace(/\s+([,.:])/g, '$1').replace(/\.{2,}$/g, '.');
   }
-  const text = `[${index + 1}] ${entry}`;
+  const number = index + 1;
+  const bookmarkId = `Ref${number}`;
+  const sequenceField = new SimpleField(' SEQ ThesisReference ', String(number));
+  if (Array.isArray(sequenceField.root) && sequenceField.root[1]) sequenceField.root[1] = bodyRun(String(number), { size: 24 });
+  const referenceNumber = new Bookmark({ id: bookmarkId, children: [sequenceField] });
   return new Paragraph({
     style: 'ThesisReference',
-    children: [bodyRun(text)],
+    children: [
+      bodyRun('[', { size: 24 }),
+      referenceNumber,
+      bodyRun('] ', { size: 24 }),
+      bodyRun(entry),
+    ],
   });
 }
 
@@ -481,15 +521,15 @@ function documentStyles() {
       },
       heading1: {
         run: { font: FONT_HEADING, size: 32, bold: true, color: '000000' },
-        paragraph: { alignment: AlignmentType.CENTER, keepNext: true, outlineLevel: 0, spacing: { before: 0, after: 240, line: BODY_LINE, lineRule: LineRuleType.AUTO } },
+        paragraph: { alignment: AlignmentType.CENTER, keepNext: true, outlineLevel: 0, indent: { firstLine: 0 }, spacing: { before: 0, after: 240, line: BODY_LINE, lineRule: LineRuleType.AUTO } },
       },
       heading2: {
         run: { font: FONT_HEADING, size: 28, bold: true, color: '000000' },
-        paragraph: { alignment: AlignmentType.LEFT, keepNext: true, outlineLevel: 1, spacing: { before: 240, after: 120, line: BODY_LINE, lineRule: LineRuleType.AUTO } },
+        paragraph: { alignment: AlignmentType.LEFT, keepNext: true, outlineLevel: 1, indent: { firstLine: 0 }, spacing: { before: 240, after: 120, line: BODY_LINE, lineRule: LineRuleType.AUTO } },
       },
       heading3: {
         run: { font: FONT_HEADING, size: 24, bold: true, color: '000000' },
-        paragraph: { alignment: AlignmentType.LEFT, keepNext: true, outlineLevel: 2, spacing: { before: 120, after: 60, line: BODY_LINE, lineRule: LineRuleType.AUTO } },
+        paragraph: { alignment: AlignmentType.LEFT, keepNext: true, outlineLevel: 2, indent: { firstLine: 0 }, spacing: { before: 120, after: 60, line: BODY_LINE, lineRule: LineRuleType.AUTO } },
       },
     },
     paragraphStyles: [
@@ -628,6 +668,7 @@ async function buildPaperDocx(input) {
   const data = normalizePayload(input);
   if (!data.title) throw new Error('论文题目不能为空');
   if (data.chapters.length < 1) throw new Error('论文正文不能为空');
+  ACTIVE_REFERENCE_BOOKMARKS = new Map(data.references.map((_, index) => [index + 1, `Ref${index + 1}`]));
 
   const coverChildren = [
     new Paragraph({
@@ -645,11 +686,11 @@ async function buildPaperDocx(input) {
 
   const frontChildren = [
     frontHeading('摘  要'),
-    ...(data.abstractCn ? [bodyParagraph(data.abstractCn)] : [bodyParagraph('摘要内容待补充。')]),
+    ...(data.abstractCn ? abstractParagraphs(data.abstractCn) : [bodyParagraph('摘要内容待补充。')]),
     ...(data.keywords ? [keywordParagraph(data.keywords)] : []),
     ...(data.titleEn ? [englishTitleParagraph(data.titleEn, { pageBreakBefore: true })] : [frontHeading('Abstract', { english: true, pageBreakBefore: true })]),
     ...(data.titleEn ? [frontHeading('Abstract', { english: true })] : []),
-    ...(data.abstractEn ? [bodyParagraph(data.abstractEn, { font: FONT_LATIN })] : [bodyParagraph('Abstract pending.', { font: FONT_LATIN })]),
+    ...(data.abstractEn ? abstractParagraphs(data.abstractEn, { font: FONT_LATIN }) : [bodyParagraph('Abstract pending.', { font: FONT_LATIN })]),
     ...(data.keywordsEn ? [keywordParagraph(data.keywordsEn, { english: true })] : []),
     frontHeading('目  录', { pageBreakBefore: true }),
     new TableOfContents('论文目录', { hyperlink: true, headingStyleRange: '1-3', useAppliedParagraphOutlineLevel: true }),
@@ -707,7 +748,11 @@ async function buildPaperDocx(input) {
       },
     ],
   });
-  return Packer.toBlob(doc);
+  try {
+    return await Packer.toBlob(doc);
+  } finally {
+    ACTIVE_REFERENCE_BOOKMARKS = null;
+  }
 }
 
 async function buildSchemeDocx(input = {}) {

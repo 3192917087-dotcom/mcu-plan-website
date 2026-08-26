@@ -1,11 +1,15 @@
 import * as Store from './storage.js?v=20260826-1';
-import * as Prompts from './prompts.js?v=20260825-1';
+import * as Prompts from './prompts.js?v=20260826-9';
 import { allPins, compatiblePins, validateMappings } from './pin-data.js?v=20260824-2';
+import { REFERENCE_LIBRARY, REFERENCE_LIBRARY_META } from './reference-library.js?v=20260826-2';
 import * as Rules from '../studio-next/rules.js?v=20260824-6';
 
 const PAGE_CONFIG = globalThis.MCU_PAGE_CONFIG || {};
 const APP_TITLE = '单片机方案与论文工作台 V2';
 const API_SETTINGS_KEY = 'mcu-paper-studio-v2.api-settings';
+const REFERENCE_TOOL_KEY = 'mcu-paper-studio-v2.reference-tool';
+const MOTIVATION_KEY = 'mcu-paper-studio-v2.daily-motivation-v2';
+const MOTIVATION_REFRESH_MS = 10 * 60 * 1000;
 const MIN_BODY_CHARS = 18000;
 const DEFAULT_API = Object.freeze({
   mode: 'user',
@@ -25,13 +29,6 @@ const API_PRESETS = Object.freeze({
 });
 let activeApiConfig = { ...DEFAULT_API };
 
-const DEFAULT_REFERENCES = Object.freeze([
-  { authors: '谭浩强', title: 'C程序设计（第五版）', documentType: 'M', place: '北京', publisher: '清华大学出版社', year: '2017', formatted: '谭浩强. C程序设计（第五版）[M]. 北京: 清华大学出版社, 2017.' },
-  { authors: '张毅刚', title: '单片机原理及应用', documentType: 'M', place: '北京', publisher: '高等教育出版社', year: '2016', formatted: '张毅刚. 单片机原理及应用[M]. 北京: 高等教育出版社, 2016.' },
-  { authors: 'Joseph Yiu', title: 'The Definitive Guide to ARM Cortex-M3 and Cortex-M4 Processors', documentType: 'M', place: 'Oxford', publisher: 'Newnes', year: '2013', formatted: 'Yiu J. The Definitive Guide to ARM Cortex-M3 and Cortex-M4 Processors[M]. 3rd ed. Oxford: Newnes, 2013.' },
-  { authors: 'STMicroelectronics', title: 'RM0008 STM32F101xx, STM32F102xx, STM32F103xx, STM32F105xx and STM32F107xx Reference Manual', documentType: 'EB/OL', publisher: 'STMicroelectronics', year: '2021', formatted: 'STMicroelectronics. RM0008 STM32F101xx, STM32F102xx, STM32F103xx, STM32F105xx and STM32F107xx Reference Manual[EB/OL]. STMicroelectronics, 2021.' },
-]);
-
 const $ = id => document.getElementById(id);
 const qs = (selector, root = document) => root.querySelector(selector);
 const qsa = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -47,6 +44,21 @@ let saveTimer = null;
 let saveQueue = Promise.resolve();
 let generationClock = null;
 let operationStatusTimer = null;
+let standaloneReferenceState = {
+  title: '', notes: '', count: 15, selectedIds: [], recommendationIds: [], reasons: {}, source: '', summary: '', updatedAt: '',
+};
+let dailyMotivationState = { date: '', text: '', source: '' };
+let motivationRefreshTimer = null;
+let motivationRequestInFlight = false;
+const FALLBACK_MOTIVATIONS = Object.freeze([
+  '长风破浪会有时，直挂云帆济沧海。',
+  '不积跬步，无以至千里；不积小流，无以成江海。',
+  '千磨万击还坚劲，任尔东西南北风。',
+  '纸上得来终觉浅，绝知此事要躬行。',
+  '天行健，君子以自强不息。',
+  '山重水复疑无路，柳暗花明又一村。',
+  '博观而约取，厚积而薄发。',
+]);
 
 function nowIso() { return new Date().toISOString(); }
 function makeId(prefix = 'item') {
@@ -65,7 +77,119 @@ function sanitizeTechnicalText(value) {
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 }
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 function safeFilename(value) { return String(value || '未命名项目').replace(/[\\/:*?"<>|]/g, '_').slice(0, 70); }
+function clampReferenceCount(value) { return Math.max(5, Math.min(30, Number(value) || 15)); }
+function loadStandaloneReferenceState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(REFERENCE_TOOL_KEY) || '{}');
+    standaloneReferenceState = { ...standaloneReferenceState, ...saved, count: clampReferenceCount(saved.count) };
+  } catch (error) {}
+}
+function saveStandaloneReferenceState() {
+  try { localStorage.setItem(REFERENCE_TOOL_KEY, JSON.stringify(standaloneReferenceState)); } catch (error) {}
+}
+function clearStandaloneReferenceResults() {
+  standaloneReferenceState = {
+    ...standaloneReferenceState,
+    selectedIds: [],
+    recommendationIds: [],
+    reasons: {},
+    source: '',
+    summary: '',
+    updatedAt: '',
+  };
+  saveStandaloneReferenceState();
+  renderStandaloneReferenceTool();
+  toast('文献推荐结果已清除', 'success');
+}
+function todayKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+function loadDailyMotivation() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(MOTIVATION_KEY) || '{}');
+    dailyMotivationState = { ...dailyMotivationState, ...saved };
+  } catch (error) {}
+  const date = todayKey();
+  if (dailyMotivationState.date !== date || !dailyMotivationState.text) {
+    dailyMotivationState = { date, text: FALLBACK_MOTIVATIONS[Math.floor(Date.now() / 86400000) % FALLBACK_MOTIVATIONS.length], source: 'local' };
+    saveDailyMotivation();
+  }
+}
+function saveDailyMotivation() {
+  try { localStorage.setItem(MOTIVATION_KEY, JSON.stringify(dailyMotivationState)); } catch (error) {}
+}
+function renderDailyMotivation() {
+  const node = $('daily-motivation-text');
+  if (!node) return;
+  const text = dailyMotivationState.text || FALLBACK_MOTIVATIONS[0];
+  qsa('.daily-motivation-text', $('daily-motivation-track')).forEach(item => { item.textContent = text; });
+  restartMotivationTicker();
+}
+function restartMotivationTicker() {
+  const track = $('daily-motivation-track');
+  const first = $('daily-motivation-text');
+  const viewport = qs('.daily-motivation-viewport');
+  if (!track || !first || !viewport) return;
+  track.classList.remove('is-running');
+  // 保证滚动轨道始终覆盖视口，前一份文字离开左侧时后一份从右侧接上。
+  const gap = parseFloat(getComputedStyle(track).columnGap || getComputedStyle(track).gap || '0') || 0;
+  const shift = first.getBoundingClientRect().width + gap;
+  track.style.setProperty('--motivation-shift', `${shift}px`);
+  let copies = qsa('.daily-motivation-text', track).length;
+  while (track.scrollWidth < viewport.clientWidth + shift && copies < 24) {
+    const clone = first.cloneNode(true);
+    clone.removeAttribute('id');
+    clone.setAttribute('aria-hidden', 'true');
+    track.append(clone);
+    copies += 1;
+  }
+  void track.offsetWidth;
+  track.classList.add('is-running');
+}
+function rotateFallbackMotivation() {
+  const currentIndex = FALLBACK_MOTIVATIONS.indexOf(dailyMotivationState.text);
+  const nextIndex = (currentIndex + 1 + FALLBACK_MOTIVATIONS.length) % FALLBACK_MOTIVATIONS.length;
+  dailyMotivationState = { date: todayKey(), text: FALLBACK_MOTIVATIONS[nextIndex], source: 'local' };
+  saveDailyMotivation();
+  renderDailyMotivation();
+}
+function scheduleDailyMotivationRefresh() {
+  if (motivationRefreshTimer) clearInterval(motivationRefreshTimer);
+  motivationRefreshTimer = setInterval(() => { void refreshDailyMotivation({ force: true }); }, MOTIVATION_REFRESH_MS);
+}
+async function refreshDailyMotivation({ force = false } = {}) {
+  if (motivationRequestInFlight) return;
+  const date = todayKey();
+  if (dailyMotivationState.date !== date) loadDailyMotivation();
+  renderDailyMotivation();
+  if (!force && dailyMotivationState.source === 'ai' && dailyMotivationState.date === date) return;
+  if (!activeApiConfig.apiKey) {
+    if (force) rotateFallbackMotivation();
+    return;
+  }
+  motivationRequestInFlight = true;
+  try {
+    const slot = Math.floor(Date.now() / MOTIVATION_REFRESH_MS);
+    const raw = await callAi(Prompts.buildDailyMotivationMessages({ date, slot }), { reasoning: false, maxTokens: 240, jsonMode: true, requestLabel: '励志语更新', timeoutMs: 25000 });
+    const result = await parseAiJson(raw, { requestLabel: '每日鼓励语', maxTokens: 240 });
+    const text = String(result.text || '').replace(/[\r\n]+/g, ' ').replace(/^['“”"\s]+|['“”"\s]+$/g, '').trim();
+    if (text.length >= 8 && text.length <= 80 && !/(API|模型|AI|接口|生成失败)/i.test(text)) {
+      dailyMotivationState = { date, text, source: 'ai', slot };
+      saveDailyMotivation();
+      renderDailyMotivation();
+    }
+  } catch (error) {
+    // 本地语句已经先行显示，鼓励语失败不影响方案和论文功能。
+    if (force) rotateFallbackMotivation();
+  } finally {
+    motivationRequestInFlight = false;
+  }
+}
 function countBodyChars(value) {
   return String(value || '')
     .replace(/【非正文·[\s\S]*?【非正文结束】/g, '')
@@ -143,7 +267,7 @@ function createBlankProject(name = '未命名项目', start = 'paper') {
   const title = name === '未命名项目' ? '' : name;
   const outline = [];
   return {
-    schemaVersion: 25,
+    schemaVersion: 26,
     id: makeId('project'),
     name,
     title,
@@ -167,6 +291,8 @@ function createBlankProject(name = '未命名项目', start = 'paper') {
       materials: {
         schemeSourceId: '', schemeRawText: '', schemeFilename: '', devicesText: '', functionsText: '', connectionsText: '', codeText: '', referencesText: '',
         testInfo: '', toolsText: '', photoNotes: '', sourceNotes: '', filenames: [], schematicFilename: '', schematicText: '', outlineReferenceText: '', outlineReferenceFilename: '', targetBodyChars: MIN_BODY_CHARS,
+        useReferencesInPaper: true, referenceRecommendationCount: 15,
+        referenceRecommendationIds: [], referenceRecommendationReasons: {}, referenceRecommendationSource: '', referenceRecommendationSummary: '', referenceRecommendationAt: '',
       },
       factSheet: {
         controller: '', devices: [], functions: [], mappings: [], powerNotes: [], fixedFacts: [], conflicts: [], conflictsAcknowledged: false, analyzedAt: '', confirmedAt: '',
@@ -262,7 +388,7 @@ function normalizeProject(source, options = {}) {
     if (duplicate || imported) normalized.id = makeId('project');
     if (duplicate) normalized.name = `${normalized.name || normalized.title || '项目'} 副本`;
     normalized.paper.materials.targetBodyChars = Math.max(MIN_BODY_CHARS, Math.min(40000, Number(normalized.paper.materials.targetBodyChars) || MIN_BODY_CHARS));
-    normalized.schemaVersion = 25;
+    normalized.schemaVersion = 26;
     normalized.updatedAt = nowIso();
     normalized.createdAt = duplicate || imported ? nowIso() : normalized.createdAt || nowIso();
     if (normalized.paper.generation.status === 'running') {
@@ -401,6 +527,7 @@ function updateProjectNameFromTitle() {
 
 async function init() {
   activeApiConfig = loadStoredCustomApiSettings() || { ...DEFAULT_API };
+  loadStandaloneReferenceState();
   bindEvents();
   try {
     projects = await Store.listProjects();
@@ -424,9 +551,12 @@ async function init() {
       paperStep = project.paper.step || 'materials';
     }
     const requestedRoute = location.hash.replace('#', '');
-    currentRoute = ['projects', 'scheme', 'paper'].includes(requestedRoute) && (project || requestedRoute === 'projects') ? requestedRoute : 'projects';
+    currentRoute = ['projects', 'scheme', 'paper', 'tools'].includes(requestedRoute) && (project || ['projects', 'tools'].includes(requestedRoute)) ? requestedRoute : 'projects';
+    loadDailyMotivation();
     renderAll();
+    scheduleDailyMotivationRefresh();
     void checkActiveApiConnection({ silent: true });
+    void refreshDailyMotivation();
   } catch (error) {
     toast(error.message || '项目数据库初始化失败', 'error');
     console.error(error);
@@ -437,6 +567,7 @@ function renderAll() {
   qsa('[data-current-project-name]').forEach(node => { node.textContent = project?.name || project?.title || '尚未选择项目'; });
   renderProjectSwitcher();
   renderProjects();
+  renderStandaloneReferenceTool();
   if (project) {
     renderScheme();
     renderPaper();
@@ -487,17 +618,18 @@ function renderProjects() {
 }
 
 function setRoute(route, options = {}) {
-  if (route !== 'projects' && !project) {
+  if (['scheme', 'paper'].includes(route) && !project) {
     openNewProjectDialog(route === 'scheme' ? 'scheme' : 'paper');
     return;
   }
-  currentRoute = ['projects', 'scheme', 'paper'].includes(route) ? route : 'projects';
+  currentRoute = ['projects', 'scheme', 'paper', 'tools'].includes(route) ? route : 'projects';
   qsa('.route-view').forEach(view => view.classList.toggle('is-active', view.dataset.view === currentRoute));
   qsa('.nav-item').forEach(button => button.classList.toggle('is-active', button.dataset.route === currentRoute));
   if (options.render !== false) {
     if (currentRoute === 'projects') renderProjects();
     if (currentRoute === 'scheme') renderScheme();
     if (currentRoute === 'paper') renderPaper();
+    if (currentRoute === 'tools') renderStandaloneReferenceTool();
   }
   history.replaceState(null, '', `#${currentRoute}`);
   requestAnimationFrame(() => $('workspace-main')?.focus({ preventScroll: true }));
@@ -1174,10 +1306,13 @@ function capturePaperMaterials({ invalidate = true } = {}) {
   const previousHardware = JSON.stringify({ title: project.title, devicesText: materials.devicesText, functionsText: materials.functionsText, codeText: materials.codeText, sourceNotes: materials.sourceNotes });
   const previousOutlineReference = materials.outlineReferenceText || '';
   const previousTargetBodyChars = Number(materials.targetBodyChars) || MIN_BODY_CHARS;
+  const previousReferences = JSON.stringify({ text: materials.referencesText || '', use: materials.useReferencesInPaper !== false, count: clampReferenceCount(materials.referenceRecommendationCount) });
   project.title = $('paper-title-input')?.value.trim() || project.title || '';
   materials.devicesText = sanitizeTechnicalText($('paper-devices')?.value.trim() || '');
   materials.functionsText = sanitizeTechnicalText($('paper-functions')?.value.trim() || '');
   materials.referencesText = $('paper-references')?.value.trim() || '';
+  materials.useReferencesInPaper = $('paper-use-references')?.checked !== false;
+  materials.referenceRecommendationCount = clampReferenceCount($('paper-reference-count')?.value);
   materials.testInfo = $('paper-test-info')?.value.trim() || '';
   materials.toolsText = $('paper-tools')?.value.trim() || '';
   materials.photoNotes = $('paper-photo-notes')?.value.trim() || '';
@@ -1187,9 +1322,15 @@ function capturePaperMaterials({ invalidate = true } = {}) {
   if (previousOutlineReference !== materials.outlineReferenceText) materials.outlineReferenceFilename = '';
   updateProjectNameFromTitle();
   const nextHardware = JSON.stringify({ title: project.title, devicesText: materials.devicesText, functionsText: materials.functionsText, codeText: materials.codeText, sourceNotes: materials.sourceNotes });
+  const nextReferences = JSON.stringify({ text: materials.referencesText || '', use: materials.useReferencesInPaper !== false, count: materials.referenceRecommendationCount });
   if (invalidate && previousHardware !== nextHardware) resetHardwareAnalysis('器件资料已修改');
   else if (invalidate && previousOutlineReference !== materials.outlineReferenceText) invalidateOutlinePlan('参考目录已修改');
   else if (invalidate && previousTargetBodyChars !== materials.targetBodyChars) invalidateOutlinePlan('正文目标字数已修改');
+  else if (invalidate && previousReferences !== nextReferences && project.paper.chapters?.['1']?.content) {
+    project.paper.chapters['1'].status = 'stale';
+    project.paper.generation.status = 'stale';
+    project.paper.generation.message = '参考文献设置已修改，第一章需要更新';
+  }
   persistProject();
 }
 
@@ -1229,6 +1370,9 @@ function renderPaper() {
   $('paper-devices').value = materials.devicesText || '';
   $('paper-functions').value = materials.functionsText || '';
   $('paper-references').value = materials.referencesText || '';
+  $('paper-use-references').checked = materials.useReferencesInPaper !== false;
+  $('paper-reference-count').value = String(clampReferenceCount(materials.referenceRecommendationCount));
+  renderReferenceTool();
   $('paper-test-info').value = materials.testInfo || '';
   $('paper-tools').value = materials.toolsText || '';
   $('paper-photo-notes').value = materials.photoNotes || '';
@@ -1694,15 +1838,20 @@ function artifactPlanKey(item) {
   return `${item.chapterId}|${item.type}|${title}`;
 }
 
+const FIGURE_ARTIFACT_TYPES = new Set(['device-image', 'result-image', 'circuit', 'system-framework', 'software-architecture', 'flowchart', 'timing']);
+const TABLE_ARTIFACT_TYPES = new Set(['comparison-table', 'pin-table', 'test-table']);
+
 function mergeRequiredArtifacts(outline, planned = []) {
   const facts = project.paper.factSheet;
   const devices = [...(facts.devices || [])];
   if (facts.controller && !devices.some(device => String(device.model || '').toLowerCase() === String(facts.controller).toLowerCase())) {
     devices.unshift({ id: `device-controller-${facts.controller}`, model: facts.controller, role: is51Controller(facts.controller) ? '主控单片机' : '主控最小系统开发板', interfaceType: 'GPIO' });
   }
-  const baseline = Prompts.buildArtifactPlan({ outline, devices, functions: facts.functions });
+  const baseline = Prompts.buildArtifactPlan({ outline, devices, functions: facts.functions, mappings: facts.mappings || [] });
   const merged = [];
   [...planned, ...baseline].forEach(item => {
+    if (item.type === 'hardware-block') return;
+    if (item.type === 'pin-table' && (item.sourceFactIds || []).length > 1) return;
     const sourceIds = unique(item.sourceFactIds || []);
     const existing = merged.find(existing => {
       if (artifactPlanKey(existing) === artifactPlanKey(item)) return true;
@@ -1717,7 +1866,26 @@ function mergeRequiredArtifacts(outline, planned = []) {
       existing.sourceFactIds = unique([...(existing.sourceFactIds || []), ...sourceIds]);
     }
   });
-  return merged;
+  const figureCounts = new Map();
+  const tableCounts = new Map();
+  const formulaCounts = new Map();
+  return merged.map(item => {
+    const output = { ...item };
+    if (FIGURE_ARTIFACT_TYPES.has(item.type)) {
+      const number = (figureCounts.get(item.chapterId) || 0) + 1;
+      figureCounts.set(item.chapterId, number);
+      output.figureNumber = `${item.chapterId}-${number}`;
+    } else if (TABLE_ARTIFACT_TYPES.has(item.type)) {
+      const number = (tableCounts.get(item.chapterId) || 0) + 1;
+      tableCounts.set(item.chapterId, number);
+      output.tableNumber = `${item.chapterId}-${number}`;
+    } else if (item.type === 'formula') {
+      const number = (formulaCounts.get(item.chapterId) || 0) + 1;
+      formulaCounts.set(item.chapterId, number);
+      output.formulaNumber = `${item.chapterId}-${number}`;
+    }
+    return output;
+  });
 }
 
 function normalizeOutlinePlanResult(result, targetBodyChars = MIN_BODY_CHARS) {
@@ -1766,16 +1934,34 @@ function generationArtifactPlanIssues(artifacts = []) {
   const errors = [];
   const hasType = (type, chapterId) => artifacts.some(item => item.type === type && (!chapterId || item.chapterId === chapterId));
   if (!hasType('system-framework', '2') || !hasType('comparison-table', '2')) errors.push('第二章缺少总体框架图或器件选型对比表');
-  if (!hasType('hardware-block', '3') || !hasType('pin-table', '3') || !hasType('circuit', '3')) errors.push('第三章缺少硬件组成图、简要引脚表或电路图');
+  if (hasType('hardware-block', '3')) errors.push('第三章不得重复生成系统硬件组成图，总体框架只保留在第二章');
+  if (!hasType('circuit', '3')) errors.push('第三章缺少器件电路图');
   if (!hasType('software-architecture', '4') || !hasType('flowchart', '4')) errors.push('第四章缺少软件结构图或流程图');
   if (!hasType('test-table', '5') || !hasType('result-image', '5')) errors.push('第五章缺少量化测试表或功能展示图');
-  if (!hasType('formula')) errors.push('论文生成规则至少需要一个与真实计算或测试分析相关的公式');
-  const actualDevices = [...(project.paper.factSheet.devices || [])];
+  if (artifacts.some(item => item.type === 'formula' && item.chapterId !== '4')) errors.push('公式应放在第四章软件设计，不应放在第五章');
+  const actualDevices = (project.paper.factSheet.devices || []).map((device, index) => ({ ...device, id: device.id || 'device-' + (index + 1) }));
   const controller = project.paper.factSheet.controller;
   if (controller && !actualDevices.some(device => String(device.model || '').toLowerCase() === String(controller).toLowerCase())) actualDevices.unshift({ id: `device-controller-${controller}`, model: controller, role: '主控' });
-  actualDevices.forEach(device => {
+  const plannedDeviceKeys = new Set();
+  const plannedDevices = actualDevices.filter(device => {
+    const key = String(device.model || '').replace(/[\s（）()_-]/g, '').toLowerCase();
+    if (!key || plannedDeviceKeys.has(key)) return false;
+    plannedDeviceKeys.add(key);
+    return true;
+  });
+  plannedDevices.forEach(device => {
+    if (!artifacts.some(item => item.type === 'comparison-table' && item.chapterId === '2' && (item.sourceFactIds || []).includes(device.id))) errors.push(device.model + '缺少独立选型对比表计划');
     if (!artifacts.some(item => item.type === 'device-image' && (item.sourceFactIds || []).includes(device.id))) errors.push(`${device.model}缺少第二章器件图计划`);
     if (!artifacts.some(item => item.type === 'circuit' && (item.sourceFactIds || []).includes(device.id))) errors.push(`${device.model}缺少第三章电路图计划`);
+  });
+  const mappedDeviceNames = unique((project.paper.factSheet.mappings || []).map(mapping => mapping.device));
+  mappedDeviceNames.forEach(deviceName => {
+    const mappingKey = String(deviceName || '').replace(/[\s（）()_-]/g, '').toLowerCase();
+    const device = plannedDevices.find(item => {
+      const deviceKey = String(item.model || '').replace(/[\s（）()_-]/g, '').toLowerCase();
+      return mappingKey && deviceKey && (mappingKey === deviceKey || mappingKey.includes(deviceKey) || deviceKey.includes(mappingKey));
+    });
+    if (device && !artifacts.some(item => item.type === 'pin-table' && (item.sourceFactIds || []).includes(device.id))) errors.push(`${device.model}缺少就近放置的独立引脚表`);
   });
   (project.paper.factSheet.functions || []).forEach(func => {
     if (!artifacts.some(item => item.type === 'flowchart' && (item.sourceFactIds || []).includes(func.id))) errors.push(`功能“${func.name}”缺少第四章流程图计划`);
@@ -1869,15 +2055,418 @@ async function confirmPins() {
   toast('器件和引脚已确认，可以开始生成论文', 'success');
 }
 
+const REFERENCE_DOMAIN_TERMS = Object.freeze([
+  '鱼缸','水质','养殖','水产','农业','灌溉','温室','家居','门禁','安防','消防','火灾','烟雾','燃气','老人','健康','医疗','心率','血氧','体温','跌倒','可穿戴',
+  '机器人','小车','循迹','避障','导航','无人机','视觉','图像','识别','边缘计算','人工智能','物联网','云平台','无线','通信','LoRa','NB-IoT','WiFi','蓝牙','ZigBee',
+  '传感器','检测','监测','温湿度','光照','压力','液位','水位','浊度','pH','报警','电机','舵机','继电器','控制','电力','电网','储能','逆变','故障诊断','预测维护','FPGA','信号处理','嵌入式','单片机','STM32','ESP32',
+]);
+
+const REFERENCE_DIRECTION_RULES = Object.freeze([
+  { query: /鱼缸|水质|养殖|水产|温室|灌溉|农业/, direction: /智慧农业|养殖/ },
+  { query: /家居|门禁|照明|窗帘|家庭/, direction: /智能家居|物联网/ },
+  { query: /老人|健康|医疗|心率|血氧|体温|跌倒|可穿戴/, direction: /健康监测|可穿戴|辅助设备/ },
+  { query: /机器人|小车|循迹|避障|导航|机械臂/, direction: /机器人|自主导航|智能小车/ },
+  { query: /视觉|图像|识别|摄像|边缘计算|人工智能/, direction: /边缘AI|机器视觉/ },
+  { query: /消防|火灾|烟雾|燃气|工业监测|能源控制/, direction: /消防安全|工业监测|能源控制/ },
+  { query: /电网|电力|储能|逆变|变换器|充电/, direction: /电力电子|智能电网/ },
+  { query: /LoRa|NB-IoT|蓝牙|ZigBee|无线|通信|传感网络/i, direction: /无线通信|传感网络/ },
+  { query: /安全|加密|认证|入侵/, direction: /物联网安全/ },
+  { query: /FPGA|信号处理|滤波|频谱/, direction: /信号处理|FPGA/ },
+  { query: /故障|预测维护|工业物联网|设备状态/, direction: /工业物联网|预测维护/ },
+  { query: /传感|检测|监测|测量|采集/, direction: /传感器|检测系统/ },
+  { query: /单片机|STM32|ESP32|嵌入式|物联网/i, direction: /嵌入式|物联网系统/ },
+]);
+
+function referenceProjectQuery() {
+  const materials = project?.paper?.materials || {};
+  return [project?.title, materials.devicesText, materials.functionsText, materials.sourceNotes].filter(Boolean).join(' ');
+}
+
+function normalizeReferenceText(value) {
+  return String(value || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+}
+
+function referenceScore(record, query) {
+  const source = `${record.direction} ${record.title} ${record.topics} ${record.source} ${record.authors}`;
+  const normalizedQuery = normalizeReferenceText(query);
+  const normalizedSource = normalizeReferenceText(source);
+  let score = 0;
+  REFERENCE_DOMAIN_TERMS.forEach(term => {
+    const key = term.toLowerCase();
+    if (normalizedQuery.includes(normalizeReferenceText(key)) && normalizedSource.includes(normalizeReferenceText(key))) score += key.length >= 4 ? 16 : 11;
+  });
+  REFERENCE_DIRECTION_RULES.forEach(rule => {
+    if (rule.query.test(query) && rule.direction.test(record.direction)) score += 38;
+  });
+  const latinTokens = unique(String(query).match(/[A-Za-z][A-Za-z0-9-]{2,}/g) || []);
+  latinTokens.forEach(token => { if (source.toLowerCase().includes(token.toLowerCase())) score += 10; });
+  if (/期刊论文/.test(record.type)) score += 8;
+  else if (/学位论文/.test(record.type)) score += 5;
+  else if (/会议论文/.test(record.type)) score += 3;
+  score += Math.max(0, Math.min(5, Number(record.year) - 2021));
+  score += Math.min(5, Math.log2(Number(record.citationCount || 0) + 1));
+  return score;
+}
+
+function referencePublicationReady(record) {
+  const citation = String(record.formatted || '');
+  if (!record.authors || !record.title || !record.source || !record.year || !citation) return false;
+  if (/期刊论文|\[J\]/i.test(record.type)) {
+    return new RegExp(`[,，]\\s*${record.year}\\s*[,，]\\s*\\d+\\s*\\([^)]+\\)\\s*[:：]\\s*[A-Za-z]?\\d+`, 'i').test(citation);
+  }
+  return /\[[A-Z]+(?:\/[A-Z]+)?\]/i.test(citation);
+}
+
+function referenceLanguageTargets(count) {
+  const total = clampReferenceCount(count);
+  const chinese = Math.round(total * 0.7);
+  return { total, chinese, foreign: total - chinese };
+}
+
+function rankedReferenceCandidates(query = referenceProjectQuery(), limit = 100) {
+  const ranked = REFERENCE_LIBRARY.filter(referencePublicationReady).map(record => ({ record, score: referenceScore(record, query) }))
+    .sort((left, right) => right.score - left.score || Number(right.record.year) - Number(left.record.year) || Number(right.record.citationCount) - Number(left.record.citationCount));
+  const chinese = ranked.filter(item => item.record.language === '中文').slice(0, Math.round(limit * 0.7));
+  const foreign = ranked.filter(item => item.record.language === '外文').slice(0, limit - chinese.length);
+  return [...chinese, ...foreign].sort((left, right) => right.score - left.score).map(item => item.record);
+}
+
+function fallbackReferenceSelection(candidates, count = 15) {
+  const target = referenceLanguageTargets(count);
+  const chinese = candidates.filter(item => item.language === '中文').slice(0, target.chinese);
+  const foreign = candidates.filter(item => item.language === '外文').slice(0, target.foreign);
+  const selected = [...chinese, ...foreign];
+  candidates.forEach(item => { if (selected.length < target.total && !selected.some(existing => existing.id === item.id)) selected.push(item); });
+  return selected.slice(0, target.total);
+}
+
+function balanceReferenceSelection(selected, candidates, count) {
+  const target = referenceLanguageTargets(count);
+  const balanced = [
+    ...selected.filter(item => item.language === '中文').slice(0, target.chinese),
+    ...selected.filter(item => item.language === '外文').slice(0, target.foreign),
+  ];
+  const addFrom = (language, maximum) => {
+    const current = () => balanced.filter(item => item.language === language).length;
+    candidates.filter(item => item.language === language).forEach(item => {
+      if (current() < maximum && !balanced.some(existing => existing.id === item.id)) balanced.push(item);
+    });
+  };
+  addFrom('中文', target.chinese);
+  addFrom('外文', target.foreign);
+  candidates.forEach(item => { if (balanced.length < target.total && !balanced.some(existing => existing.id === item.id)) balanced.push(item); });
+  return balanced.slice(0, target.total);
+}
+
+function recommendedReferenceRecords() {
+  const ids = project?.paper?.materials?.referenceRecommendationIds || [];
+  const byId = new Map(REFERENCE_LIBRARY.map(item => [item.id, item]));
+  return ids.map(id => byId.get(id)).filter(Boolean);
+}
+
+function referencesByIds(ids = []) {
+  const byId = new Map(REFERENCE_LIBRARY.map(item => [item.id, item]));
+  return ids.map(id => byId.get(id)).filter(Boolean);
+}
+
+function updateReferenceSelectedCount() {
+  const checked = qsa('#reference-result-list input[type="checkbox"]:checked').length;
+  const total = qsa('#reference-result-list input[type="checkbox"]').length;
+  const target = $('reference-selected-count');
+  if (target) target.textContent = total ? `已选 ${checked}/${total}` : '';
+  const apply = $('btn-apply-reference-recommendations');
+  if (apply) apply.disabled = !checked;
+}
+
+function renderReferenceTool() {
+  const materials = project?.paper?.materials;
+  if (!materials) return;
+  const enabled = materials.useReferencesInPaper !== false;
+  const records = recommendedReferenceRecords();
+  const status = $('reference-library-status');
+  if (status) status.textContent = !enabled
+    ? '当前论文不使用参考文献'
+    : materials.referencesText.trim()
+    ? `当前已有 ${referenceTextEntries(materials.referencesText).length} 篇 · 文献库 ${REFERENCE_LIBRARY_META.count} 篇`
+    : `文献库 ${REFERENCE_LIBRARY_META.count} 篇 · 留空将自动推荐`;
+  const recommendButton = $('btn-recommend-references');
+  const countInput = $('paper-reference-count');
+  if (recommendButton) recommendButton.disabled = !enabled;
+  if (countInput) countInput.disabled = !enabled;
+  $('reference-field')?.classList.toggle('is-reference-disabled', !enabled);
+  const panel = $('reference-recommendations');
+  if (!panel) return;
+  panel.hidden = !enabled || !records.length;
+  if (!records.length) { $('reference-result-list').innerHTML = ''; return; }
+  const reasons = materials.referenceRecommendationReasons || {};
+  $('reference-recommendation-summary').textContent = materials.referenceRecommendationSummary || (materials.referenceRecommendationSource === 'ai' ? 'AI已按题目、器件和功能筛选' : '已按本地相关性排序');
+  $('reference-result-list').innerHTML = records.map(record => `<label class="reference-result-item"><input type="checkbox" value="${escapeHtml(record.id)}" checked><span class="reference-result-copy"><strong>${escapeHtml(record.formatted)}</strong><span>${escapeHtml(reasons[record.id] || `${record.direction} · ${record.year}年 · ${record.language}`)}</span></span></label>`).join('');
+  updateReferenceSelectedCount();
+}
+
+function standaloneRecommendedRecords() {
+  return referencesByIds(standaloneReferenceState.recommendationIds || []);
+}
+
+function updateStandaloneReferenceSelection({ save = true } = {}) {
+  const checked = qsa('#standalone-reference-list input[type="checkbox"]:checked').map(input => input.value);
+  standaloneReferenceState.selectedIds = checked;
+  const selected = referencesByIds(checked);
+  const output = selected.map((record, index) => `[${index + 1}] ${String(record.formatted || '').replace(/^\s*\[\d+\]\s*/, '')}`).join('\n');
+  if ($('standalone-reference-output')) $('standalone-reference-output').value = output;
+  if ($('standalone-reference-selected-count')) $('standalone-reference-selected-count').textContent = standaloneRecommendedRecords().length ? `已选 ${selected.length}/${standaloneRecommendedRecords().length}` : '';
+  ['btn-standalone-select-all', 'btn-standalone-clear-selection', 'btn-standalone-clear-results'].forEach(id => { if ($(id)) $(id).disabled = !standaloneRecommendedRecords().length; });
+  if ($('btn-copy-standalone-references')) $('btn-copy-standalone-references').disabled = !selected.length;
+  if (save) saveStandaloneReferenceState();
+}
+
+function renderStandaloneReferenceTool() {
+  if (!$('standalone-reference-form')) return;
+  $('standalone-reference-title').value = standaloneReferenceState.title || '';
+  $('standalone-reference-notes').value = standaloneReferenceState.notes || '';
+  $('standalone-reference-count').value = String(clampReferenceCount(standaloneReferenceState.count));
+  const records = standaloneRecommendedRecords();
+  const selectedIds = new Set(standaloneReferenceState.selectedIds || []);
+  $('standalone-reference-result-status').textContent = records.length ? `${records.length}篇` : '等待推荐';
+  $('standalone-reference-summary').textContent = standaloneReferenceState.summary || '填写题目后开始筛选。';
+  $('standalone-reference-library-status').textContent = `文献库共${REFERENCE_LIBRARY_META.count}篇；API不可用时自动使用本地相关性排序。`;
+  $('standalone-reference-list').innerHTML = records.length
+    ? records.map(record => `<label class="reference-result-item"><input type="checkbox" value="${escapeHtml(record.id)}" ${selectedIds.has(record.id) ? 'checked' : ''}><span class="reference-result-copy"><strong>${escapeHtml(record.formatted)}</strong><span>${escapeHtml(standaloneReferenceState.reasons?.[record.id] || `${record.direction} · ${record.year}年 · ${record.language}`)}</span></span></label>`).join('')
+    : '<div class="reference-empty"><strong>尚未生成文献</strong><span>推荐结果会在这里逐篇显示，可勾选后复制。</span></div>';
+  updateStandaloneReferenceSelection({ save: false });
+}
+
+function referenceTextEntries(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+  const numbered = raw.split(/\n+(?=\s*\[\d+\]\s*)/).map(item => item.trim()).filter(Boolean);
+  return numbered.length > 1 ? numbered : raw.split('\n').map(item => item.trim()).filter(Boolean);
+}
+
+function mergeReferencesIntoText(records) {
+  const materials = project.paper.materials;
+  const existing = referenceTextEntries(materials.referencesText).map(item => item.replace(/^\s*\[\d+\]\s*/, '').trim()).filter(Boolean);
+  const keys = new Set(existing.map(normalizeReferenceText));
+  try {
+    Rules.parseReferences(existing).forEach(record => {
+      const titleKey = normalizeReferenceText(record.title);
+      if (titleKey) keys.add(`title:${titleKey}`);
+    });
+  } catch (error) {}
+  records.forEach(record => {
+    const citation = String(record.formatted || '').replace(/^\s*\[\d+\]\s*/, '').trim();
+    const key = normalizeReferenceText(citation);
+    const titleKey = normalizeReferenceText(record.title);
+    if (citation && !keys.has(key) && (!titleKey || !keys.has(`title:${titleKey}`))) {
+      existing.push(citation);
+      keys.add(key);
+      if (titleKey) keys.add(`title:${titleKey}`);
+    }
+  });
+  materials.referencesText = existing.map((item, index) => `[${index + 1}] ${item}`).join('\n');
+  $('paper-references').value = materials.referencesText;
+}
+
+async function selectReferenceRecommendations({ title, devices = [], functions = [], notes = '', count = 15, signal } = {}) {
+  const target = referenceLanguageTargets(count);
+  const query = [title, ...devices, ...functions, notes].filter(Boolean).join(' ');
+  const candidates = rankedReferenceCandidates(query, 120);
+  let selected = [];
+  const reasons = {};
+  let summary = '';
+  let source = 'ai';
+  try {
+    const candidatePayload = candidates.map(item => ({ id: item.id, type: item.type, direction: item.direction, language: item.language, year: item.year, authors: item.authors, title: item.title, source: item.source, topics: item.topics, citationCount: item.citationCount }));
+    const raw = await callAi(Prompts.buildReferenceRecommendationMessages({ title, devices, functions, candidates: candidatePayload, count: target.total }), { reasoning: false, maxTokens: 6000, jsonMode: true, signal, requestLabel: '参考文献推荐', timeoutMs: 100000 });
+    const result = await parseAiJson(raw, { signal, requestLabel: '参考文献推荐', maxTokens: 6000 });
+    const candidateMap = new Map(candidates.map(item => [item.id, item]));
+    (Array.isArray(result.selected) ? result.selected : []).forEach(item => {
+      const id = typeof item === 'string' ? item : String(item.id || '');
+      const record = candidateMap.get(id);
+      if (record && !selected.some(existing => existing.id === id)) {
+        selected.push(record);
+        if (typeof item === 'object' && item.reason) reasons[id] = String(item.reason).trim();
+      }
+    });
+    summary = String(result.summary || '').trim();
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    source = 'local';
+    summary = 'AI推荐暂不可用，已按题目关键词、方向、年份和文献类型完成本地筛选';
+  }
+  const aiCount = selected.length;
+  selected = balanceReferenceSelection(selected, candidates, target.total);
+  if (source === 'ai' && aiCount < selected.length) {
+    source = 'hybrid';
+    summary = `${summary || 'AI已按课题相关性筛选'}；不足部分已按本地相关性补足`;
+  }
+  const actual = referenceLanguageTargets(selected.length);
+  const chinese = selected.filter(item => item.language === '中文').length;
+  const foreign = selected.filter(item => item.language === '外文').length;
+  return { selected, reasons, source, summary: `${summary || '已完成相关性筛选'}；共${selected.length}篇（中文${chinese}篇、外文${foreign}篇）`, target: actual };
+}
+
+async function recommendReferences({ automatic = false, signal = null } = {}) {
+  const materials = project?.paper?.materials;
+  if (!project?.title) {
+    if (!automatic) { $('paper-title-input')?.focus(); toast('请先填写论文题目', 'error'); }
+    return [];
+  }
+  if (materials?.useReferencesInPaper === false) {
+    if (!automatic) toast('请先开启“论文中使用参考文献”', 'info');
+    return [];
+  }
+  let ownRequest = false;
+  if (!signal) {
+    if (requestController) { toast('当前还有任务正在运行', 'info'); return []; }
+    requestController = new AbortController();
+    requestTask = 'reference-recommendation';
+    signal = requestController.signal;
+    ownRequest = true;
+  }
+  const button = $('btn-recommend-references');
+  const status = $('reference-library-status');
+  if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); button.textContent = '正在匹配文献'; }
+  if (status) status.textContent = `正在从 ${REFERENCE_LIBRARY_META.count} 篇文献中筛选，请稍候`;
+  try {
+    const count = clampReferenceCount(materials.referenceRecommendationCount);
+    const { selected, reasons, source, summary } = await selectReferenceRecommendations({ title: project.title, devices: lines(materials.devicesText), functions: lines(materials.functionsText), notes: materials.sourceNotes, count, signal });
+    materials.referenceRecommendationIds = selected.map(item => item.id);
+    materials.referenceRecommendationReasons = reasons;
+    materials.referenceRecommendationSource = source;
+    materials.referenceRecommendationSummary = summary;
+    materials.referenceRecommendationAt = nowIso();
+    if (automatic) mergeReferencesIntoText(selected);
+    await persistProject({ immediate: true });
+    renderReferenceTool();
+    if (!automatic) toast(source === 'local' ? `AI暂不可用，已在本地筛选 ${selected.length} 篇` : `已推荐 ${selected.length} 篇文献，请确认后加入`, source === 'local' ? 'info' : 'success');
+    return selected;
+  } finally {
+    if (ownRequest) {
+      requestController = null;
+      requestTask = '';
+    }
+    if (button) { button.disabled = false; button.removeAttribute('aria-busy'); button.textContent = 'AI推荐文献'; }
+    renderReferenceTool();
+  }
+}
+
+async function applyReferenceRecommendations() {
+  const ids = qsa('#reference-result-list input[type="checkbox"]:checked').map(input => input.value);
+  const byId = new Map(REFERENCE_LIBRARY.map(item => [item.id, item]));
+  const selected = ids.map(id => byId.get(id)).filter(Boolean);
+  if (!selected.length) return toast('请至少选择一篇文献', 'error');
+  mergeReferencesIntoText(selected);
+  await persistProject({ immediate: true });
+  renderReferenceTool();
+  $('reference-recommendations').hidden = true;
+  toast(`已加入 ${selected.length} 篇文献，原有内容已保留`, 'success');
+}
+
+async function recommendStandaloneReferences(event) {
+  event?.preventDefault();
+  const title = $('standalone-reference-title').value.trim();
+  if (!title) return toast('请先填写课题题目', 'error');
+  if (requestController) return toast('当前还有任务正在运行', 'info');
+  const button = $('btn-standalone-reference-search');
+  standaloneReferenceState.title = title;
+  standaloneReferenceState.notes = $('standalone-reference-notes').value.trim();
+  standaloneReferenceState.count = clampReferenceCount($('standalone-reference-count').value);
+  requestController = new AbortController();
+  requestTask = 'standalone-reference-recommendation';
+  button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
+  button.textContent = '正在筛选文献';
+  $('standalone-reference-result-status').textContent = '筛选中';
+  $('standalone-reference-summary').textContent = `正在从${REFERENCE_LIBRARY_META.count}篇文献中匹配`;
+  try {
+    const result = await selectReferenceRecommendations({ title, notes: standaloneReferenceState.notes, count: standaloneReferenceState.count, signal: requestController.signal });
+    standaloneReferenceState.recommendationIds = result.selected.map(item => item.id);
+    standaloneReferenceState.selectedIds = [...standaloneReferenceState.recommendationIds];
+    standaloneReferenceState.reasons = result.reasons;
+    standaloneReferenceState.source = result.source;
+    standaloneReferenceState.summary = result.summary;
+    standaloneReferenceState.updatedAt = nowIso();
+    saveStandaloneReferenceState();
+    renderStandaloneReferenceTool();
+    toast(result.source === 'local' ? 'AI暂不可用，已完成本地筛选' : '参考文献推荐完成', result.source === 'local' ? 'info' : 'success');
+  } catch (error) {
+    if (error?.name !== 'AbortError') toast(error.message || '参考文献推荐失败', 'error');
+  } finally {
+    requestController = null;
+    requestTask = '';
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+    button.textContent = 'AI推荐文献';
+  }
+}
+
+async function copyStandaloneReferences() {
+  updateStandaloneReferenceSelection();
+  const output = $('standalone-reference-output').value;
+  if (!output) return toast('请至少选择一篇文献', 'error');
+  try {
+    await navigator.clipboard.writeText(output);
+    toast('已复制带连续编号的参考文献', 'success');
+  } catch (error) {
+    $('standalone-reference-output').classList.remove('sr-only');
+    $('standalone-reference-output').select();
+    toast('浏览器未允许自动复制，已选中文本', 'info');
+  }
+}
+
 function prepareReferenceRecords() {
-  const raw = project.paper.materials.referencesText.trim();
+  if (project.paper.materials.useReferencesInPaper === false) {
+    project.paper.referenceRecords = [];
+    Object.values(project.paper.chapters || {}).forEach(chapter => {
+      if (chapter?.content) chapter.content = String(chapter.content).replace(/\[(\d+)\]/g, '');
+    });
+    return project.paper.referenceRecords;
+  }
+  let raw = project.paper.materials.referencesText.trim();
   let records = [];
+  if (!raw) {
+    const count = clampReferenceCount(project.paper.materials.referenceRecommendationCount);
+    const fallback = fallbackReferenceSelection(rankedReferenceCandidates(referenceProjectQuery(), 120), count);
+    mergeReferencesIntoText(fallback);
+    raw = project.paper.materials.referencesText.trim();
+  }
   if (raw) {
-    try { records = Rules.parseReferences(raw) || []; } catch (error) { records = []; }
+    const libraryByCitation = new Map(REFERENCE_LIBRARY.map(item => [normalizeReferenceText(item.formatted), item]));
+    try {
+      records = referenceTextEntries(raw).map((entry, index) => {
+        const citation = entry.replace(/^\s*\[\d+\]\s*/, '').trim();
+        const library = libraryByCitation.get(normalizeReferenceText(citation));
+        if (!library) return Rules.parseReferences(`[${index + 1}] ${citation}`)?.[0];
+        const documentType = library.type.match(/\[([A-Z]+(?:\/[A-Z]+)?)\]/i)?.[1] || '';
+        const journalDetails = library.formatted.match(new RegExp(`[,，]\\s*${library.year}\\s*[,，]\\s*(\\d+)\\s*\\(([^)]+)\\)\\s*[:：]\\s*([A-Za-z]?\\d+(?:\\s*[-–—]\\s*[A-Za-z]?\\d+)?)`, 'i'));
+        const volumeIssue = String(library.publication || '').match(/(?:\d{4}\s*[,，]\s*)?(\d+)\s*\(([^)]+)\)/);
+        const pages = journalDetails?.[3] || String(library.publication || '').match(/[:：]\s*([A-Za-z]?\d+(?:\s*[-–—]\s*[A-Za-z]?\d+)?)/)?.[1] || '';
+        return Rules.parseReferences([{
+          id: library.id,
+          authors: library.authors,
+          title: library.title,
+          documentType,
+          source: library.source,
+          year: library.year,
+          volume: journalDetails?.[1] || volumeIssue?.[1] || '',
+          issue: journalDetails?.[2] || volumeIssue?.[2] || '',
+          pages: pages.replace(/\s+/g, ''),
+          institution: documentType === 'D' ? library.source : '',
+          publisher: ['M', 'S'].includes(documentType) ? library.source : '',
+          doi: /^10\./.test(library.identifier) ? library.identifier : '',
+          url: library.url,
+          region: library.language === '中文' ? 'domestic' : library.language === '外文' ? 'foreign' : 'unknown',
+          formatted: library.formatted,
+          raw: library.formatted,
+          originalNumber: index + 1,
+        }])?.[0];
+      }).filter(Boolean);
+    } catch (error) { records = []; }
     if (!records.length) {
       records = lines(raw).map((line, index) => ({ id: `ref-user-${index + 1}`, authors: '', title: line.replace(/^\[\d+\]\s*/, ''), raw: line.replace(/^\[\d+\]\s*/, ''), formatted: line.replace(/^\[\d+\]\s*/, '') }));
     }
-  } else records = DEFAULT_REFERENCES.map((item, index) => ({ ...clone(item), id: `ref-default-${index + 1}`, abstract: '' }));
+  }
   project.paper.referenceRecords = records.map((record, index) => {
     let formatted = record.formatted || record.formattedCitation || record.raw || '';
     if (!formatted && typeof Rules.formatReferenceRecord === 'function') {
@@ -1885,6 +2474,34 @@ function prepareReferenceRecords() {
     }
     return { ...record, id: record.id || `ref-${index + 1}`, citationNumber: index + 1, formatted: String(formatted || '').replace(/^\s*\[\d+\]\s*/, '') };
   });
+  return project.paper.referenceRecords;
+}
+
+function synchronizeReferenceOrder() {
+  if (project.paper.materials.useReferencesInPaper === false) {
+    project.paper.referenceRecords = [];
+    return [];
+  }
+  const intro = (project.paper.outline || []).find(item => item.kind === 'introduction') || (project.paper.outline || []).find(item => item.id === '1');
+  const saved = project.paper.chapters?.[intro?.id || '1'];
+  const records = project.paper.referenceRecords || [];
+  if (!saved?.content || !records.length) return records;
+  const firstSeen = [];
+  for (const match of String(saved.content).matchAll(/\[(\d+)\]/g)) {
+    const number = Number(match[1]);
+    if (number >= 1 && number <= records.length && !firstSeen.includes(number)) firstSeen.push(number);
+  }
+  if (!firstSeen.length) return records;
+  const remaining = records.map((_, index) => index + 1).filter(number => !firstSeen.includes(number));
+  const order = [...firstSeen, ...remaining];
+  const numberMap = new Map(order.map((oldNumber, index) => [oldNumber, index + 1]));
+  saved.content = String(saved.content).replace(/\[(\d+)\]/g, (full, rawNumber) => {
+    const nextNumber = numberMap.get(Number(rawNumber));
+    return nextNumber ? `{{REF_${nextNumber}}}` : full;
+  }).replace(/\{\{REF_(\d+)\}\}/g, '[$1]');
+  project.paper.referenceRecords = order.map((oldNumber, index) => ({ ...records[oldNumber - 1], citationNumber: index + 1 }));
+  project.paper.materials.referencesText = project.paper.referenceRecords.map((record, index) => `[${index + 1}] ${String(record.formatted || record.raw || '').replace(/^\s*\[\d+\]\s*/, '')}`).join('\n');
+  if ($('paper-references')) $('paper-references').value = project.paper.materials.referencesText;
   return project.paper.referenceRecords;
 }
 
@@ -1903,7 +2520,7 @@ function comparableParagraphs(value) {
     .replace(/【非正文·[\s\S]*?【非正文结束】/g, '')
     .replace(/\s+/g, '')
     .trim())
-    .filter(paragraph => paragraph.length >= 120 && !paragraph.startsWith('|') && !/^\d+(?:\.\d+){1,2}[^，。]{0,40}$/.test(paragraph));
+    .filter(paragraph => paragraph.length >= 90 && !paragraph.startsWith('|') && !/^\d+(?:\.\d+){1,2}[^，。]{0,40}$/.test(paragraph));
 }
 
 function paragraphGrams(value, size = 3) {
@@ -1931,7 +2548,7 @@ function crossChapterDuplicateIssues(chapterId, content) {
     if (!previous?.content || Number(previous.id) >= Number(chapterId) || previous.status === 'stale') return;
     const earlier = comparableParagraphs(previous.content);
     current.forEach(paragraph => {
-      const match = earlier.find(candidate => paragraph.slice(0, 180) === candidate.slice(0, 180) || paragraphSimilarity(paragraph, candidate) >= 0.82);
+      const match = earlier.find(candidate => paragraph.slice(0, 180) === candidate.slice(0, 180) || paragraphSimilarity(paragraph, candidate) >= 0.78);
       if (match) issues.push(`与第${previous.id}章存在大段重复或同义复述：“${paragraph.slice(0, 72)}……”`);
     });
   });
@@ -1943,13 +2560,57 @@ function internalDuplicateIssues(content) {
   const issues = [];
   for (let left = 0; left < paragraphs.length; left += 1) {
     for (let right = left + 1; right < paragraphs.length; right += 1) {
-      if (paragraphs[left].slice(0, 180) === paragraphs[right].slice(0, 180) || paragraphSimilarity(paragraphs[left], paragraphs[right]) >= 0.86) {
+      if (paragraphs[left].slice(0, 180) === paragraphs[right].slice(0, 180) || paragraphSimilarity(paragraphs[left], paragraphs[right]) >= 0.82) {
         issues.push(`本章存在重复或同义复述段落：“${paragraphs[right].slice(0, 72)}……”`);
         break;
       }
     }
   }
   return unique(issues).slice(0, 6);
+}
+
+function headingRecords(content = '') {
+  return [...String(content || '').replace(/．/g, '.').matchAll(/^\s*(\d+(?:\.\d+){1,2})\s+([^\n]+?)\s*$/gm)]
+    .map(match => ({ number: match[1], title: match[2].replace(/[\s：:、，,。；;（）()]/g, ''), raw: `${match[1]} ${match[2].trim()}` }));
+}
+
+function duplicateHeadingIssues(content = '') {
+  const records = headingRecords(content);
+  const issues = [];
+  const seenNumbers = new Set();
+  const seenTitles = new Map();
+  records.forEach(record => {
+    if (seenNumbers.has(record.number)) issues.push(`本章标题编号${record.number}重复，必须只保留一个小节`);
+    seenNumbers.add(record.number);
+    if (record.title.length >= 6) {
+      if (seenTitles.has(record.title)) issues.push(`本章存在重复小节标题：“${record.raw}”与“${seenTitles.get(record.title)}”`);
+      else seenTitles.set(record.title, record.raw);
+    }
+  });
+  return unique(issues).slice(0, 6);
+}
+
+function duplicateVisualIssues() {
+  const seen = new Map();
+  const issues = [];
+  Object.values(project.paper.chapters || {}).forEach(chapter => {
+    const text = String(chapter?.content || '');
+    const blocks = [...text.matchAll(/【非正文(?:·[^】]*)?】[\s\S]*?【非正文结束】/g)].map(match => match[0]);
+    blocks.forEach(block => {
+      const signature = block
+        .replace(/图\s*\d+\s*[-－—]\s*\d+/g, '图号')
+        .replace(/表\s*\d+\s*[-－—]\s*\d+/g, '表号')
+        .replace(/\s+/g, '')
+        .trim();
+      if (signature.length < 12) return;
+      if (seen.has(signature)) {
+        issues.push(`第${chapter.id}章与第${seen.get(signature)}章存在重复图表或Mermaid内容`);
+      } else {
+        seen.set(signature, chapter.id);
+      }
+    });
+  });
+  return unique(issues).slice(0, 8);
 }
 
 function normalizeChapterText(value, chapter) {
@@ -1992,6 +2653,83 @@ function artifactInstructionBlock(content, artifact) {
   return text.slice(index, end >= 0 ? end + '【非正文结束】'.length : Math.min(text.length, index + 2400));
 }
 
+function artifactFigureReferenceIssues(content, artifacts = []) {
+  const text = String(content || '');
+  const issues = [];
+  artifacts.filter(item => FIGURE_ARTIFACT_TYPES.has(item.type) && item.figureNumber).forEach(artifact => {
+    const numberPattern = String(artifact.figureNumber).replace('-', '\\s*[-－—]\\s*');
+    const matches = [...text.matchAll(new RegExp(`如图\\s*${numberPattern}\\s*所示`, 'g'))];
+    if (!matches.length) issues.push(`${artifact.title}缺少正文中的“如图${artifact.figureNumber}所示”`);
+    if (matches.length > 1) issues.push(`${artifact.title}的“如图${artifact.figureNumber}所示”出现${matches.length}次，只能保留一次`);
+    const artifactIndex = text.indexOf(artifact.title);
+    if (matches.length === 1 && artifactIndex >= 0 && matches[0].index > artifactIndex) issues.push(`${artifact.title}应先在正文中引用，再放置图位或Mermaid图`);
+  });
+  return issues;
+}
+
+function stripVisualBlocksForCitationScan(content = '') {
+  return String(content || '')
+    .replace(/【非正文(?:·[^】]*)?】[\s\S]*?【非正文结束】/g, '\n')
+    .replace(/```mermaid[\s\S]*?```/gi, '\n');
+}
+
+function artifactCitationLedgerIssues() {
+  const expected = new Map();
+  const duplicatePlans = [];
+  (project.paper.artifacts || []).forEach(artifact => {
+    const kind = FIGURE_ARTIFACT_TYPES.has(artifact.type) ? 'figure' : TABLE_ARTIFACT_TYPES.has(artifact.type) ? 'table' : '';
+    const number = String(kind === 'figure' ? artifact.figureNumber || '' : artifact.tableNumber || '').replace(/[－—.]/g, '-').trim();
+    if (!kind || !number) return;
+    const key = `${kind}:${number}`;
+    if (expected.has(key)) duplicatePlans.push({ kind, number, chapterId: artifact.chapterId, title: artifact.title });
+    else expected.set(key, { ...artifact, kind, number });
+  });
+
+  const citations = new Map();
+  const collect = (chapter, kind, match) => {
+    const number = `${match[1]}-${match[2]}`;
+    const key = `${kind}:${number}`;
+    const list = citations.get(key) || [];
+    list.push({ chapterId: String(chapter.id), index: match.index });
+    citations.set(key, list);
+  };
+  const patterns = {
+    figure: /(?:如|见|由|结合)?\s*图\s*(\d+)\s*[-－—.]\s*(\d+)\s*(?:中\s*)?所示/g,
+    table: /(?:如|见|由|结合)?\s*表\s*(\d+)\s*[-－—.]\s*(\d+)\s*(?:中\s*)?所示/g,
+  };
+  Object.values(project.paper.chapters || {}).forEach(chapter => {
+    const text = stripVisualBlocksForCitationScan(chapter?.content || '');
+    Object.entries(patterns).forEach(([kind, pattern]) => {
+      for (const match of text.matchAll(pattern)) collect(chapter, kind, match);
+    });
+  });
+
+  const issues = [];
+  duplicatePlans.forEach(item => issues.push({
+    id: `visual-plan-duplicate-${item.kind}-${item.number}`,
+    severity: 'blocking',
+    chapterId: String(item.chapterId || ''),
+    message: `${item.kind === 'figure' ? '图' : '表'}${item.number}在图表计划中重复，必须只保留一个编号`,
+  }));
+  expected.forEach((artifact, key) => {
+    const found = citations.get(key) || [];
+    const label = `${artifact.kind === 'figure' ? '图' : '表'}${artifact.number}`;
+    if (!found.length) {
+      issues.push({ id: `visual-missing-${key}`, severity: 'blocking', chapterId: String(artifact.chapterId || ''), message: `${artifact.title || label}缺少正文中的“如${artifact.kind === 'figure' ? '图' : '表'}${artifact.number}所示”引用` });
+      return;
+    }
+    if (found.length > 1) issues.push({ id: `visual-repeat-${key}`, severity: 'blocking', chapterId: String(found[0].chapterId || artifact.chapterId || ''), message: `${label}在正文中引用了${found.length}次，只能出现一次` });
+    const wrongChapter = found.find(item => String(item.chapterId) !== String(artifact.chapterId));
+    if (wrongChapter) issues.push({ id: `visual-chapter-${key}`, severity: 'blocking', chapterId: String(wrongChapter.chapterId), message: `${label}应在第${artifact.chapterId}章引用，当前出现在第${wrongChapter.chapterId}章` });
+  });
+  citations.forEach((found, key) => {
+    if (expected.has(key)) return;
+    const [kind, number] = key.split(':');
+    found.forEach(item => issues.push({ id: `visual-unknown-${kind}-${number}-${item.chapterId}`, severity: 'blocking', chapterId: item.chapterId, message: `正文引用了未建立计划的${kind === 'figure' ? '图' : '表'}${number}` }));
+  });
+  return issues;
+}
+
 function mermaidFlowIssues(block, artifactTitle = '流程图') {
   const match = String(block || '').match(/```mermaid\s*\n([\s\S]*?)```/i);
   if (!match) return [`${artifactTitle}缺少可复制的Mermaid代码块`];
@@ -2000,9 +2738,11 @@ function mermaidFlowIssues(block, artifactTitle = '流程图') {
   const nodeIds = new Set([...code.matchAll(/\b([A-Za-z][A-Za-z0-9_]*)\s*(?=[\[({])/g)].map(item => item[1]));
   const issues = [];
   if (!/^flowchart\s+TD\s*$/im.test(code)) issues.push(`${artifactTitle}必须使用flowchart TD`);
-  if (!/开始/.test(code) || !/结束/.test(code)) issues.push(`${artifactTitle}必须同时包含“开始”和“结束”节点`);
+  if ((code.match(/开始/g) || []).length !== 1 || (code.match(/结束/g) || []).length !== 1) issues.push(`${artifactTitle}必须各有且只有一个“开始”和“结束”节点`);
+  if (!/\(\[\s*开始\s*\]\)/.test(code) || !/\(\[\s*结束\s*\]\)/.test(code)) issues.push(`${artifactTitle}的开始和结束必须使用圆角终止节点`);
   if (nodeIds.size < 5) issues.push(`${artifactTitle}少于5个有效节点`);
-  if (nodeIds.size > 10 || lines.length > 18) issues.push(`${artifactTitle}过于复杂，应精简到10个节点以内`);
+  if (nodeIds.size > 9 || lines.length > 18) issues.push(`${artifactTitle}过于复杂，应精简到9个节点以内`);
+  if ((code.match(/\{[^{}]+\}/g) || []).length > 2) issues.push(`${artifactTitle}判断节点超过2个，分支需要归纳`);
   if (!/\{[^{}]+\}/.test(code) || !/(?:--\s*(?:是|否)\s*-->|-->\|(?:是|否)\|)/.test(code)) issues.push(`${artifactTitle}缺少简洁的是/否判断分支`);
   if (/\b(?:subgraph|classDef|style|click)\b|<\/?[A-Za-z][^>]*>/i.test(code)) issues.push(`${artifactTitle}包含不必要的样式、子图或HTML语法`);
   return issues;
@@ -2061,14 +2801,25 @@ function consecutiveVisualIssues(content = '') {
       .replace(/^\s*\d+(?:\.\d+){1,2}\s+[^\n]+$/gm, '')
       .replace(/\s+/g, '');
     const substantive = (between.match(/[\u3400-\u9fffA-Za-z0-9]/g) || []).length;
-    if (substantive < 60) issues.push(`存在连续的${blocks[index - 1].type === 'figure' ? '图' : '表'}与${blocks[index].type === 'figure' ? '图' : '表'}，中间缺少实质正文段落`);
+    if (substantive < 80) issues.push(`存在连续的${blocks[index - 1].type === 'figure' ? '图' : '表'}与${blocks[index].type === 'figure' ? '图' : '表'}，中间缺少实质正文段落`);
   }
   return unique(issues);
 }
 
 function artifactDetailIssues(content, artifacts = []) {
-  const issues = [];
+  const issues = [...artifactFigureReferenceIssues(content, artifacts)];
   artifacts.forEach(artifact => {
+    if (artifact.sectionId) {
+      const sectionMatch = String(content || '').match(new RegExp(`^${escapeRegExp(artifact.sectionId)}\\s+`, 'm'));
+      const titlePattern = new RegExp(escapeRegExp(artifact.title), 'g');
+      const titleMatches = [...String(content || '').matchAll(titlePattern)];
+      if (titleMatches.length === 0) {
+        issues.push(`${artifact.title}缺少插图位置`);
+      } else {
+        if (sectionMatch && titleMatches[0].index < sectionMatch.index) issues.push(`${artifact.title}没有放在${artifact.sectionId}对应正文之后`);
+        if (titleMatches.length > 1) issues.push(`${artifact.title}出现多次，应只保留一个插入位置`);
+      }
+    }
     const block = artifactInstructionBlock(content, artifact);
     if (!block) {
       issues.push(`${artifact.title}未预留或未使用准确图名`);
@@ -2078,7 +2829,7 @@ function artifactDetailIssues(content, artifacts = []) {
       issues.push(...mermaidFlowIssues(block, artifact.title));
     } else if (artifact.type === 'device-image' || artifact.type === 'result-image' || artifact.type === 'circuit') {
       if (!/待插入|此处插入/.test(block)) issues.push(`${artifact.title}缺少简短插图提示`);
-    } else if (['system-framework', 'hardware-block', 'software-architecture'].includes(artifact.type)) {
+    } else if (['system-framework', 'software-architecture'].includes(artifact.type)) {
       issues.push(...mermaidStructureIssues(block, artifact.title));
     } else if (artifact.type === 'timing') {
       issues.push(...mermaidTimingIssues(block, artifact.title));
@@ -2106,7 +2857,7 @@ async function ensureChapterStructureAndArtifacts(chapter, content, signal) {
         role: 'system',
         content: `你是本科论文章节质量补强编辑。请在不删减有效正文、不改变确认事实、不增加新器件/引脚/功能的前提下，修复指定章节的标题、图表说明和跨章重复问题。优先补齐problemsToRepair中列出的每一项图表、公式、表格或Mermaid流程图，不得遗漏。requiredSections中的二级、三级标题必须全部出现且顺序不变，三级标题数量以目录为准，不得擅自压缩。对标记为跨章重复的段落必须按照本章唯一职责重新组织：删除在前文已经完整介绍的参数、原理、接线或程序步骤，只保留一句必要衔接，再补入本章专属分析，禁止仅替换同义词。
 
-每个缺失或说明不足的图表都要放在对应正文之后。程序流程图使用flowchart TD并同时包含“开始”“结束”节点；框架图和结构图使用flowchart TD或LR；通信时序使用sequenceDiagram。所有Mermaid图保持简洁，禁止subgraph、style、classDef和HTML。器件图、电路图、实物图和功能展示图只保留独占一行的“【非正文·插图位置：图名】”以及下一行“【非正文结束】”，不得写拍摄、绘制、构图或取景说明。引脚表不得包含“信号方向”列。选型对比表、引脚表和测试表必须直接生成可用的Markdown表格并在表前后分析；公式必须直接写出并解释变量、单位、参数来源和用途。任意两张图或表之间必须补入不少于80字的实质正文段落，禁止连续图图、图表或表表。只输出补强后的完整本章正文，不输出章标题、解释或质量评价。`,
+每个缺失或说明不足的图表都要放在对应正文之后。artifacts中的每张图都按figureNumber在图前正文中恰好引用一次“如图x-x所示”，每张表都按tableNumber在表前正文中恰好引用一次“如表x-x所示”，不得漏引、复用编号或单独成段。流程图使用flowchart TD，开始和结束各一个且使用圆角终止节点，主干自上而下、最多9个节点和2个判断节点，分支尽快汇合；框架图和结构图使用flowchart TD或LR；通信时序使用sequenceDiagram。所有Mermaid图保持简洁，禁止subgraph、style、classDef和HTML。第三章不得生成硬件组成图或总体结构图。器件图、电路图、实物图和功能展示图只保留独占一行的“【非正文·插图位置：图名】”以及下一行“【非正文结束】”，不得写拍摄、绘制、构图或取景说明。每张引脚表只对应一个器件并紧跟该器件电路说明，不得包含“信号方向”列。选型对比表、引脚表和测试表必须直接生成可用的Markdown表格并在表前后分析；公式必须直接写出并解释变量、单位、参数来源和用途。任意两张图或表之间必须补入不少于80字的实质正文段落，禁止连续图图、图表或表表。只输出补强后的完整本章正文，不输出章标题、解释或质量评价。`,
       },
       { role: 'user', content: JSON.stringify({ pass: pass + 1, chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections }, chapterResponsibility: Prompts.chapterResponsibilities?.(chapter.kind) || '', confirmedFacts: project.paper.factSheet, completedChapterLedger: completedDigest(), chapterArtifacts, problemsToRepair: [...missingHeadings.map(item => `缺少目录标题：${item}`), ...detailIssues, ...duplicateIssues], existingChapter: bestContent }, null, 2) },
     ], { reasoning: false, maxTokens: 16000, signal, requestLabel: `第${chapter.id}章内容质量补强${pass ? '复核' : ''}` });
@@ -2163,7 +2914,7 @@ function renderGeneration() {
   document.body.classList.toggle('has-generation-notice', showScreenNotice);
   document.title = showScreenNotice ? `${generation.percent}% · ${generation.activeRequestLabel || '正在生成论文'}` : APP_TITLE;
   const phases = [
-    ['planning', '结构规划'], ['chapters', '正文'], ['extras', '摘要'], ['audit', '技术复核'], ['quality', '本地检查'], ['export', '导出'],
+    ['references', '文献'], ['planning', '结构规划'], ['chapters', '正文'], ['extras', '摘要'], ['audit', '技术复核'], ['quality', '本地检查'], ['export', '导出'],
   ];
   const order = phases.map(item => item[0]);
   const activeIndex = generation.status === 'completed' ? order.length : Math.max(0, order.indexOf(generation.phase));
@@ -2219,7 +2970,17 @@ async function generateOneChapter(chapter, signal) {
   const maxTokens = reasoning ? 16000 : 12000;
   const raw = await callAi(Prompts.buildChapterMessages({ project, chapter, outline: project.paper.outline, artifacts: project.paper.artifacts, completedDigest: completedDigest() }), { reasoning, maxTokens, signal, requestLabel: `第${chapter.id}章写作` });
   let content = normalizeChapterText(raw, chapter);
-  content = await ensureChapterStructureAndArtifacts(chapter, content, signal);
+  try {
+    content = await ensureChapterStructureAndArtifacts(chapter, content, signal);
+  } catch (error) {
+    if (signal.aborted) throw error;
+    project.paper.quality.aiIssues = [
+      ...(project.paper.quality.aiIssues || []),
+      { id: makeId('chapter-quality-warning'), severity: 'warning', type: 'artifact-repair', chapterId: chapter.id, message: '第' + chapter.id + '章正文已返回，但图表补强暂未完成：' + (error.message || 'API请求失败'), source: 'system' },
+    ];
+    generation.message = '第' + chapter.id + '章正文已保存，图表补强稍后自动处理';
+    await saveGenerationCheckpoint();
+  }
   if (countBodyChars(content) < 700) throw new Error(`第${chapter.id}章返回内容过短，未覆盖已保存内容`);
   project.paper.chapters[chapter.id] = {
     id: chapter.id,
@@ -2230,6 +2991,7 @@ async function generateOneChapter(chapter, signal) {
     inputRevision: project.factRevision,
     updatedAt: nowIso(),
   };
+  if (chapter.kind === 'introduction') synchronizeReferenceOrder();
   generation.completedChapterIds = unique([...(generation.completedChapterIds || []), chapter.id]);
   generation.currentChapterId = '';
   generation.message = `第${chapter.id}章已保存`;
@@ -2396,6 +3158,7 @@ function localQualityIssues() {
     if (/(?:尚未|未能|没有|并未)(?:完全)?(?:实现|完成|验证|测试)|功能未完成|系统未完成/.test(text)) issues.push({ id: `self-disclose-${chapter.id}`, severity: 'blocking', chapterId: chapter.id, message: `第${chapter.id}章出现系统未完成或未测试式表述` });
     internalDuplicateIssues(text).forEach((message, index) => issues.push({ id: `internal-duplicate-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message }));
     crossChapterDuplicateIssues(chapter.id, text).forEach((message, index) => issues.push({ id: `near-duplicate-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message }));
+    duplicateHeadingIssues(text).forEach((message, index) => issues.push({ id: `duplicate-heading-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message }));
     consecutiveVisualIssues(text).forEach((message, index) => issues.push({ id: `visual-spacing-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message }));
     const missingHeadings = missingRequiredHeadings(chapter, text);
     if (missingHeadings.length) issues.push({ id: `headings-missing-${chapter.id}`, severity: 'blocking', chapterId: chapter.id, message: `第${chapter.id}章缺少目录标题：${missingHeadings.join('、')}` });
@@ -2406,6 +3169,8 @@ function localQualityIssues() {
       if (table.length > 12) issues.push({ id: `table-row-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message: `第${chapter.id}章有表格超过10行数据，必须按功能或模块拆分` });
     });
   });
+  duplicateVisualIssues().forEach((message, index) => issues.push({ id: `duplicate-visual-${index}`, severity: 'blocking', chapterId: message.match(/第(\d+)章/)?.[1] || '', message }));
+  artifactCitationLedgerIssues().forEach(issue => issues.push(issue));
 
   (project.paper.artifacts || []).filter(item => item.type === 'flowchart').forEach(item => {
     const text = String(chapters[item.chapterId]?.content || '');
@@ -2417,10 +3182,10 @@ function localQualityIssues() {
     const block = artifactInstructionBlock(text, item);
     mermaidTimingIssues(block, item.title).forEach((message, index) => issues.push({ id: `timing-${item.id}-${index}`, severity: 'warning', chapterId: item.chapterId, message }));
   });
-  (project.paper.artifacts || []).filter(item => ['device-image', 'result-image', 'circuit', 'system-framework', 'hardware-block', 'software-architecture', 'comparison-table', 'pin-table', 'test-table'].includes(item.type)).forEach(item => {
+  (project.paper.artifacts || []).filter(item => ['device-image', 'result-image', 'circuit', 'system-framework', 'software-architecture', 'comparison-table', 'pin-table', 'test-table'].includes(item.type)).forEach(item => {
     const text = String(chapters[item.chapterId]?.content || '');
     const detail = artifactDetailIssues(text, [item]);
-    if (detail.length) issues.push({ id: `artifact-detail-${item.id}`, severity: ['circuit', 'comparison-table', 'pin-table', 'test-table'].includes(item.type) ? 'blocking' : 'warning', chapterId: item.chapterId, message: detail[0] });
+    if (detail.length) issues.push({ id: `artifact-detail-${item.id}`, severity: 'blocking', chapterId: item.chapterId, message: detail[0] });
   });
   (project.paper.artifacts || []).filter(item => item.type === 'formula').forEach(item => {
     const text = String(chapters[item.chapterId]?.content || '');
@@ -2429,10 +3194,6 @@ function localQualityIssues() {
   (project.paper.artifacts || []).filter(item => item.type === 'system-framework').forEach(item => {
     const text = String(chapters[item.chapterId]?.content || '');
     if (!/系统总体.*(?:框架|结构)图|总体功能框架图/.test(text)) issues.push({ id: `framework-${item.id}`, severity: 'warning', chapterId: item.chapterId, message: '系统总体功能框架图尚未明确预留' });
-  });
-  (project.paper.artifacts || []).filter(item => item.type === 'hardware-block').forEach(item => {
-    const text = String(chapters[item.chapterId]?.content || '');
-    if (!/硬件.*(?:组成|结构)图/.test(text)) issues.push({ id: `hardware-block-${item.id}`, severity: 'warning', chapterId: item.chapterId, message: '硬件组成图尚未与系统功能框架图区分' });
   });
   const testChapter = outline.find(item => item.kind === 'test');
   if (testChapter) {
@@ -2444,6 +3205,7 @@ function localQualityIssues() {
   const hardwareChapter = outline.find(item => item.kind === 'hardware');
   if (hardwareChapter) {
     const text = String(chapters[hardwareChapter.id]?.content || '');
+    if (/【非正文·Mermaid图：[^】]*(?:系统硬件组成|硬件总体结构|硬件框架)[^】]*】/.test(text)) issues.push({ id: 'hardware-duplicate-framework', severity: 'blocking', chapterId: hardwareChapter.id, message: '第三章不应重复生成硬件组成图或总体框架图，只保留第二章系统总体功能框架图' });
     if (/2\.8\s*寸\s*TFT/i.test(text)) issues.push({ id: 'hardware-tft-size', severity: 'blocking', chapterId: hardwareChapter.id, message: '硬件章节仍出现2.8寸TFT，应统一为1.8寸TFT' });
     const pullupValues = [
       ...[...text.matchAll(/上拉电阻[^。\n]{0,18}?(\d+(?:\.\d+)?)\s*k(?:Ω|欧姆)/gi)].map(match => Number(match[1])),
@@ -2546,13 +3308,14 @@ async function repairChapterBlockingIssues(chapter, problems, signal) {
       role: 'system',
       content: `你是单片机本科论文重点问题修复编辑。只修复problems列出的重点问题，保持本章全部有效正文、目录标题顺序、确认器件、引脚和功能不变，输出修复后的完整本章正文，不输出章标题、解释或评价。
 
-必须执行：删除重复和系统未完成式表述；修复与确认事实矛盾的硬件描述；任意图/表之间补入不少于80字的实质分析段落；器件图、电路图、实物图和功能图只保留独占一行的“【非正文·插图位置：图名】”和下一行“【非正文结束】”；框架图、结构图和流程图直接使用简洁Mermaid，流程图同时具有“开始”“结束”节点；引脚关系表不得有“信号方向”列；测试必须有量化表格；超过5列或10行数据的表格必须按功能或模块拆分成多张表，并保持每张表前后有正文分析。除51单片机外主控按最小系统开发板描述，5V输入经板载稳压得到3.3V，所有模块共地，凡上拉电阻统一10 kΩ，TFT统一1.8寸。禁止新增标题、器件、引脚、功能或文献。`,
+必须执行：删除重复和系统未完成式表述；修复与确认事实矛盾的硬件描述；任意图/表之间补入不少于80字的实质分析段落；artifacts中的每张图按figureNumber在图前正文中恰好引用一次“如图x-x所示”，每张表按tableNumber在表前正文中恰好引用一次“如表x-x所示”；器件图、电路图、实物图和功能图只保留独占一行的“【非正文·插图位置：图名】”和下一行“【非正文结束】”；框架图、结构图和流程图直接使用简洁Mermaid，流程图的开始和结束各一个且为圆角终止节点，主干自上而下、最多9个节点和2个判断节点；第三章不得生成硬件组成图或总体结构图；每张引脚表只对应一个器件并紧跟其电路说明，不得有“信号方向”列；测试必须有量化表格；超过5列或10行数据的表格必须按功能或模块拆分成多张表，并保持每张表前后有正文分析。除51单片机外主控按最小系统开发板描述，5V输入经板载稳压得到3.3V，所有模块共地，凡上拉电阻统一10 kΩ，TFT统一1.8寸。禁止新增标题、器件、引脚、功能或文献。`,
     },
     { role: 'user', content: JSON.stringify({ title: project.title, chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections }, responsibility: Prompts.chapterResponsibilities?.(chapter.kind) || '', problems, confirmedFacts: project.paper.factSheet, artifacts: (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id), references: chapter.kind === 'introduction' ? project.paper.referenceRecords : [], existingChapter: before }, null, 2) },
   ], { reasoning: false, maxTokens: 16000, signal, requestLabel: `自动修复第${chapter.id}章重点问题`, timeoutMs: 150000 });
   const candidate = normalizeChapterText(raw, chapter);
   if (countBodyChars(candidate) < Math.max(700, Math.floor(countBodyChars(before) * 0.78))) return false;
   saved.content = candidate;
+  if (chapter.kind === 'introduction') synchronizeReferenceOrder();
   const afterCount = localQualityIssues().filter(issue => issue.severity === 'blocking' && issue.chapterId === chapter.id).length;
   if (afterCount > beforeCount) {
     saved.content = before;
@@ -2625,7 +3388,6 @@ async function generatePaper() {
     project.paper.keywordsEn = '';
     project.paper.acknowledgment = '';
   }
-  prepareReferenceRecords();
   requestController = new AbortController();
   requestTask = 'paper-generation';
   generation.status = 'running';
@@ -2643,6 +3405,14 @@ async function generatePaper() {
   startGenerationClock();
   await saveGenerationCheckpoint();
   try {
+    if (project.paper.materials.useReferencesInPaper !== false && !project.paper.materials.referencesText.trim()) {
+      generation.phase = 'references';
+      generation.activeRequestLabel = '自动匹配参考文献';
+      generation.message = `正在从${REFERENCE_LIBRARY_META.count}篇文献中筛选与题目相关的参考文献`;
+      await saveGenerationCheckpoint();
+      await recommendReferences({ automatic: true, signal: requestController.signal });
+    }
+    prepareReferenceRecords();
     await planOutlineForPaper(requestController.signal);
     const artifactErrors = prepareGenerationArtifacts();
     if (artifactErrors.length) throw new Error(`论文图表要求建立失败：${artifactErrors[0]}`);
@@ -2655,16 +3425,41 @@ async function generatePaper() {
       if (!chapterNeedsGeneration(chapter)) continue;
       await generateOneChapter(chapter, requestController.signal);
     }
-    await expandBodyIfNeeded(requestController.signal);
+    try {
+      await expandBodyIfNeeded(requestController.signal);
+    } catch (error) {
+      if (requestController.signal.aborted) throw error;
+      project.paper.quality.aiIssues = [
+        ...(project.paper.quality.aiIssues || []),
+        { id: makeId('body-expansion-warning'), severity: 'warning', type: 'body-length', chapterId: '', message: '正文补写请求未完成，已保留当前章节：' + (error.message || 'API请求失败'), source: 'system' },
+      ];
+      generation.message = '章节正文已保存，字数补写请求未完成，继续进行摘要和检查';
+      await saveGenerationCheckpoint();
+    }
     await generateExtras(requestController.signal);
+    synchronizeReferenceOrder();
     await runFinalAudit(requestController.signal);
+    synchronizeReferenceOrder();
     generation.phase = 'quality';
     generation.activeRequestLabel = '检查并自动修复重点问题';
     generation.message = '正在检查标题、图表间距、硬件事实、摘要、引用与字数';
     await saveGenerationCheckpoint();
     runLocalQuality();
-    const autoRepaired = await autoRepairImportantQuality(requestController.signal);
+    let autoRepaired = false;
+    try {
+      autoRepaired = await autoRepairImportantQuality(requestController.signal);
+    } catch (error) {
+      if (requestController.signal.aborted) throw error;
+      // 质量修复属于增强阶段。API在此阶段超时不能抹掉已保存的完整章节，保留问题清单供用户继续修复。
+      project.paper.quality.aiIssues = [
+        ...(project.paper.quality.aiIssues || []),
+        { id: makeId('quality-warning'), severity: 'warning', type: 'quality-repair', chapterId: '', message: `自动修复阶段暂未完成：${error.message || 'API请求失败'}`, source: 'system' },
+      ];
+      generation.message = '正文已生成，质量修复请求未完成，已保留当前稿并可下载';
+      await saveGenerationCheckpoint();
+    }
     if (autoRepaired) await runFinalAudit(requestController.signal);
+    synchronizeReferenceOrder();
     runLocalQuality();
     generation.status = 'completed';
     generation.phase = 'export';
@@ -2681,8 +3476,9 @@ async function generatePaper() {
   } catch (error) {
     const paused = error?.name === 'AbortError';
     generation.status = paused ? 'paused' : 'failed';
-    generation.message = paused ? '已暂停，完成的章节均已保存' : '生成遇到问题，可以从当前步骤继续';
-    generation.lastError = paused ? '' : (error.message || '论文生成失败');
+    const phaseLabel = generation.activeRequestLabel || ({ references: '参考文献匹配', planning: '结构规划', chapters: `第${generation.currentChapterId || ''}章写作`, expand: '正文补写', extras: '摘要与前置内容', audit: '技术复核', quality: '质量修复' }[generation.phase] || '论文生成');
+    generation.message = paused ? '已暂停，完成的章节均已保存' : `${phaseLabel}中断，已保存已完成章节，可以继续生成或下载当前稿`;
+    generation.lastError = paused ? '' : `${phaseLabel}：${error.message || '论文生成失败'}`;
     generation.activeRequestLabel = '';
     generation.updatedAt = nowIso();
     await persistProject({ immediate: true });
@@ -2711,6 +3507,7 @@ async function exportPaper(options = {}) {
   try {
     if (!globalThis.PaperDocx?.buildPaperDocx) throw new Error('DOCX组件尚未加载，请刷新页面后重试');
     prepareReferenceRecords();
+    synchronizeReferenceOrder();
     const completed = project.paper.outline.filter(chapter => project.paper.chapters[chapter.id]?.content).length;
     const chapters = project.paper.outline.map(chapter => {
       const saved = project.paper.chapters[chapter.id];
@@ -2799,7 +3596,30 @@ function bindEvents() {
   $('paper-materials-form').addEventListener('input', event => {
     if (['paper-code-folder', 'paper-scheme-source', 'paper-scheme-file', 'paper-outline-file', 'paper-scheme-text'].includes(event.target.id)) return;
     capturePaperMaterials({ invalidate: true });
+    if (['paper-references', 'paper-use-references', 'paper-reference-count'].includes(event.target.id)) renderReferenceTool();
   });
+  $('btn-recommend-references').addEventListener('click', () => recommendReferences());
+  $('btn-apply-reference-recommendations').addEventListener('click', applyReferenceRecommendations);
+  $('btn-clear-reference-recommendations').addEventListener('click', () => { $('reference-recommendations').hidden = true; });
+  $('reference-result-list').addEventListener('change', updateReferenceSelectedCount);
+  $('standalone-reference-form').addEventListener('submit', recommendStandaloneReferences);
+  ['standalone-reference-title', 'standalone-reference-notes', 'standalone-reference-count'].forEach(id => $(id).addEventListener('input', event => {
+    if (id === 'standalone-reference-title') standaloneReferenceState.title = event.target.value;
+    if (id === 'standalone-reference-notes') standaloneReferenceState.notes = event.target.value;
+    if (id === 'standalone-reference-count') standaloneReferenceState.count = clampReferenceCount(event.target.value);
+    saveStandaloneReferenceState();
+  }));
+  $('standalone-reference-list').addEventListener('change', () => updateStandaloneReferenceSelection());
+  $('btn-standalone-select-all').addEventListener('click', () => {
+    qsa('#standalone-reference-list input[type="checkbox"]').forEach(input => { input.checked = true; });
+    updateStandaloneReferenceSelection();
+  });
+  $('btn-standalone-clear-selection').addEventListener('click', () => {
+    qsa('#standalone-reference-list input[type="checkbox"]').forEach(input => { input.checked = false; });
+    updateStandaloneReferenceSelection();
+  });
+  $('btn-standalone-clear-results').addEventListener('click', clearStandaloneReferenceResults);
+  $('btn-copy-standalone-references').addEventListener('click', copyStandaloneReferences);
   $('paper-code-folder').addEventListener('change', readCodeFolder);
   $('paper-schematic-file').addEventListener('change', readSchematicFile);
   $('btn-reanalyze-pins').addEventListener('click', analyzeHardware);
@@ -2821,7 +3641,7 @@ function bindEvents() {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && project) persistProject({ immediate: true }); });
   window.addEventListener('hashchange', () => {
     const route = location.hash.replace('#', '');
-    if (['projects', 'scheme', 'paper'].includes(route)) setRoute(route);
+    if (['projects', 'scheme', 'paper', 'tools'].includes(route)) setRoute(route);
   });
 }
 

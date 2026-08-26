@@ -184,7 +184,7 @@ function makeArtifact(type, chapter, title, instruction, relatedFunction = '', o
   };
 }
 
-export function buildArtifactPlan({ outline = [], devices = [], functions = [] } = {}) {
+export function buildArtifactPlan({ outline = [], devices = [], functions = [], mappings = [] } = {}) {
   const overall = findChapter(outline, 'overall');
   const hardware = findChapter(outline, 'hardware');
   const software = findChapter(outline, 'software');
@@ -193,7 +193,7 @@ export function buildArtifactPlan({ outline = [], devices = [], functions = [] }
   const artifacts = [];
   const controllerDevice = devices.find(device => /主控|单片机/.test(`${device.role || ''} ${device.model || ''}`));
   const controllerName = modelName(controllerDevice) || modelName(devices.find(device => /STM32|STC|AT89|ESP32|Arduino/i.test(modelName(device))));
-  const actualDevices = [...devices];
+  const actualDevices = devices.map((device, index) => ({ ...device, id: device.id || 'device-' + (index + 1) }));
   if (controllerName && !actualDevices.some(device => modelName(device).toLowerCase() === controllerName.toLowerCase())) {
     actualDevices.unshift({ id: `device-controller-${controllerName}`, model: controllerName, role: '主控' });
   }
@@ -207,29 +207,37 @@ export function buildArtifactPlan({ outline = [], devices = [], functions = [] }
   });
   const contentDevices = uniqueDevices.filter(device => !/主控|单片机|电源|晶振|复位|下载|调试/.test(`${device.role || ''} ${device.model || ''}`));
   if (overall) {
-    artifacts.push(makeArtifact('system-framework', overall, '系统总体功能框架图', '直接生成简洁Mermaid代码，使用flowchart LR，按输入、主控、显示/执行/通信和供电支撑组织5至9个节点；只表达功能层次，不写具体引脚，不与硬件组成图混淆。', '', { sectionId: '2.2', reason: '说明系统各功能模块之间的总体关系' }));
-    artifacts.push(makeArtifact('comparison-table', overall, '主要器件选型对比表', '放在各类器件选型分析之后。主控以及每类关键传感、执行、显示和通信器件，都要把实际选用型号与至少2个常见候选型号比较；候选型号只用于选型论证，不能写成系统实际使用器件。使用不超过5列的简洁三线表，器件较多时按类别拆表，每张表只比较与本项目决策有关的核心指标、适用性和选择依据。', '', { sectionId: '2.4', reason: '用候选型号对比证据支撑每类关键器件的选型结论' }));
+    artifacts.push(makeArtifact('system-framework', overall, '系统总体功能框架图', '直接生成简洁Mermaid代码，使用flowchart LR，按输入、主控、显示/执行/通信和供电支撑组织5至9个短句节点；主干清晰、连线不交叉，只表达功能层次，不写具体引脚。全文不再生成第二张硬件组成图。', '', { sectionId: '2.2', reason: '说明系统各功能模块之间的总体关系' }));
     uniqueDevices.forEach(device => {
       const name = device.model || device.name;
+      const selectionSection = /主控|单片机/.test((device.role || '') + ' ' + name) ? '2.4.1' : /传感|检测|温湿度|光照|压力|液位|烟雾|气体|DHT|MQ|DS18/i.test((device.role || '') + ' ' + name) ? '2.4.2' : '2.4.3';
+      artifacts.push(makeArtifact('comparison-table', overall, name + '选型对比表', '紧跟' + name + '选型分析之后，只比较' + name + '与至少2个常见候选型号。表格不超过5列、10行，指标必须服务于本项目的接口、精度、驱动难度、成本或供电需求；候选型号只能用于论证，不能写入实际器件清单或后续电路。', '', { sectionId: selectionSection, sourceFactIds: [device.id], reason: '用独立对比表支撑' + name + '的选型结论' }));
       artifacts.push(makeArtifact('device-image', overall, `${name}器件图`, `只保留“此处插入${name}器件图”的简短独立提示，不写拍摄、构图、绘制或标注方法。`, '', { sectionId: '2.4', sourceFactIds: [device.id], reason: '帮助读者识别实际选用器件' }));
     });
   }
   if (hardware) {
-    artifacts.push(makeArtifact('hardware-block', hardware, '系统硬件组成图', '直接生成简洁Mermaid代码，使用flowchart LR，用5至10个节点表达主控、供电和实际外设之间的物理连接；只标接口类别，不展开程序流程。', '', { sectionId: '3.1', reason: '说明系统硬件的物理组成' }));
-    if (contentDevices.length) artifacts.push(makeArtifact('pin-table', hardware, '主要外设引脚连接关系表', '放在各电路详细说明之前，按“外设、外设信号、主控引脚、说明”组织简短三线表，不设置“信号方向”列；每表最多10行，器件较多时按采集、执行、显示通信拆表。', '', { sectionId: '3.1', sourceFactIds: contentDevices.map(device => device.id), reason: '集中核对已确认引脚并减少正文重复' }));
     uniqueDevices.forEach(device => {
       const name = device.model || device.name;
       const title = /主控|单片机/.test(`${device.role || ''} ${name}`) ? `${name}最小系统电路图` : `${name}接口电路图`;
       artifacts.push(makeArtifact('circuit', hardware, title, `只保留“此处插入${title}”的简短独立提示，不写绘制步骤；正文负责说明已确认引脚、供电、共地和必要的10 kΩ上拉关系。`, '', { sourceFactIds: [device.id], reason: '对应说明该器件与主控的实际电气连接' }));
+      const deviceKey = String(name || '').replace(/[\s（）()_-]/g, '').toLowerCase();
+      const deviceMappings = mappings.filter(mapping => {
+        const mappingKey = String(mapping.device || '').replace(/[\s（）()_-]/g, '').toLowerCase();
+        return mappingKey && deviceKey && (mappingKey === deviceKey || mappingKey.includes(deviceKey) || deviceKey.includes(mappingKey));
+      });
+      if (deviceMappings.length && contentDevices.some(item => item.id === device.id)) {
+        const confirmedPins = deviceMappings.map(mapping => `${mapping.signal || '信号'}=${mapping.pin || '待确认'}`).join('，');
+        artifacts.push(makeArtifact('pin-table', hardware, `${name}引脚连接关系表`, `紧跟在${name}接口电路说明处，按“外设信号、主控引脚、连接说明”生成该器件专用三线表，不设置“信号方向”列，不与其他器件合并。只写已确认映射：${confirmedPins}；最多5列、8行数据。`, '', { sourceFactIds: [device.id], reason: `就近核对${name}的已确认引脚，避免第三章出现超长总表` }));
+      }
     });
     artifacts.push(makeArtifact('circuit', hardware, '5V输入与3.3V稳压供电电路图', '只保留“此处插入5V输入与3.3V稳压供电电路图”的简短独立提示，不写绘制步骤。', '', { sectionId: '3.2', reason: '说明开发板5V输入和板载3.3V稳压供电关系' }));
   }
   if (software) {
     artifacts.push(makeArtifact('software-architecture', software, '系统软件结构图', '直接生成简洁Mermaid代码，使用flowchart TD，用5至10个节点表达主程序、初始化、采集、控制、显示/通信和异常处理之间的调用关系；不出现硬件接线。', '', { sectionId: '4.1', reason: '说明软件模块和数据流之间的总体关系' }));
-    artifacts.push(makeArtifact('flowchart', software, '主程序流程图', '直接给出简洁Mermaid代码，使用flowchart TD，必须有“开始”和“结束”节点；控制在6至10个节点，仅保留初始化、采集、判断、执行、显示/通信更新和异常处理等关键步骤。', '主程序', { sectionId: '4.2', reason: '说明系统软件的主执行顺序' }));
+    artifacts.push(makeArtifact('flowchart', software, '主程序流程图', '直接给出简洁Mermaid代码，使用flowchart TD；A([开始])和末端([结束])各一个，主干自上而下，分支尽快汇合。控制在6至9个短句节点、最多2个判断节点，仅保留初始化、采集、判断、执行、显示/通信更新和异常处理等关键步骤。', '主程序', { sectionId: '4.2', reason: '说明系统软件的主执行顺序' }));
     distinctFunctions.forEach(func => {
       const name = functionSource(func);
-      artifacts.push(makeArtifact('flowchart', software, `${name}流程图`, `直接给出简洁Mermaid代码，使用flowchart TD，必须有“开始”和“结束”节点；用5至8个节点表达${name}的输入、处理、关键判断、正常动作和异常路径。`, name, { sourceFactIds: [func.id], reason: '确保每项确认功能都有可直接绘制的软件流程' }));
+      artifacts.push(makeArtifact('flowchart', software, `${name}流程图`, `直接给出简洁Mermaid代码，使用flowchart TD；A([开始])和末端([结束])各一个，主干自上而下，分支尽快汇合。用5至8个短句节点、最多2个判断节点表达${name}的输入、处理、关键判断、正常动作和异常路径。`, name, { sourceFactIds: [func.id], reason: '确保每项确认功能都有可直接绘制的软件流程' }));
       if (/温湿度|单总线|DHT|DS18|I2C|SPI|UART|串口|通信|无线|蓝牙|WiFi|射频/i.test(name)) {
         artifacts.push(makeArtifact('timing', software, `${name}通信时序图`, '直接生成简洁Mermaid sequenceDiagram代码，保留参与对象、发起、应答、数据传输、异常或超时和结束，不写逐步绘制说明。', name, { sourceFactIds: [func.id], reason: '说明该功能中通信或严格时序的执行关系' }));
       }
@@ -242,7 +250,6 @@ export function buildArtifactPlan({ outline = [], devices = [], functions = [] }
   }
   if (test) {
     artifacts.push(makeArtifact('test-table', test, '系统功能测试表', '按功能分组，每表最多5列、10行，表题在表格上方。必须包含测试环境或输入条件、操作步骤、测试次数、量化结果/误差/响应时间和结论；表前说明测试方法，表后分析结果。', '', { sectionId: '5.4', sourceFactIds: distinctFunctions.map(func => func.id), reason: '使用量化数据验证每项确认功能' }));
-    artifacts.push(makeArtifact('formula', test, '测试误差或成功率计算公式', '根据项目测试指标选择误差、相对误差、成功率或平均响应时间公式，说明变量、单位和计算结果。', '', { sectionId: '5.5', reason: '为测试数据分析提供可复核的计算依据' }));
     distinctFunctions.forEach(func => {
       const name = functionSource(func);
       artifacts.push(makeArtifact('result-image', test, `${name}功能展示图`, `只保留“此处插入${name}功能展示图”的简短独立提示，不写拍摄、截图或取景方法。`, name, { sourceFactIds: [func.id], reason: '展示该功能在实际操作后的可观察结果' }));
@@ -297,7 +304,49 @@ export function buildHardwareMessages(materials) {
 I2C设备列SCL、SDA；UART设备列TX、RX；SPI设备列SCK、MISO、MOSI及每个设备独立CS；模拟传感器列AO/ADC；普通控制列CTRL；有实际需要时列INT、RST、EN。推荐引脚必须考虑主控型号和常见复用关系。I2C等总线可合理共享，并用同一busGroup标识。只返回JSON：
 {"controller":"准确主控型号","devices":[{"model":"型号","role":"作用","interfaceType":"GPIO/I2C/UART/SPI/ADC/1-Wire等"}],"functions":[{"name":"功能","deviceModels":["关联器件"]}],"mappings":[{"device":"器件型号","interfaceType":"接口","signal":"SCL等","pin":"PB6","alternatives":["PB8"],"busGroup":"I2C1或空","shareAllowed":true}],"powerNotes":["供电与共地说明"],"fixedFacts":["确定的通信常识"],"conflicts":["仅用户资料明确矛盾时填写"]}`,
     },
+    {
+      role: 'system',
+      content: '多路继电器处理规则：同一型号的多个继电器可以共用一个器件清单项，但必须按被控对象分别建立功能、控制通道和主控引脚映射。例如继电器1控制风扇、继电器2控制水泵，不能合并成笼统的继电器控制。每个通道的signal应带通道或对象标识，全部映射必须保留，后续论文要分别介绍其电路、程序逻辑和测试结果。',
+    },
     { role: 'user', content: JSON.stringify({ ...materials, schematicText: String(materials?.schematicText || '').slice(0, 100000), schematicFilename: materials?.schematicFilename || '' }, null, 2) },
+  ];
+}
+
+export function buildReferenceRecommendationMessages({ title, devices = [], functions = [], candidates = [], count = 15 }) {
+  const total = Math.max(5, Math.min(30, Number(count) || 15));
+  const chineseCount = Math.round(total * 0.7);
+  const foreignCount = total - chineseCount;
+  return [
+    {
+      role: 'system',
+      content: `你是电子信息工程课题的参考文献筛选员。只能从candidateReferences中选择，不得补写、改写或虚构文献。根据课题题目、器件、功能和补充关键词，精确选择${total}篇与课题最相关、可用于开题报告、任务书或论文第一章研究现状的文献。
+
+筛选要求：
+1. 主题相关性最高，优先近五年期刊论文；标准、学位论文、会议论文只在确有价值时选用。
+2. 中外文比例固定约7:3：选择中文${chineseCount}篇、外文${foreignCount}篇；仅在候选确实不足时允许微调，禁止为凑数选择明显跑题文献。
+3. 文献库没有摘要时，只能根据题名、方向、来源和适用课题判断相关性，不能虚构研究方法、实验数据或研究结论。
+4. 每篇只能出现一次。只返回候选中的id，reason用一句话说明它与本课题哪个研究方面相关。
+
+只返回JSON：{"selected":[{"id":"lib-1","reason":"相关性说明"}],"summary":"筛选依据"}`,
+    },
+    {
+      role: 'user',
+      content: JSON.stringify({ title, devices, functions, requestedCount: total, languageTargets: { chinese: chineseCount, foreign: foreignCount }, candidateReferences: candidates }, null, 2),
+    },
+  ];
+}
+
+export function buildDailyMotivationMessages({ date = '', slot = '' } = {}) {
+  return [
+    {
+      role: 'system',
+      content: `你是单片机设计工作室的励志语编辑。请写一句简短、坚定、热血但不空泛的中文鼓励语。可以化用古诗词或名言，但不要冒充名人原话，不要写作者姓名，不要出现AI、模型、论文生成、接口、API等技术提示。优先突出逆风翻盘、破局、坚持和最终抵达，适合从右向左滚动展示。只返回JSON：{"text":"鼓励语"}。日期：${date}；轮次：${slot}`,
+    },
+    {
+      role: 'system',
+      content: '内容风格改为通用励志语，不必贴合单片机或论文主题。优先使用热门古诗词片段、历史名句和逆风翻盘风格的格言，突出困境中的坚持、破局、反转和最终抵达；可以化用但不要捏造作者或把不确定出处强行署名。语句要适合顶部滚动展示，控制在18至45个汉字。',
+    },
+    { role: 'user', content: JSON.stringify({ date, slot }, null, 2) },
   ];
 }
 
@@ -341,10 +390,10 @@ export function chapterResponsibilities(kind) {
     introduction: '第一章只设四个二级小节：背景意义、国内外研究现状、主要研究内容、论文结构安排。“主要研究内容”和“论文结构安排”必须分别写作；国内外现状使用三级标题展开。器件、电路、程序和测试细节留给后续章节。文献只能在现状分析中依正文首次出现顺序单篇引用，每篇最多引用一次。',
     requirement: '只写功能需求、性能需求与可行性，不提前展开具体电路和程序步骤。',
     overall: '写系统需求、总体结构、工作原理和器件选型。主控以及每类关键传感、执行、显示和通信器件，都必须把实际选用型号与至少2个常见候选型号进行简要比较，再结合项目需求给出选择结论；候选型号只用于论证，不能写成实际器件。用器件图片和分组对比表支撑结论，不展开引脚、电路、驱动程序和测试结果。',
-    hardware: '只写主控、电源和各外设电路及实际连接关系。按照目录合理归纳同类电路，说明信号、引脚、供电、共地、10 kΩ上拉或驱动关系，可用不含信号方向列的简短引脚表；除51单片机外主控按最小系统开发板描述，5V输入经板载稳压获得3.3V。每个实际器件都有器件图和对应电路图提示。不得重复第二章的器件参数、候选比较和选型理由，也不能提前写程序流程。',
-    software: '只写软件结构、主程序、器件驱动过程和各核心功能逻辑。主程序和每项确认功能必须有简洁、可复制且含“开始”“结束”节点的Mermaid流程图；软件结构图和通信时序也直接使用Mermaid，真实计算才使用公式。不得粘贴程序源代码，不直接用函数名堆叠介绍，也不得重复硬件接线。',
+    hardware: '只写主控、电源和各外设电路及实际连接关系。按照目录合理归纳同类电路，说明信号、引脚、供电、共地、10 kΩ上拉或驱动关系；每个外设的简短引脚表紧跟其接口电路说明，不设置第三章总引脚表。电路图提示和对应引脚表之间必须先有分别介绍该器件接口与连接依据的实质正文，不能连续出现图位和表格。除51单片机外主控按最小系统开发板描述，5V输入经板载稳压获得3.3V。每个实际器件都有对应电路图提示。多路继电器按被控对象分别写控制通道、引脚和驱动逻辑。第三章禁止再次生成系统结构图或硬件框架图，不得重复第二章的器件参数、器件图片、总体功能框架、候选比较和选型理由，也不能提前写程序流程。',
+    software: '只写软件结构、主程序、器件驱动过程和各核心功能逻辑。主程序和每项确认功能必须有简洁、可复制且含“开始”“结束”节点的Mermaid流程图；软件结构图和通信时序也直接使用Mermaid，真实计算才使用公式。多路继电器必须按被控对象分别描述判断条件、输出通道和异常处理。公式只放在第四章软件设计，不能在第五章测试章节生成公式。不得粘贴程序源代码，不直接用函数名堆叠介绍，也不得重复硬件接线。',
     implementation: '按功能分别写硬件连接与软件逻辑，但同一器件的选型介绍、连接关系和程序过程必须分工清晰，禁止在不同小节重复。',
-    test: '写调试工具、操作方法、每个功能的量化测试、功能展示图位置及结果分析。没有用户数据时结合器件能力和现实实验条件保守推定；每项确认功能都要覆盖，必须有数据表格，不提示“模拟数据”，不得重复第四章程序流程。',
+    test: '写调试工具、操作方法、每个功能的量化测试、功能展示图位置及结果分析。没有用户数据时结合器件能力和现实实验条件保守推定；多路继电器按不同被控对象分别测试和分析；每项确认功能都要覆盖，必须有数据表格，不提示“模拟数据”，第五章不生成公式，公式和计算方法统一放在第四章，不得重复第四章程序流程。',
     conclusion: '结合题目背景概括已完成工作、主要结果和合理展望。不得自曝系统未完成、功能缺失或使用模板化套话。',
   };
   return map[kind] || '';
@@ -371,13 +420,13 @@ export function buildChapterMessages({ project, chapter, outline, artifacts, com
 通用铁律：
 1. 用户确认资料最高优先级；不得改换主控、器件、引脚、接口、功能。
 1.1 全文不得出现ESP8266；独立WiFi模块统一写ESP-01S。
-2. 遵守章节职责，选型、硬件连接、程序逻辑、测试内容不得跨章重复。同一事实只在最合适的位置详细写一次，其他位置最多用一句承担衔接，不得换词复述。completedChapterDigest中已经出现的参数、原理、步骤、结论和图表不得再次详细展开。
+2. 遵守章节职责，选型、硬件连接、程序逻辑、测试内容不得跨章重复。同一事实只在最合适的位置详细写一次，其他位置最多用一句承担衔接，不得换词复述。completedChapterDigest中已经出现的参数、原理、步骤、结论和图表不得再次详细展开。不得重复已经写过的二级或三级标题；相邻小节不能使用相同的段落开头、论证顺序或结论句式。若两个小节职责接近，应合并为一个完整论证，不要复制一套内容后换标题。
 3. 标题必须单独成行且不使用Markdown井号。二级标题严格写成“x.x 标题”，三级标题严格写成“x.x.x 标题”。必须完整保留requiredSections给出的标题并按顺序写作；不得自行增加三级标题。三级标题只承担目录已经确认的分类，不按每个器件、功能或测试项目继续细拆，同类内容在同一标题下用自然段组织。
 4. 不插入源代码，不用具体函数名作为主体介绍。
-5. 每个chapterArtifacts项目都必须在对应内容之后出现，不能遗漏。器件图、电路图、实物图和功能展示图只使用独占一行的“【非正文·插图位置：图名】”，下一行直接写“【非正文结束】”，不得添加拍摄、取景、构图、绘制步骤或冗长标注说明；该格式是给用户后续插图的醒目占位提示，不属于论文正文，连接依据必须写在正文中。框架图、硬件组成图、软件结构图、程序流程图和通信时序图直接给出第7条规定的Mermaid代码，不写逐节点绘制说明。comparison-table、pin-table和test-table必须直接生成可用的Markdown表格；pin-table只设“外设、外设信号、主控引脚、说明”，禁止“信号方向”列。formula必须直接写出公式并解释变量、单位、参数来源和用途。所有非正文提示前后各空一行，绝不能接在正文句末。图形首次引用必须融入有分析内容的正文句子，禁止把“如图x-x所示。”单独成段，同一图只引用一次。
-5.1 任意两项视觉内容之间都必须有至少一个不少于80字的实质正文段落。图与图、图与表、表与图、表与表均不得连续出现；中间段落需要分析前一项内容并自然引出后一项，不能只写“如下图/表所示”等过渡句。
-6. 系统功能框架图、硬件组成图、电路图、软件结构图和程序流程图必须名称与内容明确区分。
-7. 框架图、结构图、流程图和时序图固定使用独占一行的“【非正文·Mermaid图：图名】”，下一行用三个反引号加mermaid开启代码围栏，末尾关闭代码围栏，再单独写“【非正文结束】”。框架图和结构图使用flowchart LR或flowchart TD并控制在10个节点以内；主程序和每个核心功能流程图必须使用flowchart TD，必须同时包含文字为“开始”和“结束”的节点，主流程6至10个节点、单项功能5至8个节点，判断分支只用“是/否”等短标签；通信时序使用sequenceDiagram。禁止subgraph、style、classDef、HTML标签、重复节点和无意义堆叠。
+5. 每个chapterArtifacts项目都必须在对应内容之后出现，不能遗漏。chapterArtifacts中的每张图和每张表都已给出编号；图前实质正文中必须恰好出现一次“如图x-x所示”，表前实质正文中必须恰好出现一次“如表x-x所示”，均需融入完整分析句，禁止单独成段、漏写、重复引用或自行改号。器件图、电路图、实物图和功能展示图只使用独占一行的“【非正文·插图位置：图名】”，下一行直接写“【非正文结束】”，不得添加拍摄、取景、构图、绘制步骤或冗长标注说明；该格式是给用户后续插图的醒目占位提示，不属于论文正文，连接依据必须写在正文中。框架图、软件结构图、程序流程图和通信时序图直接给出第7条规定的Mermaid代码，不写逐节点绘制说明。第三章不得生成硬件组成图或结构图。comparison-table、pin-table和test-table必须直接生成可用的Markdown表格；每个pin-table只写一个器件，使用“外设信号、主控引脚、连接说明”三列，禁止“信号方向”列。formula必须直接写出公式并解释变量、单位、参数来源和用途。所有非正文提示前后各空一行，绝不能接在正文句末。
+5.1 任意两项视觉内容之间都必须有至少一个不少于80字的实质正文段落。图与图、图与表、表与图、表与表均不得连续出现；中间段落需要分析前一项内容并自然引出后一项，不能只写“如下图/表所示”等过渡句。不同章节不得复用相同的图位标题、Mermaid代码、表格标题或图表说明；器件图片必须放在对应器件选型小节的正文分析之后，不能集中放在章节末尾或放到其他器件小节。
+6. 系统总体功能框架图只在第二章出现一次；第三章只用电路图和分器件引脚表表达硬件，不再生成同义结构图。软件结构图和程序流程图必须与第二章功能框架明确区分。
+7. 框架图、结构图、流程图和时序图固定使用独占一行的“【非正文·Mermaid图：图名】”，下一行用三个反引号加mermaid开启代码围栏，末尾关闭代码围栏，再单独写“【非正文结束】”。框架图和结构图使用flowchart LR或flowchart TD并控制在9个节点以内。主程序和每个核心功能流程图必须使用flowchart TD，起点写成A([开始])，终点使用唯一的“([结束])”节点；主干自上而下，分支在1至2步内汇合，主流程6至9个节点、单项功能5至8个节点，最多2个判断节点，判断分支只用“是/否”等短标签。每个节点使用4至12字短句，不画交叉回线、多个结束节点或无出口分支；通信时序使用sequenceDiagram。禁止subgraph、style、classDef、HTML标签、重复节点和无意义堆叠。
 8. 时序图只用于确有通信或严格时序的功能。公式只用于真实计算，必须解释变量、单位、参数来源和用途。
 9. 表格使用标准Markdown表格，表题“表x-x 表名”单独一行并放在表格之前。每张表最多5列、10行数据；内容较多时必须主动按功能、模块或测试项目拆成多张表，并为每张表补一段承接分析，绝不能输出超长表格后再依赖导出端截断。表格前后必须有实质分析，不能让两张表连续出现。导出端会统一转换为三线表，不要在表格中模拟竖线装饰或合并单元格。
 10. 禁止“系统尚未实现”“功能未完成”“受条件限制未测试”等自曝式表述；不得虚构型号、引脚和引用出版信息。
@@ -403,13 +452,19 @@ export function buildChapterMessages({ project, chapter, outline, artifacts, com
     chapterArtifacts,
     deviceSelectionPolicy: chapter.kind === 'overall' ? '主控以及每类关键外设都要把实际选用型号与至少2个常见候选型号比较，比较指标必须服务本项目需求。候选器件只能出现在选型论证和对比表中，不得混入实际器件清单或后续接线、程序、测试描述。器件类别较多时拆成多张不超过5列的三线表。' : '本章不新增候选器件。',
     references,
-    referencePolicy: chapter.kind === 'introduction'
-      ? `仅在第一章国内外研究现状中按列表顺序逐篇引用。每篇只引用一次，一句话只放一个编号，不得合并成[1-3]或[1][2]。文末参考文献将按正文首次引用顺序排列。`
+    referencePolicy: chapter.kind === 'introduction' && references.length
+      ? `仅在第一章国内外研究现状中按列表顺序逐篇引用。每篇只引用一次，一句话只放一个编号，不得合并成[1-3]或[1][2]。文末参考文献将按正文首次引用顺序排列。若某篇文献abstract为空，只能依据作者、题名和出版来源保守说明其研究主题或应用方向，禁止写出该文献采用的具体方法、实验数据、性能提升和研究结论。`
+      : chapter.kind === 'introduction'
+        ? '用户关闭或未提供参考文献，本章不得出现引用编号、具名文献综述或文末参考文献条目。国内外现状只做不带具体作者和文献编号的概括分析。'
       : '本章不得出现参考文献编号、作者文献综述或新增文献。',
     completedChapterDigest: completedDigest || '无，当前为第一章',
     output: '只输出本章正文；完整保留requiredSections中的二级和三级标题并按顺序展开，不得删减项目自适应目录；不要重复输出“第x章 章名”一级标题，不要使用#号。',
   };
-  return [{ role: 'system', content: systemPrompt }, { role: 'user', content: JSON.stringify(userPayload, null, 2) }];
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'system', content: '补充执行规则：第二章每个实际器件的选型分析后分别生成该器件专用对比表，不得把所有器件塞进一个总表；第三章每个器件的电路图提示和引脚表之间必须先写一段不少于80字的接口与连接分析；第五章只写测试方法、量化数据和结果，不生成公式，公式只放在第四章；同型号多路继电器按被控对象分别写作，不能因为型号相同而合并功能、引脚或测试。' },
+    { role: 'user', content: JSON.stringify(userPayload, null, 2) },
+  ];
 }
 
 export function buildExtrasMessages(project) {
@@ -423,6 +478,10 @@ export function buildExtrasMessages(project) {
 
 中文关键词和英文关键词各3至5个，顺序和含义一一对应；中文使用全角分号，英文使用英文分号。致谢自然具体，围绕选题分析、硬件调试、程序验证和论文整理过程表达，不出现任何人名、学校名或单位名，不使用“时光荏苒”等模板开头，不写系统不足。只返回JSON：{"titleEn":"","abstractCn":"","abstractEn":"","keywords":"3至5个中文关键词，以分号分隔","keywordsEn":"3至5个英文关键词，以英文分号分隔","acknowledgment":""}`,
     },
+    {
+      role: 'system',
+      content: '摘要段落规则：中文摘要和英文摘要都必须分为2至3个自然段，段落之间使用空行分隔；每段承担不同信息：研究背景与目的、总体设计与功能、验证结果与结论。不要把摘要写成一个连续大段。',
+    },
     { role: 'user', content: JSON.stringify({ title: project.title, chapters }, null, 2) },
   ];
 }
@@ -435,12 +494,15 @@ export function buildAuditMessages(project) {
     checks: [
       '硬件型号、接口、引脚和工作逻辑前后一致',
       '不同章节没有大段重复或职责越界',
+      '没有重复的二级或三级标题，近似小节已经归纳',
+      '正文不存在高相似度段落或同义复述',
       '各章二级和三级标题与项目自适应目录一致，没有漏写目录标题',
       '每个确认功能都有简洁、可复制且语法完整的Mermaid流程图',
-      '框架图、硬件组成图、电路图、软件结构图已区分',
+      '系统总体功能框架图只在第二章出现，第三章没有重复的硬件组成图或框架图',
       '测试包含现实的量化数据和不超过5列10行的表格',
-      '同一图仅首次引用且“如图所示”融入正文',
+      '每张图都按给定图号在对应正文中恰好出现一次“如图x-x所示”，第二章器件图也没有漏引',
       '任何两张图、两张表或图表之间都有实质正文段落，不存在连续视觉内容',
+      '不同图表和Mermaid图内容不重复，器件图片位于对应器件选型小节',
       '每个流程图均为简洁可复制的Mermaid代码，并包含必要的是/否分支、异常路径或回路线',
       '器件图、电路图、实物图和功能图只保留简短插图提示，没有拍摄或绘制方法',
       '图表预留及说明单独成行，表题在表格之前且表格可转换为三线表',

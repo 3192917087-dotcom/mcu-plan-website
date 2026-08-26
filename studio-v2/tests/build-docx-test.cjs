@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const JSZip = require('jszip');
 
 globalThis.docx = require('../vendor/docx.umd.js');
 require('../docx-export.js');
@@ -19,7 +20,7 @@ async function main() {
     keywordsEn: 'microcontroller; environmental monitoring; sensor; control system',
     chapters: [
       {
-        id: '1', title: '绪论', content: '1.1 课题研究背景及意义\n\n室内环境监测是智能控制系统的重要应用方向。\n\n1.2 主要研究内容\n\n本文完成硬件、软件与测试设计。',
+        id: '1', title: '绪论', content: '1.1 课题研究背景及意义\n\n室内环境监测是智能控制系统的重要应用方向[1]。\n\n1.2 主要研究内容\n\n本文完成硬件、软件与测试设计。',
       },
       {
         id: '2', title: '系统总体方案设计', content: '2.1 系统总体结构\n\n2.1.1 信息采集层\n\n传感器负责采集环境参数。\n\n2.1.2 控制与输出层\n\n主控完成判断并更新显示和报警状态，系统关系如图2-1所示。\n\n【非正文·插图位置：系统总体功能框架图】\n\n【非正文结束】\n\n图示之后结合信息流向说明主控如何接收传感数据，并将判断结果分别送至显示与报警模块，使图形表达与文字分析相互补充。\n\n表2-1 系统功能测试结果\n\n| 测试项目 | 测试次数 | 平均响应时间/ms | 结论 |\n|---|---:|---:|---|\n| 数据采集 | 20 | 820 | 通过 |\n| 异常报警 | 20 | 160 | 通过 |\n\n测试结果表明，各功能均能按设定逻辑运行。',
@@ -32,6 +33,11 @@ async function main() {
     acknowledgment: '通过本次设计，对单片机系统的方案分析、硬件连接、程序逻辑和测试过程形成了更加完整的认识。',
   });
   fs.writeFileSync(outputPath, Buffer.from(await blob.arrayBuffer()));
+  const zip = await JSZip.loadAsync(fs.readFileSync(outputPath));
+  const documentXml = await zip.file('word/document.xml').async('string');
+  if (!/REF Ref1/.test(documentXml) || !/SEQ ThesisReference/.test(documentXml) || !/w:bookmarkStart[^>]+w:name="Ref1"/.test(documentXml)) {
+    throw new Error('DOCX参考文献交叉引用字段未写入');
+  }
   const schemeBlob = await globalThis.PaperDocx.buildSchemeDocx({
     title: '基于STM32的环境监测系统设计',
     devices: [{ model: 'STM32F103C8T6', role: '主控' }, { model: 'DHT11', role: '温湿度传感器' }],

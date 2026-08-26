@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f6f8f7">
   <title>单片机方案与论文工作台 V2</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="styles.css?v=20260825-3">
+  <link rel="stylesheet" href="styles.css?v=20260826-9">
 </head>
 <body>
   <a class="skip-link" href="#workspace-main">跳到主要内容</a>
@@ -29,6 +29,9 @@
         <button class="nav-item" type="button" data-route="paper">
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v5h5M9 12h7M9 16h7"/></svg><span>论文</span>
         </button>
+        <button class="nav-item" type="button" data-route="tools">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h6a3 3 0 0 1 3 3v11a3 3 0 0 0-3-3H4zM20 5h-6a3 3 0 0 0-3 3v11a3 3 0 0 1 3-3h6z"/></svg><span>文献</span>
+        </button>
       </nav>
 
       <div class="topbar-actions">
@@ -44,6 +47,14 @@
         </label>
       </div>
     </header>
+    <div class="daily-motivation" id="daily-motivation" role="status" aria-live="polite">
+      <div class="daily-motivation-viewport">
+        <span class="daily-motivation-track" id="daily-motivation-track">
+          <span class="daily-motivation-text" id="daily-motivation-text">长风破浪会有时，直挂云帆济沧海。</span>
+          <span class="daily-motivation-text daily-motivation-text-copy" id="daily-motivation-text-copy" aria-hidden="true">长风破浪会有时，直挂云帆济沧海。</span>
+        </span>
+      </div>
+    </div>
 
     <main id="workspace-main" tabindex="-1">
       <section class="route-view is-active" id="view-projects" data-view="projects" aria-labelledby="projects-title">
@@ -70,6 +81,33 @@
           <h2>还没有项目</h2>
           <p>新建项目后，方案和论文可以分别使用。</p>
           <button class="button button-primary" type="button" data-action="new-project">新建第一个项目</button>
+        </div>
+      </section>
+
+      <section class="route-view" id="view-tools" data-view="tools" aria-labelledby="reference-tool-title">
+        <div class="utility-page">
+          <div class="page-head compact-head">
+            <div><p class="eyebrow">独立工具</p><h1 id="reference-tool-title">参考文献推荐</h1><p>可单独用于开题报告、任务书和论文，结果来自本地文献库。</p></div>
+          </div>
+          <div class="reference-workspace">
+            <form class="reference-query-panel" id="standalone-reference-form">
+              <div class="section-title compact-section-title"><span>筛选条件</span><h2>填写课题信息</h2></div>
+              <label class="field field-large" for="standalone-reference-title"><span>课题题目 <b>必填</b></span><input id="standalone-reference-title" required placeholder="例如：基于STM32的智能温室监测系统"></label>
+              <label class="field" for="standalone-reference-notes"><span>补充关键词 <small>可选</small></span><textarea id="standalone-reference-notes" rows="5" placeholder="可填写器件、功能、研究方向或开题报告关键词"></textarea></label>
+              <div class="reference-query-options">
+                <label class="field" for="standalone-reference-count"><span>推荐篇数</span><input id="standalone-reference-count" type="number" min="5" max="30" value="15"></label>
+                <div class="ratio-display" aria-label="中外文比例"><span>中外文比例</span><strong>中文 70% · 外文 30%</strong></div>
+              </div>
+              <button class="button button-primary button-large" id="btn-standalone-reference-search" type="submit">AI推荐文献</button>
+              <p class="field-note" id="standalone-reference-library-status" role="status" aria-live="polite">文献库共551篇；API不可用时自动使用本地相关性排序。</p>
+            </form>
+            <section class="reference-output-panel" aria-labelledby="standalone-reference-results-title">
+              <header><div><span class="status-badge" id="standalone-reference-result-status">等待推荐</span><h2 id="standalone-reference-results-title">推荐结果</h2><p id="standalone-reference-summary">填写题目后开始筛选。</p></div><span id="standalone-reference-selected-count"></span></header>
+              <div class="standalone-reference-list" id="standalone-reference-list"><div class="reference-empty"><strong>尚未生成文献</strong><span>推荐结果会在这里逐篇显示，可勾选后复制。</span></div></div>
+              <div class="reference-output-actions"><button class="button button-secondary" id="btn-standalone-select-all" type="button" disabled>全选</button><button class="button button-secondary" id="btn-standalone-clear-selection" type="button" disabled>清空选择</button><button class="button button-secondary" id="btn-standalone-clear-results" type="button" disabled>清除结果</button><button class="button button-primary" id="btn-copy-standalone-references" type="button" disabled>复制已选文献</button></div>
+              <textarea class="sr-only" id="standalone-reference-output" aria-label="已选参考文献文本"></textarea>
+            </section>
+          </div>
         </div>
       </section>
 
@@ -190,7 +228,7 @@
                   </div>
                 </div>
 
-                <details class="advanced-section">
+                <details class="advanced-section" id="paper-advanced-section">
                   <summary><span>补充资料</span><small>程序、参考文献、测试、照片和学校要求</small><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg></summary>
                   <div class="advanced-content field-grid">
                     <div class="field field-wide">
@@ -214,7 +252,25 @@
                         <small id="outline-file-summary">支持 DOCX、TXT、MD</small>
                       </div>
                     </div>
-                    <label class="field field-wide" for="paper-references"><span>参考文献 <small>用 [1]、[2] 区分；填写后将直接使用</small></span><textarea id="paper-references" rows="7" placeholder="[1] 作者. 题名[J]. 期刊名, 年, 卷(期): 页码.&#10;[2] 作者. 题名[D]. 城市: 学位授予单位, 年."></textarea></label>
+                    <label class="reference-use-option" for="paper-use-references">
+                      <input id="paper-use-references" type="checkbox" checked>
+                      <span><strong>AI写作时使用参考文献</strong><small>开启后，文献留空时自动匹配；关闭则正文和文末均不引用。</small></span>
+                    </label>
+                    <div class="field field-wide reference-field" id="reference-field">
+                      <span>参考文献 <small>已有文献可继续填写，编号会按正文首次引用顺序同步</small></span>
+                      <textarea id="paper-references" rows="8" placeholder="[1] 作者. 题名[J]. 期刊名, 年, 卷(期): 页码.&#10;[2] 作者. 题名[D]. 城市: 学位授予单位, 年."></textarea>
+                      <div class="reference-actions">
+                        <label class="reference-count-field" for="paper-reference-count"><span>篇数</span><input id="paper-reference-count" type="number" min="5" max="30" value="15"></label>
+                        <button class="button button-secondary" id="btn-recommend-references" type="button">AI推荐文献</button>
+                        <span class="ratio-note">中文70% · 外文30%</span>
+                        <span id="reference-library-status" role="status" aria-live="polite">文献库已就绪</span>
+                      </div>
+                      <section class="reference-recommendations" id="reference-recommendations" aria-labelledby="reference-recommendations-title" hidden>
+                        <header><div><strong id="reference-recommendations-title">推荐结果</strong><small id="reference-recommendation-summary"></small></div><span id="reference-selected-count"></span></header>
+                        <div class="reference-result-list" id="reference-result-list"></div>
+                        <footer><button class="button button-secondary" id="btn-clear-reference-recommendations" type="button">收起结果</button><button class="button button-primary" id="btn-apply-reference-recommendations" type="button">加入参考文献</button></footer>
+                      </section>
+                    </div>
                     <label class="field" for="paper-test-info"><span>测试记录</span><textarea id="paper-test-info" rows="5" placeholder="已有测试数据、操作步骤或测试条件"></textarea></label>
                     <label class="field" for="paper-tools"><span>调试工具</span><textarea id="paper-tools" rows="5" placeholder="例如：Keil、示波器、万用表、串口助手"></textarea></label>
                     <label class="field" for="paper-photo-notes"><span>实物与照片说明</span><textarea id="paper-photo-notes" rows="4" placeholder="已有实物图、需要预留的展示图"></textarea></label>
@@ -312,7 +368,7 @@
   <script src="vendor/pdf.min.js"></script>
   <script>if (globalThis.pdfjsLib) globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';</script>
   <script src="vendor/docx.umd.js"></script>
-  <script src="docx-export.js?v=20260825-3"></script>
-  <script type="module" src="app.js?v=20260826-1"></script>
+  <script src="docx-export.js?v=20260826-9"></script>
+  <script type="module" src="app.js?v=20260826-9"></script>
 </body>
 </html>
