@@ -1,4 +1,4 @@
-import * as Store from './storage.js?v=20260824-1';
+import * as Store from './storage.js?v=20260826-1';
 import * as Prompts from './prompts.js?v=20260825-1';
 import { allPins, compatiblePins, validateMappings } from './pin-data.js?v=20260824-2';
 import * as Rules from '../studio-next/rules.js?v=20260824-6';
