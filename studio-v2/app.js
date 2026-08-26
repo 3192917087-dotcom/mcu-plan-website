@@ -1,5 +1,5 @@
 import * as Store from './storage.js?v=20260826-1';
-import * as Prompts from './prompts.js?v=20260826-9';
+import * as Prompts from './prompts.js?v=20260826-10';
 import { allPins, compatiblePins, validateMappings } from './pin-data.js?v=20260824-2';
 import { REFERENCE_LIBRARY, REFERENCE_LIBRARY_META } from './reference-library.js?v=20260826-2';
 import * as Rules from '../studio-next/rules.js?v=20260824-6';
@@ -116,7 +116,7 @@ function loadDailyMotivation() {
   } catch (error) {}
   const date = todayKey();
   if (dailyMotivationState.date !== date || !dailyMotivationState.text) {
-    dailyMotivationState = { date, text: FALLBACK_MOTIVATIONS[Math.floor(Date.now() / 86400000) % FALLBACK_MOTIVATIONS.length], source: 'local' };
+    dailyMotivationState = { date, text: FALLBACK_MOTIVATIONS[Math.floor(Date.now() / MOTIVATION_REFRESH_MS) % FALLBACK_MOTIVATIONS.length], source: 'local', updatedAt: Date.now() };
     saveDailyMotivation();
   }
 }
@@ -151,43 +151,56 @@ function restartMotivationTicker() {
   void track.offsetWidth;
   track.classList.add('is-running');
 }
-function rotateFallbackMotivation() {
-  const currentIndex = FALLBACK_MOTIVATIONS.indexOf(dailyMotivationState.text);
+function motivationRefreshDue(now = Date.now()) {
+  const updatedAt = Number(dailyMotivationState.updatedAt) || 0;
+  return now - updatedAt >= MOTIVATION_REFRESH_MS;
+}
+function rotateFallbackMotivation(updatedAt = Date.now()) {
+  const previousText = dailyMotivationState.text;
+  const currentIndex = FALLBACK_MOTIVATIONS.indexOf(previousText);
   const nextIndex = (currentIndex + 1 + FALLBACK_MOTIVATIONS.length) % FALLBACK_MOTIVATIONS.length;
-  dailyMotivationState = { date: todayKey(), text: FALLBACK_MOTIVATIONS[nextIndex], source: 'local' };
+  dailyMotivationState = { date: todayKey(), text: FALLBACK_MOTIVATIONS[nextIndex], source: 'local', updatedAt };
   saveDailyMotivation();
   renderDailyMotivation();
+  return previousText;
 }
 function scheduleDailyMotivationRefresh() {
-  if (motivationRefreshTimer) clearInterval(motivationRefreshTimer);
-  motivationRefreshTimer = setInterval(() => { void refreshDailyMotivation({ force: true }); }, MOTIVATION_REFRESH_MS);
+  if (motivationRefreshTimer) clearTimeout(motivationRefreshTimer);
+  const elapsed = Date.now() - (Number(dailyMotivationState.updatedAt) || 0);
+  const delay = Math.max(1000, MOTIVATION_REFRESH_MS - elapsed);
+  motivationRefreshTimer = setTimeout(async () => {
+    await refreshDailyMotivation({ force: true });
+    scheduleDailyMotivationRefresh();
+  }, delay);
 }
 async function refreshDailyMotivation({ force = false } = {}) {
   if (motivationRequestInFlight) return;
   const date = todayKey();
   if (dailyMotivationState.date !== date) loadDailyMotivation();
   renderDailyMotivation();
-  if (!force && dailyMotivationState.source === 'ai' && dailyMotivationState.date === date) return;
-  if (!activeApiConfig.apiKey) {
-    if (force) rotateFallbackMotivation();
-    return;
-  }
+  const due = force || motivationRefreshDue();
+  if (!due) return;
+  const previousText = rotateFallbackMotivation();
+  scheduleDailyMotivationRefresh();
+  // 论文、方案或文献任务运行期间只做本地换句，避免额外请求影响主要生成速度。
+  if (!activeApiConfig.apiKey || requestController) return;
   motivationRequestInFlight = true;
   try {
     const slot = Math.floor(Date.now() / MOTIVATION_REFRESH_MS);
-    const raw = await callAi(Prompts.buildDailyMotivationMessages({ date, slot }), { reasoning: false, maxTokens: 240, jsonMode: true, requestLabel: '励志语更新', timeoutMs: 25000 });
+    const avoidTexts = unique([previousText, dailyMotivationState.text]);
+    const raw = await callAi(Prompts.buildDailyMotivationMessages({ date, slot, avoidTexts }), { reasoning: false, maxTokens: 240, jsonMode: true, requestLabel: '励志语更新', timeoutMs: 25000 });
     const result = await parseAiJson(raw, { requestLabel: '每日鼓励语', maxTokens: 240 });
     const text = String(result.text || '').replace(/[\r\n]+/g, ' ').replace(/^['“”"\s]+|['“”"\s]+$/g, '').trim();
-    if (text.length >= 8 && text.length <= 80 && !/(API|模型|AI|接口|生成失败)/i.test(text)) {
-      dailyMotivationState = { date, text, source: 'ai', slot };
+    if (text.length >= 8 && text.length <= 80 && text !== previousText && text !== dailyMotivationState.text && !/(API|模型|AI|接口|生成失败)/i.test(text)) {
+      dailyMotivationState = { date, text, source: 'ai', slot, updatedAt: Date.now() };
       saveDailyMotivation();
       renderDailyMotivation();
     }
   } catch (error) {
-    // 本地语句已经先行显示，鼓励语失败不影响方案和论文功能。
-    if (force) rotateFallbackMotivation();
+    // 到期时已经先行轮换本地语句，AI失败不影响励志语更新和主要功能。
   } finally {
     motivationRequestInFlight = false;
+    scheduleDailyMotivationRefresh();
   }
 }
 function countBodyChars(value) {
@@ -984,6 +997,7 @@ function submitApiSettings(event) {
   $('settings-dialog').close();
   toast('API设置已保存到当前浏览器', 'success');
   void checkActiveApiConnection({ silent: true });
+  void refreshDailyMotivation({ force: true });
 }
 
 function selectedMultiValues(key) {
@@ -3638,7 +3652,11 @@ function bindEvents() {
   $('btn-download-draft').addEventListener('click', () => exportPaper());
   $('btn-download-draft-top').addEventListener('click', () => exportPaper());
 
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && project) persistProject({ immediate: true }); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && project) persistProject({ immediate: true });
+    if (document.visibilityState === 'visible' && motivationRefreshDue()) void refreshDailyMotivation({ force: true });
+  });
+  window.addEventListener('focus', () => { if (motivationRefreshDue()) void refreshDailyMotivation({ force: true }); });
   window.addEventListener('hashchange', () => {
     const route = location.hash.replace('#', '');
     if (['projects', 'scheme', 'paper', 'tools'].includes(route)) setRoute(route);

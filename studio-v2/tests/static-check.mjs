@@ -49,6 +49,8 @@ const assertions = [
   ['独立文献结果可清除', html.includes('id="btn-standalone-clear-results"') && app.includes('function clearStandaloneReferenceResults') && app.includes("btn-standalone-clear-results').addEventListener")],
   ['每日励志语有本地回退并按日调用AI', html.includes('id="daily-motivation-text"') && app.includes('function refreshDailyMotivation') && app.includes('void refreshDailyMotivation()') && prompts.includes('buildDailyMotivationMessages')],
   ['励志语每十分钟刷新并横向滚动', app.includes('MOTIVATION_REFRESH_MS = 10 * 60 * 1000') && app.includes('scheduleDailyMotivationRefresh') && app.includes('restartMotivationTicker') && html.includes('daily-motivation-viewport') && styles.includes('daily-motivation-marquee')],
+  ['励志语按绝对时间补更新', app.includes('function motivationRefreshDue') && app.includes('updatedAt: Date.now()') && app.includes("document.visibilityState === 'visible'") && app.includes("window.addEventListener('focus'")],
+  ['励志语更新保证可见变化', app.includes('const previousText = rotateFallbackMotivation()') && app.includes('text !== previousText') && prompts.includes('avoidTexts')],
   ['重复标题与视觉内容可拦截', app.includes('function duplicateHeadingIssues') && app.includes('function duplicateVisualIssues') && app.includes('duplicate-heading-') && app.includes('duplicate-visual-')],
   ['器件图位绑定目录小节', app.includes('artifact.sectionId') && app.includes('没有放在${artifact.sectionId}对应正文之后')],
   ['质量修复失败不丢失已生成章节', app.includes('自动修复阶段暂未完成') && app.includes('保留当前稿并可下载') && app.includes('已保存已完成章节，可以继续生成或下载当前稿')],

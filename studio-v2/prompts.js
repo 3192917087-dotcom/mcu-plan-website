@@ -336,17 +336,17 @@ export function buildReferenceRecommendationMessages({ title, devices = [], func
   ];
 }
 
-export function buildDailyMotivationMessages({ date = '', slot = '' } = {}) {
+export function buildDailyMotivationMessages({ date = '', slot = '', avoidTexts = [] } = {}) {
   return [
     {
       role: 'system',
-      content: `你是单片机设计工作室的励志语编辑。请写一句简短、坚定、热血但不空泛的中文鼓励语。可以化用古诗词或名言，但不要冒充名人原话，不要写作者姓名，不要出现AI、模型、论文生成、接口、API等技术提示。优先突出逆风翻盘、破局、坚持和最终抵达，适合从右向左滚动展示。只返回JSON：{"text":"鼓励语"}。日期：${date}；轮次：${slot}`,
+      content: `你是单片机设计工作室的励志语编辑。请写一句简短、坚定、热血但不空泛的中文鼓励语。可以化用古诗词或名言，但不要冒充名人原话，不要写作者姓名，不要出现AI、模型、论文生成、接口、API等技术提示。优先突出逆风翻盘、破局、坚持和最终抵达，适合从右向左滚动展示。新语句不得与本轮avoidTexts中的任何一句相同。只返回JSON：{"text":"鼓励语"}。日期：${date}；轮次：${slot}`,
     },
     {
       role: 'system',
       content: '内容风格改为通用励志语，不必贴合单片机或论文主题。优先使用热门古诗词片段、历史名句和逆风翻盘风格的格言，突出困境中的坚持、破局、反转和最终抵达；可以化用但不要捏造作者或把不确定出处强行署名。语句要适合顶部滚动展示，控制在18至45个汉字。',
     },
-    { role: 'user', content: JSON.stringify({ date, slot }, null, 2) },
+    { role: 'user', content: JSON.stringify({ date, slot, avoidTexts }, null, 2) },
   ];
 }
 
