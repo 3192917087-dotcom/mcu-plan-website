@@ -1,5 +1,5 @@
 import * as Store from './storage.js?v=20260826-1';
-import * as Prompts from './prompts.js?v=20260826-10';
+import * as Prompts from './prompts.js?v=20260826-11';
 import { allPins, compatiblePins, validateMappings } from './pin-data.js?v=20260824-2';
 import { REFERENCE_LIBRARY, REFERENCE_LIBRARY_META } from './reference-library.js?v=20260826-2';
 import * as Rules from '../studio-next/rules.js?v=20260824-6';
@@ -9,7 +9,10 @@ const APP_TITLE = '单片机方案与论文工作台 V2';
 const API_SETTINGS_KEY = 'mcu-paper-studio-v2.api-settings';
 const REFERENCE_TOOL_KEY = 'mcu-paper-studio-v2.reference-tool';
 const MOTIVATION_KEY = 'mcu-paper-studio-v2.daily-motivation-v2';
-const MOTIVATION_REFRESH_MS = 10 * 60 * 1000;
+const MOTIVATION_REFRESH_MIN_MS = 90 * 1000;
+const MOTIVATION_REFRESH_MAX_MS = 4 * 60 * 1000;
+const MOTIVATION_SCHEDULE_VERSION = 2;
+const MOTIVATION_AI_INTERVAL = 4;
 const MIN_BODY_CHARS = 18000;
 const DEFAULT_API = Object.freeze({
   mode: 'user',
@@ -47,7 +50,7 @@ let operationStatusTimer = null;
 let standaloneReferenceState = {
   title: '', notes: '', count: 15, selectedIds: [], recommendationIds: [], reasons: {}, source: '', summary: '', updatedAt: '',
 };
-let dailyMotivationState = { date: '', text: '', source: '' };
+let dailyMotivationState = { date: '', text: '', source: '', updatedAt: 0, nextRefreshAt: 0, rotationCount: 0, scheduleVersion: 0 };
 let motivationRefreshTimer = null;
 let motivationRequestInFlight = false;
 const FALLBACK_MOTIVATIONS = Object.freeze([
@@ -109,16 +112,28 @@ function todayKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
+function randomMotivationDelay() {
+  return Math.round(MOTIVATION_REFRESH_MIN_MS + Math.random() * (MOTIVATION_REFRESH_MAX_MS - MOTIVATION_REFRESH_MIN_MS));
+}
 function loadDailyMotivation() {
+  let saved = {};
   try {
-    const saved = JSON.parse(localStorage.getItem(MOTIVATION_KEY) || '{}');
-    dailyMotivationState = { ...dailyMotivationState, ...saved };
+    saved = JSON.parse(localStorage.getItem(MOTIVATION_KEY) || '{}');
   } catch (error) {}
   const date = todayKey();
-  if (dailyMotivationState.date !== date || !dailyMotivationState.text) {
-    dailyMotivationState = { date, text: FALLBACK_MOTIVATIONS[Math.floor(Date.now() / MOTIVATION_REFRESH_MS) % FALLBACK_MOTIVATIONS.length], source: 'local', updatedAt: Date.now() };
-    saveDailyMotivation();
-  }
+  const now = Date.now();
+  const needsNewText = saved.date !== date || !String(saved.text || '').trim();
+  const needsScheduleMigration = Number(saved.scheduleVersion) !== MOTIVATION_SCHEDULE_VERSION || !Number.isFinite(Number(saved.nextRefreshAt));
+  dailyMotivationState = {
+    date,
+    text: needsNewText ? FALLBACK_MOTIVATIONS[Math.floor(now / 86400000) % FALLBACK_MOTIVATIONS.length] : String(saved.text).trim(),
+    source: needsNewText ? 'local' : String(saved.source || 'local'),
+    updatedAt: needsNewText ? now : Number(saved.updatedAt) || now,
+    nextRefreshAt: needsNewText || needsScheduleMigration ? now : Number(saved.nextRefreshAt),
+    rotationCount: needsNewText ? 0 : Math.max(0, Number(saved.rotationCount) || 0),
+    scheduleVersion: MOTIVATION_SCHEDULE_VERSION,
+  };
+  saveDailyMotivation();
 }
 function saveDailyMotivation() {
   try { localStorage.setItem(MOTIVATION_KEY, JSON.stringify(dailyMotivationState)); } catch (error) {}
@@ -152,47 +167,59 @@ function restartMotivationTicker() {
   track.classList.add('is-running');
 }
 function motivationRefreshDue(now = Date.now()) {
-  const updatedAt = Number(dailyMotivationState.updatedAt) || 0;
-  return now - updatedAt >= MOTIVATION_REFRESH_MS;
+  return now >= (Number(dailyMotivationState.nextRefreshAt) || 0);
 }
 function rotateFallbackMotivation(updatedAt = Date.now()) {
   const previousText = dailyMotivationState.text;
   const currentIndex = FALLBACK_MOTIVATIONS.indexOf(previousText);
-  const nextIndex = (currentIndex + 1 + FALLBACK_MOTIVATIONS.length) % FALLBACK_MOTIVATIONS.length;
-  dailyMotivationState = { date: todayKey(), text: FALLBACK_MOTIVATIONS[nextIndex], source: 'local', updatedAt };
+  const rotationCount = Math.max(0, Number(dailyMotivationState.rotationCount) || 0) + 1;
+  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % FALLBACK_MOTIVATIONS.length : rotationCount % FALLBACK_MOTIVATIONS.length;
+  dailyMotivationState = {
+    ...dailyMotivationState,
+    date: todayKey(),
+    text: FALLBACK_MOTIVATIONS[nextIndex],
+    source: 'local',
+    updatedAt,
+    nextRefreshAt: updatedAt + randomMotivationDelay(),
+    rotationCount,
+    scheduleVersion: MOTIVATION_SCHEDULE_VERSION,
+  };
   saveDailyMotivation();
   renderDailyMotivation();
   return previousText;
 }
 function scheduleDailyMotivationRefresh() {
   if (motivationRefreshTimer) clearTimeout(motivationRefreshTimer);
-  const elapsed = Date.now() - (Number(dailyMotivationState.updatedAt) || 0);
-  const delay = Math.max(1000, MOTIVATION_REFRESH_MS - elapsed);
-  motivationRefreshTimer = setTimeout(async () => {
-    await refreshDailyMotivation({ force: true });
-    scheduleDailyMotivationRefresh();
-  }, delay);
+  const delay = Math.max(500, (Number(dailyMotivationState.nextRefreshAt) || Date.now()) - Date.now());
+  motivationRefreshTimer = setTimeout(() => { void refreshDailyMotivation({ force: true }); }, delay);
 }
 async function refreshDailyMotivation({ force = false } = {}) {
-  if (motivationRequestInFlight) return;
+  if (motivationRequestInFlight) {
+    scheduleDailyMotivationRefresh();
+    return;
+  }
   const date = todayKey();
   if (dailyMotivationState.date !== date) loadDailyMotivation();
   renderDailyMotivation();
   const due = force || motivationRefreshDue();
-  if (!due) return;
+  if (!due) {
+    scheduleDailyMotivationRefresh();
+    return;
+  }
   const previousText = rotateFallbackMotivation();
   scheduleDailyMotivationRefresh();
-  // 论文、方案或文献任务运行期间只做本地换句，避免额外请求影响主要生成速度。
-  if (!activeApiConfig.apiKey || requestController) return;
+  // 每次到期都先本地换句；每四轮才用AI补充一次，避免影响论文等主要任务。
+  const shouldAskAi = activeApiConfig.apiKey && !requestController && dailyMotivationState.rotationCount % MOTIVATION_AI_INTERVAL === 0;
+  if (!shouldAskAi) return;
   motivationRequestInFlight = true;
   try {
-    const slot = Math.floor(Date.now() / MOTIVATION_REFRESH_MS);
+    const slot = dailyMotivationState.rotationCount;
     const avoidTexts = unique([previousText, dailyMotivationState.text]);
     const raw = await callAi(Prompts.buildDailyMotivationMessages({ date, slot, avoidTexts }), { reasoning: false, maxTokens: 240, jsonMode: true, requestLabel: '励志语更新', timeoutMs: 25000 });
     const result = await parseAiJson(raw, { requestLabel: '每日鼓励语', maxTokens: 240 });
     const text = String(result.text || '').replace(/[\r\n]+/g, ' ').replace(/^['“”"\s]+|['“”"\s]+$/g, '').trim();
     if (text.length >= 8 && text.length <= 80 && text !== previousText && text !== dailyMotivationState.text && !/(API|模型|AI|接口|生成失败)/i.test(text)) {
-      dailyMotivationState = { date, text, source: 'ai', slot, updatedAt: Date.now() };
+      dailyMotivationState = { ...dailyMotivationState, date, text, source: 'ai', slot, updatedAt: Date.now() };
       saveDailyMotivation();
       renderDailyMotivation();
     }
