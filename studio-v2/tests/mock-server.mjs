@@ -107,6 +107,9 @@ function mockResponse(messages) {
   if (system.includes('目录规划专家')) {
     let parsed = {};
     try { parsed = JSON.parse(user); } catch {}
+    if (Array.isArray(parsed.outlineVariationReference) && parsed.outlineVariationReference.length === 6) {
+      return JSON.stringify({ summary: '已按课题方向采用自适应目录措辞，并将同类程序逻辑与测试场景归纳。', chapters: parsed.outlineVariationReference });
+    }
     const facts = parsed.confirmedFacts || {};
     const functions = Array.isArray(facts.functions) ? facts.functions : [];
     const functionTitles = functions.map((item, index) => `${index + 1} ${String(item.name || `功能${index + 1}`).replace(/^使用/, '').slice(0, 20)}`);

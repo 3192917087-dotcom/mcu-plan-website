@@ -9,6 +9,8 @@ export const CHAPTER_TARGETS = Object.freeze({
   requirement: 2600,
 });
 
+export const MIN_BODY_CHARS = 15000;
+
 export const DEFAULT_OUTLINE_ID = 'adaptive6';
 
 export function buildSourceCodeExcerpt(codeFiles = [], fallbackText = '', maxChars = 26000) {
@@ -31,6 +33,51 @@ const DEFAULT_CHAPTERS = Object.freeze([
   { id: '6', kind: 'conclusion', title: '总结与展望', sections: ['6.1 研究总结', '6.2 后续展望'] },
 ]);
 
+const OUTLINE_VARIANTS = Object.freeze([
+  {
+    name: '方案设计型',
+    chapterTitles: { 2: '系统总体方案设计', 3: '系统硬件设计', 4: '系统软件设计', 5: '系统调试与功能测试' },
+    sections: {
+      2: ['2.1 系统需求分析', '2.2 系统总体结构', '2.3 系统工作原理', '2.4 系统器件选型'],
+      3: ['3.1 主控最小系统设计', '3.2 电源及基础电路设计', '3.3 信息采集电路设计', '3.4 输出与执行电路设计', '3.5 显示及通信电路设计'],
+      4: ['4.1 软件总体结构', '4.2 主程序设计', '4.3 信息采集程序设计', '4.4 输出控制程序设计', '4.5 显示及通信程序设计'],
+      5: ['5.1 调试环境与工具', '5.2 硬件调试', '5.3 软件调试', '5.4 系统功能测试', '5.5 系统性能与稳定性测试'],
+    },
+  },
+  {
+    name: '工程实现型',
+    chapterTitles: { 2: '系统需求与总体设计', 3: '硬件电路设计与实现', 4: '控制程序设计与实现', 5: '系统调试与测试分析' },
+    sections: {
+      2: ['2.1 项目需求分析', '2.2 总体功能架构', '2.3 系统运行机制', '2.4 核心器件选型'],
+      3: ['3.1 主控及最小系统电路', '3.2 供电与基础支撑电路', '3.3 传感与信息采集电路', '3.4 控制输出与执行电路', '3.5 人机交互与通信电路'],
+      4: ['4.1 程序架构与任务划分', '4.2 主控程序运行流程', '4.3 数据采集与处理程序', '4.4 联动控制与异常处理程序', '4.5 显示、通信与交互程序'],
+      5: ['5.1 开发调试环境', '5.2 硬件联调过程', '5.3 程序联调过程', '5.4 功能验证与结果分析', '5.5 连续运行与性能测试'],
+    },
+  },
+  {
+    name: '功能验证型',
+    chapterTitles: { 2: '系统方案分析与论证', 3: '硬件系统设计', 4: '系统程序与控制逻辑设计', 5: '功能验证与性能测试' },
+    sections: {
+      2: ['2.1 设计目标与需求', '2.2 总体方案构成', '2.3 系统工作过程', '2.4 关键器件选型'],
+      3: ['3.1 主控开发板及基础电路', '3.2 系统供电电路', '3.3 检测与采集接口电路', '3.4 执行机构驱动电路', '3.5 显示和数据通信电路'],
+      4: ['4.1 软件功能架构', '4.2 主程序与任务调度', '4.3 传感数据获取与处理', '4.4 功能判断与执行控制', '4.5 状态显示与数据通信'],
+      5: ['5.1 测试环境及方法', '5.2 硬件功能检查', '5.3 软件运行调试', '5.4 主要功能验证', '5.5 性能与稳定性分析'],
+    },
+  },
+]);
+
+function stableOutlineVariant(context = {}) {
+  const seed = [context.title, ...(context.devices || []).map(modelName), ...(context.functions || []).map(functionSource)].join('|');
+  let hash = 0;
+  for (const character of seed) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  return OUTLINE_VARIANTS[hash % OUTLINE_VARIANTS.length];
+}
+
+function insertAfterSectionNumber(chapter, sectionNumber, additions = []) {
+  const index = chapter.sections.findIndex(section => section.startsWith(`${sectionNumber} `));
+  if (index >= 0 && additions.length) chapter.sections.splice(index + 1, 0, ...additions);
+}
+
 export const OUTLINE_TEMPLATES = Object.freeze({
   [DEFAULT_OUTLINE_ID]: {
     name: '项目自适应六章目录',
@@ -50,7 +97,7 @@ function uniqueNames(items = []) {
 }
 
 function functionSource(item) {
-  return String(typeof item === 'string' ? item : item?.name || item?.description || '')
+  return String(typeof item === 'string' ? item : item?.source || item?.name || item?.description || '')
     .replace(/^\s*(?:\d+[.、]|[-•])\s*/, '')
     .replace(/[。；;，,\s]+$/g, '')
     .trim();
@@ -122,8 +169,8 @@ function tertiary(sectionNumber, titles, suffix) {
   return uniqueNames(titles).map((title, index) => `${sectionNumber}.${index + 1} ${title}${suffix}`);
 }
 
-export function assignChapterTargets(chapters = [], targetBodyChars = 18000, context = {}) {
-  const target = Math.max(18000, Math.min(40000, Number(targetBodyChars) || 18000));
+export function assignChapterTargets(chapters = [], targetBodyChars = MIN_BODY_CHARS, context = {}) {
+  const target = Math.max(MIN_BODY_CHARS, Math.min(40000, Number(targetBodyChars) || MIN_BODY_CHARS));
   const deviceCount = Math.min(12, (context.devices || []).length);
   const functionCount = Math.min(16, (context.functions || []).length);
   const baseWeights = { introduction: 14, overall: 16 + deviceCount * 0.45, hardware: 21 + deviceCount * 0.8, software: 24 + functionCount * 0.85, test: 18 + functionCount * 0.45, conclusion: 7 };
@@ -144,30 +191,34 @@ export function assignChapterTargets(chapters = [], targetBodyChars = 18000, con
   return planned;
 }
 
-export function buildProjectOutline({ devices = [], functions = [], targetBodyChars = 18000 } = {}) {
+export function buildProjectOutline({ title = '', devices = [], functions = [], targetBodyChars = MIN_BODY_CHARS } = {}) {
   const outline = structuredClone(DEFAULT_CHAPTERS);
+  const variant = stableOutlineVariant({ title, devices, functions });
+  outline.forEach(chapter => {
+    if (variant.chapterTitles[chapter.id]) chapter.title = variant.chapterTitles[chapter.id];
+    if (variant.sections[chapter.id]) chapter.sections = [...variant.sections[chapter.id]];
+  });
   const deviceGroups = classifyDevices(devices);
-  const functionGroups = classifyFunctions(functions);
+  const functionGroups = groupCoreFunctions(functions);
   const overall = outline.find(chapter => chapter.id === '2');
   overall.sections.push('2.4.1 主控器件选型');
   if (deviceGroups.sensors.length) overall.sections.push('2.4.2 传感器与检测器件选型');
   if (deviceGroups.actuators.length || deviceGroups.displays.length) overall.sections.push('2.4.3 执行、显示与通信器件选型');
 
   const hardware = outline.find(chapter => chapter.id === '3');
-  hardware.sections.splice(hardware.sections.indexOf('3.3 信息采集电路设计') + 1, 0, ...tertiary('3.3', deviceGroups.sensors, '接口电路设计'));
-  hardware.sections.splice(hardware.sections.indexOf('3.4 输出与执行电路设计') + 1, 0, ...tertiary('3.4', deviceGroups.actuators, '驱动电路设计'));
-  hardware.sections.splice(hardware.sections.indexOf('3.5 显示及通信电路设计') + 1, 0, ...tertiary('3.5', deviceGroups.displays, '接口电路设计'));
+  insertAfterSectionNumber(hardware, '3.3', tertiary('3.3', deviceGroups.sensors, '接口电路设计'));
+  insertAfterSectionNumber(hardware, '3.4', tertiary('3.4', deviceGroups.actuators, '驱动电路设计'));
+  insertAfterSectionNumber(hardware, '3.5', tertiary('3.5', deviceGroups.displays, '接口电路设计'));
 
   const software = outline.find(chapter => chapter.id === '4');
-  software.sections.splice(software.sections.indexOf('4.1 软件总体结构') + 1, 0, '4.1.1 软件开发环境与总体架构', '4.1.2 软件任务划分与数据流');
-  software.sections.splice(software.sections.indexOf('4.2 主程序设计') + 1, 0, '4.2.1 系统初始化流程', '4.2.2 主循环与异常处理流程');
-  software.sections.splice(software.sections.indexOf('4.3 信息采集程序设计') + 1, 0, ...tertiary('4.3', functionGroups.acquisition, '程序设计'));
-  software.sections.splice(software.sections.indexOf('4.4 输出控制程序设计') + 1, 0, ...tertiary('4.4', functionGroups.control, '程序设计'));
-  software.sections.splice(software.sections.indexOf('4.5 显示及通信程序设计') + 1, 0, ...tertiary('4.5', functionGroups.communication, '程序设计'));
+  insertAfterSectionNumber(software, '4.1', ['4.1.1 软件开发环境与总体架构', '4.1.2 软件任务划分与数据流']);
+  insertAfterSectionNumber(software, '4.2', ['4.2.1 系统初始化流程', '4.2.2 主循环与异常处理流程']);
+  const functionSectionNumbers = { acquisition: '4.3', control: '4.4', interaction: '4.5' };
+  functionGroups.forEach(group => insertAfterSectionNumber(software, functionSectionNumbers[group.key], [`${functionSectionNumbers[group.key]}.1 ${group.title}程序设计`]));
 
   const test = outline.find(chapter => chapter.id === '5');
-  const tests = uniqueNames([...functionGroups.acquisition, ...functionGroups.control, ...functionGroups.communication]);
-  test.sections.splice(test.sections.indexOf('5.4 系统功能测试') + 1, 0, ...tertiary('5.4', tests, '功能测试'));
+  const testScenes = groupResultScenes(functions).map(scene => scene.title);
+  insertAfterSectionNumber(test, '5.4', tertiary('5.4', testScenes, '功能测试'));
   return assignChapterTargets(outline, targetBodyChars, { devices, functions });
 }
 
@@ -195,12 +246,72 @@ function makeArtifact(type, chapter, title, instruction, relatedFunction = '', o
   };
 }
 
+function functionRecord(item, index) {
+  const record = typeof item === 'object' && item ? item : {};
+  return { ...record, id: record.id || `function-${index + 1}`, source: functionSource(item) };
+}
+
+function coreFunctionGroup(record) {
+  const source = record.source;
+  if (/通信|上传|远程|WiFi|蓝牙|云|联网|APP|小程序|显示|OLED|LCD|屏|查询/.test(source)) return { key: 'interaction', title: '状态显示与通信交互' };
+  if (/控制|报警|调节|驱动|执行|道闸|舵机|继电器|风扇|水泵|加热|制冷|照明|蜂鸣/.test(source)) return { key: 'control', title: '联动控制与异常处理' };
+  return { key: 'acquisition', title: '信息采集与数据处理' };
+}
+
+function groupCoreFunctions(functions = []) {
+  const groups = new Map();
+  uniqueFunctions(functions).map(functionRecord).forEach(record => {
+    const category = coreFunctionGroup(record);
+    if (!groups.has(category.key)) groups.set(category.key, { ...category, records: [] });
+    groups.get(category.key).records.push(record);
+  });
+  return [...groups.values()];
+}
+
+function groupFlowchartFunctions(functions = []) {
+  const groups = groupCoreFunctions(functions);
+  if (groups.length <= 2) return groups;
+  const control = groups.find(group => group.key === 'control');
+  const information = groups.filter(group => group.key !== 'control').flatMap(group => group.records);
+  return [
+    information.length ? { key: 'information', title: '信息采集、状态显示与通信', records: information } : null,
+    control || null,
+  ].filter(Boolean);
+}
+
+function resultScene(record) {
+  const source = record.source;
+  const objectRules = [
+    [/水泵|灌溉|补水|排水/, '水泵与液位联动'], [/风扇|通风|降温/, '通风与温度联动'], [/加热|制热/, '加热控制'],
+    [/灯|照明|(?:^|[^O])LED/i, '照明控制'], [/舵机|窗户|窗帘|门锁|道闸/, '机构动作控制'], [/蜂鸣|报警|烟雾|气体/, '异常报警'],
+  ];
+  const matched = objectRules.find(([pattern]) => pattern.test(source));
+  if (matched) return { key: matched[1], title: matched[1] };
+  if (/通信|上传|远程|WiFi|蓝牙|云|APP|小程序|联网/.test(source)) return { key: '远程交互', title: '远程监测与交互' };
+  if (/采集|检测|监测|显示|OLED|LCD|屏|温度|湿度|光照|压力|液位|距离/.test(source)) return { key: '状态监测', title: '数据采集与状态显示' };
+  return { key: '综合运行', title: '系统综合运行' };
+}
+
+function groupResultScenes(functions = [], maximum = 3) {
+  const groups = new Map();
+  uniqueFunctions(functions).map(functionRecord).forEach(record => {
+    const scene = resultScene(record);
+    if (!groups.has(scene.key)) groups.set(scene.key, { ...scene, records: [] });
+    groups.get(scene.key).records.push(record);
+  });
+  const result = [...groups.values()];
+  if (result.length <= maximum) return result;
+  const retained = result.slice(0, maximum - 1);
+  retained.push({ key: '综合联动', title: '多功能综合联动', records: result.slice(maximum - 1).flatMap(item => item.records) });
+  return retained;
+}
+
 export function buildArtifactPlan({ outline = [], devices = [], functions = [], mappings = [] } = {}) {
   const overall = findChapter(outline, 'overall');
   const hardware = findChapter(outline, 'hardware');
   const software = findChapter(outline, 'software');
   const test = findChapter(outline, 'test');
-  const distinctFunctions = uniqueFunctions(functions);
+  const distinctFunctions = uniqueFunctions(functions).map(functionRecord);
   const artifacts = [];
   const controllerDevice = devices.find(device => /主控|单片机/.test(`${device.role || ''} ${device.model || ''}`));
   const controllerName = modelName(controllerDevice) || modelName(devices.find(device => /STM32|STC|AT89|ESP32|Arduino/i.test(modelName(device))));
@@ -246,13 +357,15 @@ export function buildArtifactPlan({ outline = [], devices = [], functions = [], 
   if (software) {
     artifacts.push(makeArtifact('software-architecture', software, '系统软件结构图', '直接生成简洁Mermaid代码，使用flowchart TD，用5至10个节点表达主程序、初始化、采集、控制、显示/通信和异常处理之间的调用关系；不出现硬件接线。', '', { sectionId: '4.1', reason: '说明软件模块和数据流之间的总体关系' }));
     artifacts.push(makeArtifact('flowchart', software, '主程序流程图', '直接给出简洁Mermaid代码，使用flowchart TD；A([开始])和末端([结束])各一个，主干自上而下，分支尽快汇合。控制在6至9个短句节点、最多2个判断节点，仅保留初始化、采集、判断、执行、显示/通信更新和异常处理等关键步骤。', '主程序', { sectionId: '4.2', reason: '说明系统软件的主执行顺序' }));
-    distinctFunctions.forEach(func => {
-      const name = functionSource(func);
-      artifacts.push(makeArtifact('flowchart', software, `${name}流程图`, `直接给出简洁Mermaid代码，使用flowchart TD；A([开始])和末端([结束])各一个，主干自上而下，分支尽快汇合。用5至8个短句节点、最多2个判断节点表达${name}的输入、处理、关键判断、正常动作和异常路径。`, name, { sourceFactIds: [func.id], reason: '确保每项确认功能都有可直接绘制的软件流程' }));
-      if (/温湿度|单总线|DHT|DS18|I2C|SPI|UART|串口|通信|无线|蓝牙|WiFi|射频/i.test(name)) {
-        artifacts.push(makeArtifact('timing', software, `${name}通信时序图`, '直接生成简洁Mermaid sequenceDiagram代码，保留参与对象、发起、应答、数据传输、异常或超时和结束，不写逐步绘制说明。', name, { sourceFactIds: [func.id], reason: '说明该功能中通信或严格时序的执行关系' }));
-      }
+    groupFlowchartFunctions(distinctFunctions).forEach(group => {
+      const names = group.records.map(item => item.source);
+      const factIds = group.records.map(item => item.id);
+      artifacts.push(makeArtifact('flowchart', software, `${group.title}流程图`, `直接给出一张简洁Mermaid流程图，用一个完整流程覆盖以下相关功能：${names.join('、')}。使用flowchart TD，A([开始])和唯一末端([结束])各一个，5至9个短句节点、最多2个判断节点；突出共享输入、关键判断、联动动作和异常出口，不要把每个驱动读写步骤再拆成独立流程图。`, group.title, { sourceFactIds: factIds, reason: '将同类程序和功能逻辑归入一张核心流程图，减少重复图示' }));
     });
+    const timingFunction = distinctFunctions.find(item => /单总线|DHT|DS18|I2C|SPI|UART|串口|通信|无线|蓝牙|WiFi|射频/i.test(item.source));
+    if (timingFunction) {
+      artifacts.push(makeArtifact('timing', software, `${functionName(timingFunction.source)}关键通信时序图`, '直接生成一张简洁Mermaid sequenceDiagram代码，只表达本项目最有代表性的通信或严格时序过程，保留发起、应答、数据传输、异常或超时和结束；不要重复流程图已经表达的功能判断逻辑。', timingFunction.source, { sourceFactIds: [timingFunction.id], reason: '用一张代表性时序图说明关键通信过程，避免相似时序图堆叠' }));
+    }
     const calculationFunction = distinctFunctions.find(func => /ADC|模拟|温度|湿度|光照|滤波|平均|阈值|误差|校准|速度|距离|电压|电流/i.test(functionSource(func)));
     if (calculationFunction) {
       const name = functionSource(calculationFunction);
@@ -261,9 +374,12 @@ export function buildArtifactPlan({ outline = [], devices = [], functions = [], 
   }
   if (test) {
     artifacts.push(makeArtifact('test-table', test, '系统功能测试表', '按功能分组，每表最多5列、10行，表题在表格上方。必须包含测试环境或输入条件、操作步骤、测试次数、量化结果/误差/响应时间和结论；表前说明测试方法，表后分析结果。', '', { sectionId: '5.4', sourceFactIds: distinctFunctions.map(func => func.id), reason: '使用量化数据验证每项确认功能' }));
-    distinctFunctions.forEach(func => {
-      const name = functionSource(func);
-      artifacts.push(makeArtifact('result-image', test, `${name}功能展示图`, `只保留“此处插入${name}功能展示图”的简短独立提示，不写拍摄、截图或取景方法。`, name, { sourceFactIds: [func.id], reason: '展示该功能在实际操作后的可观察结果' }));
+    const scenes = groupResultScenes(distinctFunctions);
+    if (!scenes.length) scenes.push({ title: '系统运行状态', records: [] });
+    scenes.forEach(scene => {
+      const factIds = scene.records.map(item => item.id);
+      const names = scene.records.map(item => item.source);
+      artifacts.push(makeArtifact('result-image', test, `${scene.title}功能展示图`, `只保留“此处插入${scene.title}功能展示图”的简短独立提示。一张图片可同时证明以下相关功能的可观察结果：${names.join('、') || '系统基本运行'}；不得为同一器件、同一屏幕页面或同一动作状态重复安排近似图片。`, scene.title, { sourceFactIds: factIds, reason: '按可观察结果场景合并功能展示，避免重复拍摄同一器件' }));
     });
   }
   return artifacts.filter(item => item.chapterId);
@@ -365,21 +481,22 @@ export function buildDailyMotivationMessages({ date = '', slot = '', avoidTexts 
   ];
 }
 
-export function buildOutlinePlanMessages({ title, facts, materials, targetBodyChars = 18000, previousPlan = null, validationIssues = [] }) {
+export function buildOutlinePlanMessages({ title, facts, materials, targetBodyChars = MIN_BODY_CHARS, previousPlan = null, validationIssues = [] }) {
   const repairing = Boolean(previousPlan && validationIssues.length);
   const systemPrompt = `你是单片机本科毕业论文的目录规划专家。请根据用户已经确认的器件、功能、引脚、程序资料和参考目录，一次性生成一版可直接用于正文写作的完整三级目录。不要生成图表统计或图表清单，不要提供模板选项，不要输出多个方案。
 
 规划优先级：
 1. 用户提供的参考目录只作为学校结构和标题风格的最高优先级参考；若缺少硬件、软件或测试内容，必须补齐。
 2. 用户已确认的器件、功能和引脚是不可更改的项目事实。
-3. 固定章节职责和避免重复规则不可被参考目录覆盖。
+3. 未提供参考目录时，采用user payload中的outlineVariationReference作为本课题的措辞与归纳基线，使不同课题在第2至第5章形成稳定但不夸张的结构差异。
+4. 固定章节职责和避免重复规则不可被参考目录覆盖。
 
-目录必须包含6章：第1章绪论、第2章系统总体方案设计、第3章系统硬件设计、第4章系统软件设计、第5章系统调试与功能测试、第6章总结与展望。目录详略必须服从目标正文总字数：三级标题只在一个二级标题下确实存在多个可独立论述的同类内容时设置，不得按每个器件或每个功能机械拆分；同类型传感、执行、电路、驱动、功能逻辑和测试应归入一个三级标题。每章必须有二级标题，除第一章规定的现状分析外，三级标题不是数量指标，简单项目可以少设：
+目录必须包含6章，章节职责依次为绪论、总体方案、硬件设计、软件设计、调试测试、总结展望。第一章和第六章保持规范名称；第2至第5章的章名、二级标题措辞及归纳角度可依据题目侧重点做小幅变化，例如采用“方案设计型”“工程实现型”或“功能验证型”表达，但不能改变章节职责、编号位置或内容边界。不要机械复制同一套默认目录，也不要为了差异化使用生僻、夸张或口语化标题。目录详略必须服从目标正文总字数：三级标题只在一个二级标题下确实存在多个可独立论述的同类内容时设置，不得按每个器件或每个功能机械拆分；同类型传感、执行、电路、驱动、功能逻辑和测试应归入一个三级标题。每章必须有二级标题，除第一章规定的现状分析外，三级标题不是数量指标，简单项目可以少设：
 - 第1章必须且只能设置4个二级标题：1.1课题研究背景及意义、1.2国内外研究现状、1.3主要研究内容、1.4论文结构安排。“主要研究内容”和“论文结构安排”必须分开。1.2必须进一步拆为国内研究现状、国外研究现状、国内外研究现状评述3个三级标题；引用只出现在这些现状小节。
 - 第2章写需求、总体结构、工作原理和器件选型。器件选型必须充分对应已确认器件，按主控、传感检测、执行、显示通信等实际类别设置三级标题。正文将对每类实际选用器件与至少2个常见候选型号进行比较，因此目录要为这些对比留下清晰归属，但候选型号不能写成系统实际器件，不写引脚和电路。
 - 第3章按实际器件和电路类别设置三级标题，写主控、电源、采集、执行、显示和通信电路，不重复第二章器件参数与选型理由。
-- 第4章必须区分软件总体结构、主程序、器件驱动和功能逻辑；每项确认功能都要在合适的三级标题中得到覆盖，同类功能可以归入同一三级标题，但不能漏项。
-- 第5章按实际功能类别设置功能测试三级标题，覆盖测试条件、操作、量化数据和结果分析；同类功能可以归纳，但不能漏项。
+- 第4章必须区分软件总体结构、主程序、器件驱动和功能逻辑；所有确认功能都要在合适的标题中得到覆盖，但应按“采集处理、联动控制、显示通信”等共享逻辑归组，不能按每个功能机械设置一套标题或流程图。
+- 第5章按可观察的功能场景设置测试标题，覆盖测试条件、操作、量化数据和结果分析；同一器件、同一界面或同一动作状态对应的相关功能应合并验证，不能拆成重复小节。
 - 第6章只总结已完成内容和合理展望，不自曝未完成，不强制设置三级标题。
 
 标题禁止使用Markdown井号。章节与标题编号必须连续、父子编号正确、标题语义不重复。只返回JSON：
@@ -388,7 +505,8 @@ export function buildOutlinePlanMessages({ title, facts, materials, targetBodyCh
   const payload = {
     task: repairing ? '修复上一版目录结构，完整返回修复后的JSON' : '生成唯一一版六章三级目录',
     title,
-    targetBodyCharacters: Math.max(18000, Math.min(40000, Number(targetBodyChars) || 18000)),
+    targetBodyCharacters: Math.max(MIN_BODY_CHARS, Math.min(40000, Number(targetBodyChars) || MIN_BODY_CHARS)),
+    outlineVariationReference: buildProjectOutline({ title, devices: facts?.devices || [], functions: facts?.functions || [], targetBodyChars }).map(chapter => ({ id: chapter.id, title: chapter.title, sections: chapter.sections })),
     confirmedFacts: facts,
     userReferenceOutline: String(materials?.outlineReferenceText || '').trim() || '未提供，按六章职责生成',
     sourceCodeFiles: materials?.filenames || [],
@@ -407,9 +525,9 @@ export function chapterResponsibilities(kind) {
     requirement: '只写功能需求、性能需求与可行性，不提前展开具体电路和程序步骤。',
     overall: '写系统需求、总体结构、工作原理和器件选型。主控以及每类关键传感、执行、显示和通信器件，都必须把实际选用型号与至少2个常见候选型号进行简要比较，再结合项目需求给出选择结论；候选型号只用于论证，不能写成实际器件。用器件图片和分组对比表支撑结论，不展开引脚、电路、驱动程序和测试结果。',
     hardware: '只写主控、电源和各外设电路及实际连接关系。按照目录合理归纳同类电路，说明信号、引脚、供电、共地、10 kΩ上拉或驱动关系；每个外设的简短引脚表紧跟其接口电路说明，不设置第三章总引脚表。电路图提示和对应引脚表之间必须先有分别介绍该器件接口与连接依据的实质正文，不能连续出现图位和表格。除51单片机外主控按最小系统开发板描述，5V输入经板载稳压获得3.3V。每个实际器件都有对应电路图提示。多路继电器按被控对象分别写控制通道、引脚和驱动逻辑。第三章禁止再次生成系统结构图或硬件框架图，不得重复第二章的器件参数、器件图片、总体功能框架、候选比较和选型理由，也不能提前写程序流程。',
-    software: '只写软件结构、主程序、器件驱动过程和各核心功能逻辑。主程序和每项确认功能必须有简洁、可复制且含“开始”“结束”节点的Mermaid流程图；软件结构图和通信时序也直接使用Mermaid，真实计算才使用公式。多路继电器必须按被控对象分别描述判断条件、输出通道和异常处理。公式只放在第四章软件设计，不能在第五章测试章节生成公式。不得粘贴程序源代码，不直接用函数名堆叠介绍，也不得重复硬件接线。',
+    software: '只写软件结构、主程序、器件驱动过程和各核心功能逻辑。保留一张主程序流程图，再按共享决策逻辑把采集处理、联动控制、显示通信等相关功能归入少量核心流程图；每项确认功能必须被某张核心流程图覆盖，但不得为每个驱动、每个功能各画一张近似流程图。通信时序只选择最有代表性的严格时序过程，真实计算才使用公式。多路继电器按被控对象分别描述判断条件、输出通道和异常处理，但共享驱动过程不重复画图。公式只放在第四章软件设计，不能在第五章测试章节生成公式。不得粘贴程序源代码，不直接用函数名堆叠介绍，也不得重复硬件接线。',
     implementation: '按功能分别写硬件连接与软件逻辑，但同一器件的选型介绍、连接关系和程序过程必须分工清晰，禁止在不同小节重复。',
-    test: '写调试工具、操作方法、每个功能的量化测试、功能展示图位置及结果分析。没有用户数据时结合器件能力和现实实验条件保守推定；多路继电器按不同被控对象分别测试和分析；每项确认功能都要覆盖，必须有数据表格，不提示“模拟数据”，第五章不生成公式，公式和计算方法统一放在第四章，不得重复第四章程序流程。',
+    test: '写调试工具、操作方法、全部功能的量化测试、功能展示图位置及结果分析。没有用户数据时结合器件能力和现实实验条件保守推定；测试内容按可观察结果场景归组，一张展示图可以同时证明多个相关功能，同一器件、同一屏幕页面或同一动作状态不得反复安排图片。多路继电器按被控对象分别测试和分析，但可在同一联动场景图中展示；必须有数据表格，不提示“模拟数据”，第五章不生成公式，公式和计算方法统一放在第四章，不得重复第四章程序流程。',
     conclusion: '结合题目背景概括已完成工作、主要结果和合理展望。不得自曝系统未完成、功能缺失或使用模板化套话。',
   };
   return map[kind] || '';
@@ -442,13 +560,13 @@ export function buildChapterMessages({ project, chapter, outline, artifacts, com
 5. 每个chapterArtifacts项目都必须在对应内容之后出现，不能遗漏。chapterArtifacts中的每张图和每张表都已给出编号；图前实质正文中必须恰好出现一次“如图x-x所示”，表前实质正文中必须恰好出现一次“如表x-x所示”，均需融入完整分析句，禁止单独成段、漏写、重复引用或自行改号。器件图、电路图、实物图和功能展示图只使用独占一行的“【非正文·插图位置：图名】”，下一行直接写“【非正文结束】”，不得添加拍摄、取景、构图、绘制步骤或冗长标注说明；该格式是给用户后续插图的醒目占位提示，不属于论文正文，连接依据必须写在正文中。框架图、软件结构图、程序流程图和通信时序图直接给出第7条规定的Mermaid代码，不写逐节点绘制说明。第三章不得生成硬件组成图或结构图。comparison-table、pin-table和test-table必须直接生成可用的Markdown表格；每个pin-table只写一个器件，使用“外设信号、主控引脚、连接说明”三列，禁止“信号方向”列。formula必须直接写出公式并解释变量、单位、参数来源和用途。所有非正文提示前后各空一行，绝不能接在正文句末。
 5.1 任意两项视觉内容之间都必须有至少一个不少于80字的实质正文段落。图与图、图与表、表与图、表与表均不得连续出现；中间段落需要分析前一项内容并自然引出后一项，不能只写“如下图/表所示”等过渡句。不同章节不得复用相同的图位标题、Mermaid代码、表格标题或图表说明；器件图片必须放在对应器件选型小节的正文分析之后，不能集中放在章节末尾或放到其他器件小节。
 6. 系统总体功能框架图只在第二章出现一次；第三章只用电路图和分器件引脚表表达硬件，不再生成同义结构图。软件结构图和程序流程图必须与第二章功能框架明确区分。
-7. 框架图、结构图、流程图和时序图固定使用独占一行的“【非正文·Mermaid图：图名】”，下一行用三个反引号加mermaid开启代码围栏，末尾关闭代码围栏，再单独写“【非正文结束】”。框架图和结构图使用flowchart LR或flowchart TD并控制在9个节点以内。主程序和每个核心功能流程图必须使用flowchart TD，起点写成A([开始])，终点使用唯一的“([结束])”节点；主干自上而下，分支在1至2步内汇合，主流程6至9个节点、单项功能5至8个节点，最多2个判断节点，判断分支只用“是/否”等短标签。每个节点使用4至12字短句，不画交叉回线、多个结束节点或无出口分支；通信时序使用sequenceDiagram。禁止subgraph、style、classDef、HTML标签、重复节点和无意义堆叠。
+7. 框架图、结构图、流程图和时序图固定使用独占一行的“【非正文·Mermaid图：图名】”，下一行用三个反引号加mermaid开启代码围栏，末尾关闭代码围栏，再单独写“【非正文结束】”。框架图和结构图使用flowchart LR或flowchart TD并控制在9个节点以内。流程图必须使用flowchart TD，起点写成A([开始])，终点使用唯一的“([结束])”节点；主程序流程图表达系统调度，核心功能流程图按共享判断链覆盖一组相关功能，驱动的固定读写步骤优先用正文或一张代表性时序图说明，不能同时生成内容相近的驱动流程图和功能逻辑流程图。主干自上而下，分支在1至2步内汇合，主流程6至9个节点、核心功能5至9个节点，最多2个判断节点，判断分支只用“是/否”等短标签。每个节点使用4至12字短句，不画交叉回线、多个结束节点或无出口分支；通信时序使用sequenceDiagram。禁止subgraph、style、classDef、HTML标签、重复节点和无意义堆叠。
 8. 时序图只用于确有通信或严格时序的功能。公式只用于真实计算，必须解释变量、单位、参数来源和用途。
 9. 表格使用标准Markdown表格，表题“表x-x 表名”单独一行并放在表格之前。每张表最多5列、10行数据；内容较多时必须主动按功能、模块或测试项目拆成多张表，并为每张表补一段承接分析，绝不能输出超长表格后再依赖导出端截断。表格前后必须有实质分析，不能让两张表连续出现。导出端会统一转换为三线表，不要在表格中模拟竖线装饰或合并单元格。
 10. 禁止“系统尚未实现”“功能未完成”“受条件限制未测试”等自曝式表述；不得虚构型号、引脚和引用出版信息。
 11. 每段提出一个明确观点，避免连续重复总结；“本文”“本系统”“该系统”等开头不得机械重复。禁止同义改写前文、重复介绍器件作用、重复解释同一连接或在测试章重述程序流程。
 12. 默认硬件事实：除51单片机外，主控按最小系统开发板描述；开发板接收5V DC输入并由板载稳压得到3.3V，各模块共地；凡出现上拉电阻，阻值统一写10 kΩ；TFT屏统一使用1.8寸，不出现2.8寸TFT。用户确认的不同事实优先。
-13. 目标有效正文约${target}个中文字符，不用标题、表格、图位和非正文说明凑字数。`;
+13. 目标有效正文约${target}个中文字符，标题、表格、图位、Mermaid代码和非正文说明不计入有效正文。各章应控制在目标值上下约15%内，信息已经完整时不要继续堆叠背景套话、重复总结或图表来超量扩写。`;
   const userPayload = {
     title: project.title,
     chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections, responsibility: chapterResponsibilities(chapter.kind), targetCharacters: target },
@@ -514,12 +632,12 @@ export function buildAuditMessages(project) {
       '没有重复的二级或三级标题，近似小节已经归纳',
       '正文不存在高相似度段落或同义复述',
       '各章二级和三级标题与项目自适应目录一致，没有漏写目录标题',
-      '每个确认功能都有简洁、可复制且语法完整的Mermaid流程图',
+      '全部确认功能都被少量核心Mermaid流程图覆盖，同类程序与功能逻辑已经合并，没有为每个功能机械重复画图',
       '系统总体功能框架图只在第二章出现，第三章没有重复的硬件组成图或框架图',
       '测试包含现实的量化数据和不超过5列10行的表格',
       '每张图都按给定图号在对应正文中恰好出现一次“如图x-x所示”，第二章器件图也没有漏引',
       '任何两张图、两张表或图表之间都有实质正文段落，不存在连续视觉内容',
-      '不同图表和Mermaid图内容不重复，器件图片位于对应器件选型小节',
+      '不同图表和Mermaid图内容不重复，器件图片位于对应器件选型小节，第五章没有对同一器件、界面或动作状态重复安排展示图',
       '每个流程图均为简洁可复制的Mermaid代码，并包含必要的是/否分支、异常路径或回路线',
       '器件图、电路图、实物图和功能图只保留简短插图提示，没有拍摄或绘制方法',
       '图表预留及说明单独成行，表题在表格之前且表格可转换为三线表',

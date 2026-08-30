@@ -1,5 +1,5 @@
 import * as Store from './storage.js?v=20260826-1';
-import * as Prompts from './prompts.js?v=20260830-1';
+import * as Prompts from './prompts.js?v=20260830-2';
 import { allPins, compatiblePins, validateMappings } from './pin-data.js?v=20260830-1';
 import { REFERENCE_LIBRARY, REFERENCE_LIBRARY_META } from './reference-library.js?v=20260826-2';
 import * as Rules from '../studio-next/rules.js?v=20260824-6';
@@ -13,7 +13,7 @@ const MOTIVATION_REFRESH_MIN_MS = 90 * 1000;
 const MOTIVATION_REFRESH_MAX_MS = 4 * 60 * 1000;
 const MOTIVATION_SCHEDULE_VERSION = 2;
 const MOTIVATION_AI_INTERVAL = 4;
-const MIN_BODY_CHARS = 18000;
+const MIN_BODY_CHARS = 15000;
 const MAX_PROGRAM_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_PROGRAM_TOTAL_CHARS = 240000;
 const PROGRAM_FILE_EXTENSIONS = new Set([
@@ -424,7 +424,7 @@ function normalizeProject(source, options = {}) {
     if (normalized.paper.outlineTemplate !== Prompts.DEFAULT_OUTLINE_ID) {
       const hasExistingChapters = Object.values(normalized.paper.chapters || {}).some(chapter => chapter?.content);
       normalized.paper.outlineTemplate = Prompts.DEFAULT_OUTLINE_ID;
-      normalized.paper.outline = Prompts.buildProjectOutline({ devices: normalized.paper.factSheet.devices, functions: normalized.paper.factSheet.functions, targetBodyChars: normalized.paper.materials.targetBodyChars });
+      normalized.paper.outline = Prompts.buildProjectOutline({ title: normalized.title, devices: normalized.paper.factSheet.devices, functions: normalized.paper.factSheet.functions, targetBodyChars: normalized.paper.materials.targetBodyChars });
       normalized.paper.outlineCustomized = false;
       normalized.paper.outlineConfirmedAt = '';
       if (hasExistingChapters) {
@@ -494,7 +494,7 @@ function normalizeProject(source, options = {}) {
     functions: oldFunctions.map((item, index) => typeof item === 'object' ? item : { id: `function-${index + 1}`, name: String(item), deviceModels: [] }),
     mappings: (oldMaterials.pinMappings || []).map(item => ({ id: item.id || makeId('mapping'), device: item.device || '', interfaceType: item.interfaceType || item.connection || 'GPIO', signal: item.signal || item.connection || 'CTRL', pin: item.pin || '待确认', alternatives: item.alternatives || [], busGroup: item.busGroup || '', shareAllowed: Boolean(item.shareAllowed) })),
   };
-  base.paper.outline = Prompts.buildProjectOutline({ devices: base.paper.factSheet.devices, functions: base.paper.factSheet.functions, targetBodyChars: base.paper.materials.targetBodyChars });
+  base.paper.outline = Prompts.buildProjectOutline({ title: base.title, devices: base.paper.factSheet.devices, functions: base.paper.factSheet.functions, targetBodyChars: base.paper.materials.targetBodyChars });
   base.paper.outlineTemplate = Prompts.DEFAULT_OUTLINE_ID;
   base.paper.chapters = clone(source?.paper?.chapters || {});
   base.paper.abstractCn = source?.paper?.abstractCn || '';
@@ -2146,6 +2146,10 @@ function generationArtifactPlanIssues(artifacts = []) {
   if (!hasType('circuit', '3')) errors.push('第三章缺少器件电路图');
   if (!hasType('software-architecture', '4') || !hasType('flowchart', '4')) errors.push('第四章缺少软件结构图或流程图');
   if (!hasType('test-table', '5') || !hasType('result-image', '5')) errors.push('第五章缺少量化测试表或功能展示图');
+  const functionalFlowcharts = artifacts.filter(item => item.type === 'flowchart' && item.chapterId === '4' && (item.sourceFactIds || []).length);
+  if (functionalFlowcharts.length > 2) errors.push('第四章核心功能流程图超过2张，应按信息处理和联动控制等共享逻辑继续合并');
+  const resultImages = artifacts.filter(item => item.type === 'result-image' && item.chapterId === '5');
+  if (resultImages.length > 3) errors.push('第五章功能展示图超过3张，应按可观察结果场景合并');
   if (artifacts.some(item => item.type === 'formula' && item.chapterId !== '4')) errors.push('公式应放在第四章软件设计，不应放在第五章');
   const actualDevices = (project.paper.factSheet.devices || []).map((device, index) => ({ ...device, id: device.id || 'device-' + (index + 1) }));
   const controller = project.paper.factSheet.controller;
@@ -2172,8 +2176,8 @@ function generationArtifactPlanIssues(artifacts = []) {
     if (device && !artifacts.some(item => item.type === 'pin-table' && (item.sourceFactIds || []).includes(device.id))) errors.push(`${device.model}缺少就近放置的独立引脚表`);
   });
   (project.paper.factSheet.functions || []).forEach(func => {
-    if (!artifacts.some(item => item.type === 'flowchart' && (item.sourceFactIds || []).includes(func.id))) errors.push(`功能“${func.name}”缺少第四章流程图计划`);
-    if (!artifacts.some(item => item.type === 'result-image' && (item.sourceFactIds || []).includes(func.id))) errors.push(`功能“${func.name}”缺少第五章展示图计划`);
+    if (!artifacts.some(item => item.type === 'flowchart' && (item.sourceFactIds || []).includes(func.id))) errors.push(`功能“${func.name}”尚未归入第四章核心流程图`);
+    if (!artifacts.some(item => item.type === 'result-image' && (item.sourceFactIds || []).includes(func.id))) errors.push(`功能“${func.name}”尚未归入第五章展示场景`);
   });
   artifacts.filter(item => item.required).forEach(item => {
     if (String(item.instruction || '').length < 12) errors.push(`${item.title}的生成要求缺失`);
@@ -2232,7 +2236,7 @@ async function planOutlineForPaper(signal) {
     planningNote = `AI结构规划返回异常，已按器件、功能和目标字数自动建立项目目录：${error.message || '返回不完整'}`;
     plan = {
       summary: planningNote,
-      chapters: Prompts.buildProjectOutline({ devices: facts.devices, functions: facts.functions, targetBodyChars }),
+      chapters: Prompts.buildProjectOutline({ title: project.title, devices: facts.devices, functions: facts.functions, targetBodyChars }),
     };
   }
 

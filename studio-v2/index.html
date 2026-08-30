@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f6f8f7">
   <title>雄鸡工作室｜单片机方案与论文</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="styles.css?v=20260830-1">
+  <link rel="stylesheet" href="styles.css?v=20260830-2">
 </head>
 <body>
   <a class="skip-link" href="#workspace-main">跳到主要内容</a>
@@ -216,7 +216,7 @@
                   <div class="section-title"><span>必填</span><h2>论文题目</h2></div>
                   <div class="field-grid title-target-grid">
                     <label class="field field-large" for="paper-title-input"><span class="sr-only">论文题目</span><input id="paper-title-input" required placeholder="输入完整论文题目"></label>
-                    <label class="field target-length-field" for="paper-target-chars"><span>正文目标字数</span><input id="paper-target-chars" type="number" min="18000" max="40000" step="1000" value="18000"><small>最低18000字，系统据此规划目录和各章篇幅</small></label>
+                    <label class="field target-length-field" for="paper-target-chars"><span>正文目标字数</span><input id="paper-target-chars" type="number" inputmode="numeric" min="15000" max="40000" step="1000" value="15000" aria-describedby="paper-target-chars-help"><small id="paper-target-chars-help">最低15000字；标题、表格、图位和Mermaid代码不计入系统有效字数</small></label>
                   </div>
                 </div>
 
@@ -374,7 +374,7 @@
   <script src="vendor/pdf.min.js"></script>
   <script>if (globalThis.pdfjsLib) globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';</script>
   <script src="vendor/docx.umd.js"></script>
-  <script src="docx-export.js?v=20260830-1"></script>
-  <script type="module" src="app.js?v=20260830-1"></script>
+  <script src="docx-export.js?v=20260830-2"></script>
+  <script type="module" src="app.js?v=20260830-2"></script>
 </body>
 </html>
