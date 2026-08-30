@@ -1,5 +1,5 @@
 import * as Store from './storage.js?v=20260826-1';
-import * as Prompts from './prompts.js?v=20260830-2';
+import * as Prompts from './prompts.js?v=20260830-5';
 import { allPins, compatiblePins, validateMappings } from './pin-data.js?v=20260830-1';
 import { REFERENCE_LIBRARY, REFERENCE_LIBRARY_META } from './reference-library.js?v=20260826-2';
 import * as Rules from '../studio-next/rules.js?v=20260824-6';
@@ -2147,9 +2147,7 @@ function generationArtifactPlanIssues(artifacts = []) {
   if (!hasType('software-architecture', '4') || !hasType('flowchart', '4')) errors.push('第四章缺少软件结构图或流程图');
   if (!hasType('test-table', '5') || !hasType('result-image', '5')) errors.push('第五章缺少量化测试表或功能展示图');
   const functionalFlowcharts = artifacts.filter(item => item.type === 'flowchart' && item.chapterId === '4' && (item.sourceFactIds || []).length);
-  if (functionalFlowcharts.length > 2) errors.push('第四章核心功能流程图超过2张，应按信息处理和联动控制等共享逻辑继续合并');
   const resultImages = artifacts.filter(item => item.type === 'result-image' && item.chapterId === '5');
-  if (resultImages.length > 3) errors.push('第五章功能展示图超过3张，应按可观察结果场景合并');
   if (artifacts.some(item => item.type === 'formula' && item.chapterId !== '4')) errors.push('公式应放在第四章软件设计，不应放在第五章');
   const actualDevices = (project.paper.factSheet.devices || []).map((device, index) => ({ ...device, id: device.id || 'device-' + (index + 1) }));
   const controller = project.paper.factSheet.controller;
@@ -2176,8 +2174,10 @@ function generationArtifactPlanIssues(artifacts = []) {
     if (device && !artifacts.some(item => item.type === 'pin-table' && (item.sourceFactIds || []).includes(device.id))) errors.push(`${device.model}缺少就近放置的独立引脚表`);
   });
   (project.paper.factSheet.functions || []).forEach(func => {
-    if (!artifacts.some(item => item.type === 'flowchart' && (item.sourceFactIds || []).includes(func.id))) errors.push(`功能“${func.name}”尚未归入第四章核心流程图`);
-    if (!artifacts.some(item => item.type === 'result-image' && (item.sourceFactIds || []).includes(func.id))) errors.push(`功能“${func.name}”尚未归入第五章展示场景`);
+    const flowCoverage = functionalFlowcharts.filter(item => (item.sourceFactIds || []).includes(func.id)).length;
+    const imageCoverage = resultImages.filter(item => (item.sourceFactIds || []).includes(func.id)).length;
+    if (flowCoverage !== 1) errors.push(`功能“${func.name}”应恰好归入一条独立程序逻辑链，当前为${flowCoverage}条`);
+    if (imageCoverage !== 1) errors.push(`功能“${func.name}”应恰好归入一个可观察展示场景，当前为${imageCoverage}个`);
   });
   artifacts.filter(item => item.required).forEach(item => {
     if (String(item.instruction || '').length < 12) errors.push(`${item.title}的生成要求缺失`);
@@ -2977,9 +2977,14 @@ function mermaidTimingIssues(block, artifactTitle = '时序图') {
   const match = String(block || '').match(/```mermaid\s*\n([\s\S]*?)```/i);
   if (!match) return [`${artifactTitle}缺少可复制的Mermaid代码块`];
   const code = match[1].trim();
+  const nodeIds = new Set([...code.matchAll(/\b([A-Za-z][A-Za-z0-9_]*)\s*(?=[\[({])/g)].map(item => item[1]));
   const issues = [];
-  if (!/^sequenceDiagram\s*$/im.test(code)) issues.push(`${artifactTitle}必须使用sequenceDiagram`);
-  if ((code.match(/->>|-->>|->|-->/g) || []).length < 3) issues.push(`${artifactTitle}缺少完整的发起、应答和数据传输过程`);
+  if (!/^flowchart\s+LR\s*$/im.test(code)) issues.push(`${artifactTitle}必须使用flowchart LR按时间从左向右横向绘制`);
+  if (/^sequenceDiagram\s*$/im.test(code) || /^flowchart\s+TD\s*$/im.test(code)) issues.push(`${artifactTitle}不能使用纵向时序布局`);
+  if ((code.match(/开始/g) || []).length !== 1 || (code.match(/结束/g) || []).length !== 1) issues.push(`${artifactTitle}必须各有且只有一个“开始”和“结束”节点`);
+  if (nodeIds.size < 5) issues.push(`${artifactTitle}缺少完整的发起、应答、数据传输和结束过程`);
+  if (nodeIds.size > 9) issues.push(`${artifactTitle}超过9个节点，应精简横向时间过程`);
+  if (/\b(?:subgraph|classDef|style|click)\b|<\/?[A-Za-z][^>]*>/i.test(code)) issues.push(`${artifactTitle}包含不必要的样式、子图或HTML语法`);
   return issues;
 }
 
@@ -3063,15 +3068,16 @@ async function ensureChapterStructureAndArtifacts(chapter, content, signal) {
     const missingHeadings = missingRequiredHeadings(chapter, bestContent);
     const detailIssues = artifactDetailIssues(bestContent, chapterArtifacts);
     const duplicateIssues = unique([...internalDuplicateIssues(bestContent), ...crossChapterDuplicateIssues(chapter.id, bestContent), ...consecutiveVisualIssues(bestContent)]);
-    if (!missingHeadings.length && !detailIssues.length && !duplicateIssues.length) return bestContent;
+    const paragraphIssues = longProseParagraphIssues(bestContent);
+    if (!missingHeadings.length && !detailIssues.length && !duplicateIssues.length && !paragraphIssues.length) return bestContent;
     const raw = await callAi([
       {
         role: 'system',
         content: `你是本科论文章节质量补强编辑。请在不删减有效正文、不改变确认事实、不增加新器件/引脚/功能的前提下，修复指定章节的标题、图表说明和跨章重复问题。优先补齐problemsToRepair中列出的每一项图表、公式、表格或Mermaid流程图，不得遗漏。requiredSections中的二级、三级标题必须全部出现且顺序不变，三级标题数量以目录为准，不得擅自压缩。对标记为跨章重复的段落必须按照本章唯一职责重新组织：删除在前文已经完整介绍的参数、原理、接线或程序步骤，只保留一句必要衔接，再补入本章专属分析，禁止仅替换同义词。
 
-每个缺失或说明不足的图表都要放在对应正文之后。artifacts中的每张图都按figureNumber在图前正文中恰好引用一次“如图x-x所示”，每张表都按tableNumber在表前正文中恰好引用一次“如表x-x所示”，不得漏引、复用编号或单独成段。流程图使用flowchart TD，开始和结束各一个且使用圆角终止节点，主干自上而下、最多9个节点和2个判断节点，分支尽快汇合；框架图和结构图使用flowchart TD或LR；通信时序使用sequenceDiagram。所有Mermaid图保持简洁，禁止subgraph、style、classDef和HTML。第三章不得生成硬件组成图或总体结构图。器件图、电路图、实物图和功能展示图只保留独占一行的“【非正文·插图位置：图名】”以及下一行“【非正文结束】”，不得写拍摄、绘制、构图或取景说明。每张引脚表只对应一个器件并紧跟该器件电路说明，不得包含“信号方向”列。选型对比表、引脚表和测试表必须直接生成可用的Markdown表格并在表前后分析；公式必须直接写出并解释变量、单位、参数来源和用途。任意两张图或表之间必须补入不少于80字的实质正文段落，禁止连续图图、图表或表表。只输出补强后的完整本章正文，不输出章标题、解释或质量评价。`,
+每个缺失或说明不足的图表都要放在对应正文之后。正文每段只表达一个主要观点，通常120至300字；超过380字必须在观点转换处用空行拆分，不删减技术内容，也不把每句话机械拆段。artifacts中的每张图都按figureNumber在图前正文中恰好引用一次“如图x-x所示”，每张表都按tableNumber在表前正文中恰好引用一次“如表x-x所示”，不得漏引、复用编号或单独成段。程序流程图使用flowchart TD，开始和结束各一个且使用圆角终止节点，主干自上而下、最多9个节点和2个判断节点，分支尽快汇合；系统总体功能框架图使用flowchart LR表达硬件组成及信息流，系统软件功能模块图使用flowchart TD表达程序任务及调用层级，不得逐个重复硬件节点或照搬第二章连接关系；通信或严格时序图必须使用flowchart LR按时间从左向右横向展开，禁止sequenceDiagram和flowchart TD。所有Mermaid图保持简洁，禁止subgraph、style、classDef和HTML。第三章不得生成硬件组成图或总体结构图。器件图、电路图、实物图和功能展示图只保留独占一行的“【非正文·插图位置：图名】”以及下一行“【非正文结束】”，不得写拍摄、绘制、构图或取景说明。每张引脚表只对应一个器件并紧跟该器件电路说明，不得包含“信号方向”列。选型对比表、引脚表和测试表必须直接生成可用的Markdown表格并在表前后分析；公式必须直接写出并解释变量、单位、参数来源和用途。任意两张图或表之间必须补入不少于80字的实质正文段落，禁止连续图图、图表或表表。只输出补强后的完整本章正文，不输出章标题、解释或质量评价。`,
       },
-      { role: 'user', content: JSON.stringify({ pass: pass + 1, chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections }, chapterResponsibility: Prompts.chapterResponsibilities?.(chapter.kind) || '', confirmedFacts: project.paper.factSheet, completedChapterLedger: completedDigest(), chapterArtifacts, problemsToRepair: [...missingHeadings.map(item => `缺少目录标题：${item}`), ...detailIssues, ...duplicateIssues], existingChapter: bestContent }, null, 2) },
+      { role: 'user', content: JSON.stringify({ pass: pass + 1, chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections }, chapterResponsibility: Prompts.chapterResponsibilities?.(chapter.kind) || '', confirmedFacts: project.paper.factSheet, completedChapterLedger: completedDigest(), chapterArtifacts, problemsToRepair: [...missingHeadings.map(item => `缺少目录标题：${item}`), ...detailIssues, ...duplicateIssues, ...paragraphIssues], existingChapter: bestContent }, null, 2) },
     ], { reasoning: false, maxTokens: 16000, signal, requestLabel: `第${chapter.id}章内容质量补强${pass ? '复核' : ''}` });
     const revised = normalizeChapterText(raw, chapter);
     const revisedProblems = missingRequiredHeadings(chapter, revised).length + artifactDetailIssues(revised, chapterArtifacts).length + internalDuplicateIssues(revised).length + crossChapterDuplicateIssues(chapter.id, revised).length + consecutiveVisualIssues(revised).length;
@@ -3346,6 +3352,21 @@ function tableRowGroups(text) {
   return groups;
 }
 
+function longProseParagraphIssues(text, maximum = 380) {
+  const clean = String(text || '')
+    .replace(/```mermaid[\s\S]*?```/gi, '\n\n')
+    .replace(/【非正文(?:·[^】]*)?】[\s\S]*?【非正文结束】/g, '\n\n');
+  const issues = [];
+  clean.split(/\n{2,}/).forEach(block => {
+    const paragraph = block.trim();
+    if (!paragraph || /^\d+(?:[.．]\d+){1,2}\s+[^\n]+$/.test(paragraph)) return;
+    if (/^\s*\|.*\|\s*$/m.test(paragraph) || /^(?:图|表)\s*\d+/m.test(paragraph)) return;
+    const length = paragraph.replace(/\s+/g, '').length;
+    if (length > maximum) issues.push(`存在${length}字的连续长段，应按观点转换拆分且单段不超过${maximum}字`);
+  });
+  return unique(issues).slice(0, 4);
+}
+
 function localQualityIssues() {
   const issues = [];
   const outline = project.paper.outline || [];
@@ -3372,6 +3393,7 @@ function localQualityIssues() {
     crossChapterDuplicateIssues(chapter.id, text).forEach((message, index) => issues.push({ id: `near-duplicate-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message }));
     duplicateHeadingIssues(text).forEach((message, index) => issues.push({ id: `duplicate-heading-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message }));
     consecutiveVisualIssues(text).forEach((message, index) => issues.push({ id: `visual-spacing-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message }));
+    longProseParagraphIssues(text).forEach((message, index) => issues.push({ id: `paragraph-length-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message }));
     const missingHeadings = missingRequiredHeadings(chapter, text);
     if (missingHeadings.length) issues.push({ id: `headings-missing-${chapter.id}`, severity: 'blocking', chapterId: chapter.id, message: `第${chapter.id}章缺少目录标题：${missingHeadings.join('、')}` });
     if (/\S[ \t]*【非正文/.test(text) || /【非正文(?:·[^】]*)?】[ \t]*\S/.test(text)) issues.push({ id: `artifact-line-${chapter.id}`, severity: 'warning', chapterId: chapter.id, message: `第${chapter.id}章存在未单独成行的图表提示` });
@@ -3392,7 +3414,7 @@ function localQualityIssues() {
   (project.paper.artifacts || []).filter(item => item.type === 'timing').forEach(item => {
     const text = String(chapters[item.chapterId]?.content || '');
     const block = artifactInstructionBlock(text, item);
-    mermaidTimingIssues(block, item.title).forEach((message, index) => issues.push({ id: `timing-${item.id}-${index}`, severity: 'warning', chapterId: item.chapterId, message }));
+    mermaidTimingIssues(block, item.title).forEach((message, index) => issues.push({ id: `timing-${item.id}-${index}`, severity: 'blocking', chapterId: item.chapterId, message }));
   });
   (project.paper.artifacts || []).filter(item => ['device-image', 'result-image', 'circuit', 'system-framework', 'software-architecture', 'comparison-table', 'pin-table', 'test-table'].includes(item.type)).forEach(item => {
     const text = String(chapters[item.chapterId]?.content || '');
@@ -3520,7 +3542,7 @@ async function repairChapterBlockingIssues(chapter, problems, signal) {
       role: 'system',
       content: `你是单片机本科论文重点问题修复编辑。只修复problems列出的重点问题，保持本章全部有效正文、目录标题顺序、确认器件、引脚和功能不变，输出修复后的完整本章正文，不输出章标题、解释或评价。
 
-必须执行：删除重复和系统未完成式表述；修复与确认事实矛盾的硬件描述；任意图/表之间补入不少于80字的实质分析段落；artifacts中的每张图按figureNumber在图前正文中恰好引用一次“如图x-x所示”，每张表按tableNumber在表前正文中恰好引用一次“如表x-x所示”；器件图、电路图、实物图和功能图只保留独占一行的“【非正文·插图位置：图名】”和下一行“【非正文结束】”；框架图、结构图和流程图直接使用简洁Mermaid，流程图的开始和结束各一个且为圆角终止节点，主干自上而下、最多9个节点和2个判断节点；第三章不得生成硬件组成图或总体结构图；每张引脚表只对应一个器件并紧跟其电路说明，不得有“信号方向”列；测试必须有量化表格；超过5列或10行数据的表格必须按功能或模块拆分成多张表，并保持每张表前后有正文分析。除51单片机外主控按最小系统开发板描述，5V输入经板载稳压得到3.3V，所有模块共地，凡上拉电阻统一10 kΩ，TFT统一1.8寸。禁止新增标题、器件、引脚、功能或文献。`,
+必须执行：删除重复和系统未完成式表述；修复与确认事实矛盾的硬件描述；正文每段只讲一个主要观点，通常120至300字，超过380字必须在观点转换处用空行拆段，禁止删减内容或逐句拆段；任意图/表之间补入不少于80字的实质分析段落；artifacts中的每张图按figureNumber在图前正文中恰好引用一次“如图x-x所示”，每张表按tableNumber在表前正文中恰好引用一次“如表x-x所示”；器件图、电路图、实物图和功能图只保留独占一行的“【非正文·插图位置：图名】”和下一行“【非正文结束】”；框架图、结构图和流程图直接使用简洁Mermaid，流程图的开始和结束各一个且为圆角终止节点，主干自上而下、最多9个节点和2个判断节点；第三章不得生成硬件组成图或总体结构图；每张引脚表只对应一个器件并紧跟其电路说明，不得有“信号方向”列；测试必须有量化表格；超过5列或10行数据的表格必须按功能或模块拆分成多张表，并保持每张表前后有正文分析。除51单片机外主控按最小系统开发板描述，5V输入经板载稳压得到3.3V，所有模块共地，凡上拉电阻统一10 kΩ，TFT统一1.8寸。禁止新增标题、器件、引脚、功能或文献。`,
     },
     { role: 'user', content: JSON.stringify({ title: project.title, chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections }, responsibility: Prompts.chapterResponsibilities?.(chapter.kind) || '', problems, confirmedFacts: project.paper.factSheet, artifacts: (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id), references: chapter.kind === 'introduction' ? project.paper.referenceRecords : [], existingChapter: before }, null, 2) },
   ], { reasoning: false, maxTokens: 16000, signal, requestLabel: `自动修复第${chapter.id}章重点问题`, timeoutMs: 150000 });
