@@ -23,6 +23,17 @@ function chapterText(id, title) {
   return `${section}\n\n${body}`;
 }
 
+function frontMatterResponse() {
+  return {
+    titleEn: 'Design of a Microcontroller-Based Environmental Monitoring System',
+    abstractCn: '面向居家环境状态感知与安全提醒需求，本文设计了一套以微控制器为核心的环境监测系统。系统由信息采集、数据处理、状态显示和异常提醒等部分组成，通过传感模块获得环境信息，经控制单元完成数据判断与状态更新，并将结果反馈给使用者。设计过程围绕功能需求建立总体方案，明确各模块之间的接口关系，在保证结构清晰的同时兼顾系统实现的可行性与后续维护需求。\n\n在软件设计方面，系统按照初始化、周期采集、有效性判断、联动控制和显示更新的顺序组织运行逻辑，并对数据异常与通信超时进行处理。完成软硬件联调后，围绕信息采集、数据显示、异常提醒和连续运行等功能开展验证，通过多组测试记录分析响应情况与运行稳定性。结果表明，所设计系统能够按照预定逻辑完成环境信息监测与状态反馈，各模块配合关系明确，整体运行过程稳定，可为同类低成本嵌入式监测项目提供设计参考。',
+    abstractEn: 'This paper presents a microcontroller-based environmental monitoring system for residential status perception and safety notification. The system integrates information acquisition, data processing, status display, and abnormal-condition alerts. Environmental information is collected by sensing modules, evaluated by the control unit, and then delivered to the user through visual feedback and alerts.\n\nThe software follows a structured sequence covering initialization, periodic acquisition, validity checking, coordinated control, and display updates. Functional and stability tests indicate that the system can perform the intended monitoring and feedback tasks with clear module coordination and stable operation.',
+    keywords: '微控制器；环境监测；信息采集；控制系统',
+    keywordsEn: 'microcontroller; environmental monitoring; information acquisition; control system',
+    acknowledgment: '本次毕业设计使所学的电路、程序设计和系统调试知识得到综合运用。方案分析、硬件实现、软件组织与测试验证的过程加深了对嵌入式系统开发方法的理解。在此对学习和实践过程中获得的指导与帮助表示诚挚感谢。',
+  };
+}
+
 function mockResponse(messages) {
   const system = String(messages.find(item => item.role === 'system')?.content || '');
   const user = String(messages.findLast(item => item.role === 'user')?.content || '');
@@ -44,8 +55,35 @@ function mockResponse(messages) {
     return JSON.stringify({ selected, summary: '已根据题目、器件、功能和出版信息筛选' });
   }
   if (system.includes('硬件事实整理工程师')) {
+    let parsed = {};
+    try { parsed = JSON.parse(user); } catch {}
+    const source = JSON.stringify(parsed.userDevices || []);
+    if (/Arduino|ATmega328/i.test(source)) {
+      return JSON.stringify({
+        controller: 'Arduino UNO',
+        developmentTools: ['Arduino IDE'],
+        backgroundNotes: '课题面向居家环境监测需求，研究方向为环境数据采集、状态显示与异常提醒。',
+        devices: [
+          { model: 'Arduino UNO', role: '主控', interfaceType: 'GPIO' },
+          { model: 'DHT11', role: '温湿度传感器', interfaceType: '1-Wire' },
+          { model: '0.96寸OLED', role: '屏幕', interfaceType: 'I2C' },
+        ],
+        functions: [
+          { name: '温湿度采集', deviceModels: ['DHT11'] },
+          { name: '环境数据显示', deviceModels: ['0.96寸OLED'] },
+        ],
+        mappings: [
+          { device: 'DHT11', interfaceType: '1-Wire', signal: 'DATA', pin: 'D2', alternatives: ['D3'], busGroup: '', shareAllowed: false },
+          { device: '0.96寸OLED', interfaceType: 'I2C', signal: 'SCL', pin: 'A5', alternatives: [], busGroup: 'I2C', shareAllowed: true },
+          { device: '0.96寸OLED', interfaceType: 'I2C', signal: 'SDA', pin: 'A4', alternatives: [], busGroup: 'I2C', shareAllowed: true },
+        ],
+        powerNotes: ['Arduino UNO与外设共地。'], fixedFacts: ['OLED采用I2C通信。'], conflicts: [],
+      });
+    }
     return JSON.stringify({
       controller: 'STM32F103C8T6',
+      developmentTools: ['Keil 5', 'STM32CubeMX'],
+      backgroundNotes: '课题面向居家环境监测需求，研究方向为传感信息采集、状态显示与异常提醒。',
       devices: [
         { model: 'STM32F103C8T6', role: '主控', interfaceType: 'GPIO' },
         { model: 'DHT11', role: '温湿度传感器', interfaceType: '1-Wire' },
@@ -86,7 +124,7 @@ function mockResponse(messages) {
   }
   if (system.includes('方案设计工程师')) return JSON.stringify({ title: '基于STM32的环境监测系统', devices: [{ model: 'STM32F103C8T6', role: '主控' }, { model: 'DHT11', role: '温湿度传感器' }, { model: '0.96寸OLED', role: '屏幕' }], functions: ['使用DHT11实现温湿度采集', '使用0.96寸OLED实现环境数据显示'] });
   if (system.includes('项目资料整理员')) return JSON.stringify({ title: '基于STM32的居家环境监测系统', devices: [{ model: 'STM32F103C8T6', role: '主控' }, { model: 'DHT11', role: '温湿度传感器' }, { model: 'ESP-01S', role: 'WiFi通信模块' }], functions: ['采集室内温湿度数据', '通过ESP-01S实现远程数据上传'], sourceNotes: '编程软件使用Keil 5，云平台采用OneNET。' });
-  if (system.includes('生成英文论文题目')) return JSON.stringify({ titleEn: 'Design of an MCU-Based Environmental Monitoring System', abstractCn: '本文围绕单片机环境监测需求，完成硬件连接、程序逻辑和系统测试设计。系统采用传感器采集环境数据，由主控完成判断并驱动显示与报警模块。测试结果表明，各项功能能够按照设定逻辑稳定运行。', abstractEn: 'This paper presents an MCU-based environmental monitoring system. Sensor data are processed by the controller and used for display and alarm control. Test results show that the designed functions operate as expected.', keywords: '单片机；环境监测；传感器；控制系统', keywordsEn: 'microcontroller; environmental monitoring; sensor; control system', acknowledgment: '本次毕业设计的完成离不开学习过程中获得的专业知识和实践训练。通过方案分析、硬件设计、程序整理与系统测试，对单片机系统的开发过程有了更加完整的认识。在此对学习和实践过程中获得的帮助表示诚挚感谢。' });
+  if (system.includes('生成英文论文题目') || system.includes('本科论文摘要编辑') || system.includes('本科论文前置内容修复编辑')) return JSON.stringify(frontMatterResponse());
   if (system.includes('技术一致性审稿人')) return JSON.stringify({ summary: '模拟复核完成', issues: [] });
   if (system.includes('补写编辑')) return Array.from({ length: 6 }, (_, index) => paragraph('补充设计分析', index + 1)).join('\n\n');
   if (system.includes('本科论文章节质量补强编辑') || system.includes('本科论文结构编辑')) {

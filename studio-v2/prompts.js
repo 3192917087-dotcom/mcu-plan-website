@@ -11,6 +11,17 @@ export const CHAPTER_TARGETS = Object.freeze({
 
 export const DEFAULT_OUTLINE_ID = 'adaptive6';
 
+export function buildSourceCodeExcerpt(codeFiles = [], fallbackText = '', maxChars = 26000) {
+  const limit = Math.max(2000, Number(maxChars) || 26000);
+  const records = Array.isArray(codeFiles) ? codeFiles.filter(item => item?.content) : [];
+  if (!records.length) return String(fallbackText || '未提供').slice(0, limit);
+  const perFileBudget = Math.max(500, Math.floor(limit / records.length) - 80);
+  return records.map(record => {
+    const path = String(record.path || record.name || '未命名程序文件');
+    return `/* 文件：${path} */\n${String(record.content || '').slice(0, perFileBudget)}`;
+  }).join('\n\n').slice(0, limit);
+}
+
 const DEFAULT_CHAPTERS = Object.freeze([
   { id: '1', kind: 'introduction', title: '绪论', sections: ['1.1 课题研究背景及意义', '1.2 国内外研究现状', '1.2.1 国内研究现状', '1.2.2 国外研究现状', '1.2.3 国内外研究现状评述', '1.3 主要研究内容', '1.4 论文结构安排'] },
   { id: '2', kind: 'overall', title: '系统总体方案设计', sections: ['2.1 系统需求分析', '2.2 系统总体结构', '2.3 系统工作原理', '2.4 系统器件选型'] },
@@ -297,12 +308,16 @@ export function buildHardwareMessages(materials) {
       role: 'system',
       content: `你是单片机项目硬件事实整理工程师。用户填写内容优先，不能擅自替换。资料只有题目时给出一套常见、真实、适合本科制作的建议；资料部分缺失时只补缺失项。用户不需要预先填写硬件连接关系，你必须先根据器件型号识别通信方式和所需信号，再依据主控资源生成供用户下拉确认的引脚建议。必须识别准确主控型号、外设型号、接口类型和每个接口需要的信号。不要把VCC、GND放入GPIO分配，但必须在powerNotes中说明供电电压和共地关系。需要独立WiFi模块时使用ESP-01S，禁止输出ESP8266；屏幕未明确指定且确需彩屏时使用1.8寸TFT，不使用2.8寸TFT。不要声称项目无法完成。
 
+开发软件必须结合识别出的主控型号和所选程序文件后缀给出：STM32固定为Keil 5和STM32CubeMX；STC、AT89等51单片机固定为Keil 5；Arduino UNO和ESP32固定为Arduino IDE；其他主控根据其官方或主流工具链选择，不得沿用错误平台的软件。developmentTools只放编译、配置、下载或程序开发软件，不放万用表、示波器等硬件工具。
+
+supplementalDocumentText是用户上传的任务书或开题报告。它只能用于提取课题背景、行业需求、研究方向和明确的设计约束，并压缩写入backgroundNotes；不得从该文档提取、补充或覆盖器件清单、功能要求、引脚和测试结果。功能事实以userFunctions及导入方案为准；二者为空时才根据题目给出合理基础功能，也不能把任务书中的功能段落直接当成已确认方案。
+
 如果schematicText来自PDF原理图，先把其中明确出现的型号、网络名和引脚当作最高优先级事实；只对文本中确实出现的连接生成mapping。PDF文字可能把标签挤在一起，无法确定连接时使用“待确认”并在conflicts说明，不要猜测。STM32F103C8T6的I2C2默认脚为PB10=SCL、PB11=SDA，I2C1常用PB6/PB7或重映射PB8/PB9，不能因为PB10/PB11属于串口复用而漏掉它们。
 
 默认硬件事实必须写入powerNotes或fixedFacts：除STC、AT89等51单片机外，主控视为最小系统开发板；开发板使用5V DC输入，板载稳压得到3.3V，5V外设接5V电源轨，系统所有模块共地；凡使用上拉电阻均统一为10 kΩ。只有用户明确提供不同事实时才按用户事实覆盖这些默认项。
 
-I2C设备列SCL、SDA；UART设备列TX、RX；SPI设备列SCK、MISO、MOSI及每个设备独立CS；模拟传感器列AO/ADC；普通控制列CTRL；有实际需要时列INT、RST、EN。推荐引脚必须考虑主控型号和常见复用关系。I2C等总线可合理共享，并用同一busGroup标识。只返回JSON：
-{"controller":"准确主控型号","devices":[{"model":"型号","role":"作用","interfaceType":"GPIO/I2C/UART/SPI/ADC/1-Wire等"}],"functions":[{"name":"功能","deviceModels":["关联器件"]}],"mappings":[{"device":"器件型号","interfaceType":"接口","signal":"SCL等","pin":"PB6","alternatives":["PB8"],"busGroup":"I2C1或空","shareAllowed":true}],"powerNotes":["供电与共地说明"],"fixedFacts":["确定的通信常识"],"conflicts":["仅用户资料明确矛盾时填写"]}`,
+I2C设备列SCL、SDA；UART设备列TX、RX；SPI设备列SCK、MISO、MOSI及每个设备独立CS；模拟传感器列AO/ADC；普通控制列CTRL；有实际需要时列INT、RST、EN。推荐引脚必须考虑主控的准确具体型号、芯片封装、开发板实际引出脚和常见复用关系，不能把STM32F103的端口套用到其他STM32系列，也不能把Arduino、ESP32或51单片机的命名混用。若具体型号不明确，宁可把pin设为“待确认”并在conflicts说明，也不能编造不存在的引脚。I2C等总线可合理共享，并用同一busGroup标识。只返回JSON：
+{"controller":"准确主控型号","developmentTools":["与主控对应的软件"],"backgroundNotes":"仅从任务书或开题报告提取的背景方向，未上传则为空","devices":[{"model":"型号","role":"作用","interfaceType":"GPIO/I2C/UART/SPI/ADC/1-Wire等"}],"functions":[{"name":"功能","deviceModels":["关联器件"]}],"mappings":[{"device":"器件型号","interfaceType":"接口","signal":"SCL等","pin":"PB6","alternatives":["PB8"],"busGroup":"I2C1或空","shareAllowed":true}],"powerNotes":["供电与共地说明"],"fixedFacts":["确定的通信常识"],"conflicts":["仅用户资料明确矛盾时填写"]}`,
     },
     {
       role: 'system',
@@ -377,8 +392,9 @@ export function buildOutlinePlanMessages({ title, facts, materials, targetBodyCh
     confirmedFacts: facts,
     userReferenceOutline: String(materials?.outlineReferenceText || '').trim() || '未提供，按六章职责生成',
     sourceCodeFiles: materials?.filenames || [],
-    sourceCodeSummary: String(materials?.codeText || '').slice(0, 22000) || '未提供',
+    sourceCodeSummary: buildSourceCodeExcerpt(materials?.codeFiles, materials?.codeText, 22000),
     testInformation: String(materials?.testInfo || '').slice(0, 8000) || '未提供',
+    backgroundDirection: String(materials?.sourceBackgroundText || '').slice(0, 8000) || '未提供',
     otherRequirements: String(materials?.sourceNotes || '').slice(0, 8000) || '未提供',
     ...(repairing ? { validationIssues, previousPlan } : {}),
   };
@@ -446,7 +462,8 @@ export function buildChapterMessages({ project, chapter, outline, artifacts, com
       connections: project.paper.materials.connectionsText || '未提供',
       testInfo: project.paper.materials.testInfo || '未提供',
       tools: project.paper.materials.toolsText || '未提供',
-      sourceCodeSummary: String(project.paper.materials.codeText || '未提供').slice(0, 26000),
+      sourceCodeSummary: buildSourceCodeExcerpt(project.paper.materials.codeFiles, project.paper.materials.codeText, 26000),
+      backgroundDirection: project.paper.materials.sourceBackgroundText || '未提供',
       additionalNotes: project.paper.materials.sourceNotes || '未提供',
     },
     chapterArtifacts,

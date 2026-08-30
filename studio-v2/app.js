@@ -1,11 +1,11 @@
 import * as Store from './storage.js?v=20260826-1';
-import * as Prompts from './prompts.js?v=20260826-11';
-import { allPins, compatiblePins, validateMappings } from './pin-data.js?v=20260824-2';
+import * as Prompts from './prompts.js?v=20260830-1';
+import { allPins, compatiblePins, validateMappings } from './pin-data.js?v=20260830-1';
 import { REFERENCE_LIBRARY, REFERENCE_LIBRARY_META } from './reference-library.js?v=20260826-2';
 import * as Rules from '../studio-next/rules.js?v=20260824-6';
 
 const PAGE_CONFIG = globalThis.MCU_PAGE_CONFIG || {};
-const APP_TITLE = '单片机方案与论文工作台 V2';
+const APP_TITLE = '雄鸡工作室｜单片机方案与论文';
 const API_SETTINGS_KEY = 'mcu-paper-studio-v2.api-settings';
 const REFERENCE_TOOL_KEY = 'mcu-paper-studio-v2.reference-tool';
 const MOTIVATION_KEY = 'mcu-paper-studio-v2.daily-motivation-v2';
@@ -14,6 +14,12 @@ const MOTIVATION_REFRESH_MAX_MS = 4 * 60 * 1000;
 const MOTIVATION_SCHEDULE_VERSION = 2;
 const MOTIVATION_AI_INTERVAL = 4;
 const MIN_BODY_CHARS = 18000;
+const MAX_PROGRAM_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_PROGRAM_TOTAL_CHARS = 240000;
+const PROGRAM_FILE_EXTENSIONS = new Set([
+  'c','h','cc','cpp','cxx','hh','hpp','hxx','ino','pde','s','asm','a51','src','inc','py','ld','lds','ioc',
+  'cfg','conf','ini','json','yaml','yml','toml','dts','overlay','kconfig','mk','cmake','txt','uvprojx','uvoptx','ewp',
+]);
 const DEFAULT_API = Object.freeze({
   mode: 'user',
   provider: 'deepseek',
@@ -307,7 +313,7 @@ function createBlankProject(name = '未命名项目', start = 'paper') {
   const title = name === '未命名项目' ? '' : name;
   const outline = [];
   return {
-    schemaVersion: 26,
+    schemaVersion: 27,
     id: makeId('project'),
     name,
     title,
@@ -330,7 +336,9 @@ function createBlankProject(name = '未命名项目', start = 'paper') {
       step: 'materials',
       materials: {
         schemeSourceId: '', schemeRawText: '', schemeFilename: '', devicesText: '', functionsText: '', connectionsText: '', codeText: '', referencesText: '',
-        testInfo: '', toolsText: '', photoNotes: '', sourceNotes: '', filenames: [], schematicFilename: '', schematicText: '', outlineReferenceText: '', outlineReferenceFilename: '', targetBodyChars: MIN_BODY_CHARS,
+        testInfo: '', toolsText: '', autoDevelopmentTools: [], photoNotes: '', sourceNotes: '', filenames: [], codeFiles: [],
+        sourceDocumentFilename: '', sourceDocumentText: '', sourceBackgroundText: '',
+        schematicFilename: '', schematicText: '', outlineReferenceText: '', outlineReferenceFilename: '', targetBodyChars: MIN_BODY_CHARS,
         useReferencesInPaper: true, referenceRecommendationCount: 15,
         referenceRecommendationIds: [], referenceRecommendationReasons: {}, referenceRecommendationSource: '', referenceRecommendationSummary: '', referenceRecommendationAt: '',
       },
@@ -428,7 +436,16 @@ function normalizeProject(source, options = {}) {
     if (duplicate || imported) normalized.id = makeId('project');
     if (duplicate) normalized.name = `${normalized.name || normalized.title || '项目'} 副本`;
     normalized.paper.materials.targetBodyChars = Math.max(MIN_BODY_CHARS, Math.min(40000, Number(normalized.paper.materials.targetBodyChars) || MIN_BODY_CHARS));
-    normalized.schemaVersion = 26;
+    normalized.paper.materials.codeFiles = Array.isArray(normalized.paper.materials.codeFiles)
+      ? normalized.paper.materials.codeFiles.map(item => ({
+        name: String(item?.name || '').trim(), path: String(item?.path || item?.name || '').trim(),
+        extension: String(item?.extension || '').trim().toLowerCase(), size: Math.max(0, Number(item?.size) || 0), content: String(item?.content || ''),
+      })).filter(item => item.name && item.content)
+      : [];
+    normalized.paper.materials.filenames = normalized.paper.materials.codeFiles.length
+      ? normalized.paper.materials.codeFiles.map(item => item.path || item.name)
+      : Array.isArray(normalized.paper.materials.filenames) ? normalized.paper.materials.filenames : [];
+    normalized.schemaVersion = 27;
     normalized.updatedAt = nowIso();
     normalized.createdAt = duplicate || imported ? nowIso() : normalized.createdAt || nowIso();
     if (normalized.paper.generation.status === 'running') {
@@ -459,9 +476,14 @@ function normalizeProject(source, options = {}) {
     referencesText: oldMaterials.referencesText || '',
     testInfo: oldMaterials.testInfo || '',
     toolsText: oldMaterials.tools || '',
+    autoDevelopmentTools: [],
     photoNotes: oldMaterials.photoNotes || '',
     sourceNotes: oldMaterials.sourceNotes || '',
     filenames: Array.isArray(oldMaterials.filenames) ? oldMaterials.filenames : [],
+    codeFiles: [],
+    sourceDocumentFilename: oldMaterials.sourceDocumentFilename || '',
+    sourceDocumentText: oldMaterials.sourceDocumentText || '',
+    sourceBackgroundText: oldMaterials.sourceBackgroundText || '',
   };
   const oldDevices = source?.audit?.factSheet?.coreDevices || source?.scheme?.devices || lines(oldMaterials.devicesText);
   const oldFunctions = source?.audit?.factSheet?.coreFunctions || source?.scheme?.functions || lines(oldMaterials.functionsText);
@@ -1344,7 +1366,7 @@ async function analyzeImportedScheme() {
 function capturePaperMaterials({ invalidate = true } = {}) {
   if (!project) return;
   const materials = project.paper.materials;
-  const previousHardware = JSON.stringify({ title: project.title, devicesText: materials.devicesText, functionsText: materials.functionsText, codeText: materials.codeText, sourceNotes: materials.sourceNotes });
+  const previousHardware = JSON.stringify({ title: project.title, devicesText: materials.devicesText, functionsText: materials.functionsText, codeText: materials.codeText, sourceNotes: materials.sourceNotes, sourceDocumentText: materials.sourceDocumentText });
   const previousOutlineReference = materials.outlineReferenceText || '';
   const previousTargetBodyChars = Number(materials.targetBodyChars) || MIN_BODY_CHARS;
   const previousReferences = JSON.stringify({ text: materials.referencesText || '', use: materials.useReferencesInPaper !== false, count: clampReferenceCount(materials.referenceRecommendationCount) });
@@ -1362,7 +1384,7 @@ function capturePaperMaterials({ invalidate = true } = {}) {
   materials.targetBodyChars = Math.max(MIN_BODY_CHARS, Math.min(40000, Number($('paper-target-chars')?.value) || MIN_BODY_CHARS));
   if (previousOutlineReference !== materials.outlineReferenceText) materials.outlineReferenceFilename = '';
   updateProjectNameFromTitle();
-  const nextHardware = JSON.stringify({ title: project.title, devicesText: materials.devicesText, functionsText: materials.functionsText, codeText: materials.codeText, sourceNotes: materials.sourceNotes });
+  const nextHardware = JSON.stringify({ title: project.title, devicesText: materials.devicesText, functionsText: materials.functionsText, codeText: materials.codeText, sourceNotes: materials.sourceNotes, sourceDocumentText: materials.sourceDocumentText });
   const nextReferences = JSON.stringify({ text: materials.referencesText || '', use: materials.useReferencesInPaper !== false, count: materials.referenceRecommendationCount });
   if (invalidate && previousHardware !== nextHardware) resetHardwareAnalysis('器件资料已修改');
   else if (invalidate && previousOutlineReference !== materials.outlineReferenceText) invalidateOutlinePlan('参考目录已修改');
@@ -1422,8 +1444,13 @@ function renderPaper() {
   $('paper-target-chars').value = String(Math.max(MIN_BODY_CHARS, Math.min(40000, Number(materials.targetBodyChars) || MIN_BODY_CHARS)));
   $('paper-scheme-text').value = materials.schemeRawText || '';
   $('scheme-file-summary').textContent = materials.schemeFilename ? `已读取：${materials.schemeFilename}` : materials.schemeRawText ? '已粘贴方案文本' : '支持 DOCX、TXT、MD';
-  $('code-file-summary').textContent = materials.filenames?.length ? `已读取 ${materials.filenames.length} 个文件` : '尚未选择';
-  renderCodeFileList(materials.filenames || []);
+  const displayedCodeFiles = materials.codeFiles?.length ? materials.codeFiles : (materials.filenames || []);
+  $('code-file-summary').textContent = displayedCodeFiles.length ? `已选 ${displayedCodeFiles.length} 个文件，可继续追加` : '尚未选择，可分多次追加';
+  renderCodeFileList(displayedCodeFiles);
+  $('source-file-summary').textContent = materials.sourceDocumentFilename
+    ? `已读取：${materials.sourceDocumentFilename}（${String(materials.sourceDocumentText || '').length}字，${materials.sourceBackgroundText ? '已提取背景方向' : '分析时仅提取背景方向'}）`
+    : '支持 DOCX、TXT、MD；旧版DOC请先用WPS另存为DOCX';
+  $('btn-clear-source-file').disabled = !materials.sourceDocumentFilename;
   $('schematic-file-summary').textContent = materials.schematicFilename
     ? `已读取：${materials.schematicFilename}${materials.schematicText ? `（${materials.schematicText.length}字）` : ''}`
     : '尚未选择';
@@ -1460,32 +1487,121 @@ async function readOutlineReferenceFile(event) {
   }
 }
 
-async function readCodeFolder(event) {
-  const files = [...(event.target.files || [])].filter(file => /\.(?:c|h)$/i.test(file.name));
-  event.target.value = '';
-  if (!files.length) return toast('所选文件夹没有找到 .c 或 .h 文件', 'error');
-  const parts = [];
-  for (const file of files) {
-    const text = await file.text();
-    parts.push(`/* 文件：${file.webkitRelativePath || file.name} */\n${text}`);
-  }
-  project.paper.materials.codeText = parts.join('\n\n').slice(0, 180000);
-  project.paper.materials.filenames = files.map(file => file.webkitRelativePath || file.name);
-  if (project.paper.factSheet.analyzedAt) bumpFactRevision('程序资料已修改');
-  await persistProject({ immediate: true });
-  $('code-file-summary').textContent = `已读取 ${files.length} 个文件`;
-  renderCodeFileList(project.paper.materials.filenames);
-  toast(`已读取 ${files.length} 个程序文件`, 'success');
+function programFileExtension(filename = '') {
+  return String(filename).toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] || '';
 }
 
-function renderCodeFileList(filenames = []) {
+function supportedProgramFile(file) {
+  const name = String(file?.name || '');
+  const basename = name.toLowerCase();
+  return PROGRAM_FILE_EXTENSIONS.has(programFileExtension(name)) || ['makefile', 'kconfig', 'cmakelists.txt', 'platformio.ini'].includes(basename);
+}
+
+function rebuildProgramCodeText(materials) {
+  const records = Array.isArray(materials.codeFiles) ? materials.codeFiles : [];
+  const perFileBudget = Math.max(800, Math.floor(MAX_PROGRAM_TOTAL_CHARS / Math.max(1, records.length)) - 80);
+  const parts = [];
+  for (const record of records) {
+    parts.push(`/* 文件：${record.path || record.name} */\n${String(record.content || '').slice(0, perFileBudget)}`);
+  }
+  materials.codeText = parts.join('\n\n').slice(0, MAX_PROGRAM_TOTAL_CHARS).trim();
+  materials.filenames = records.map(item => item.path || item.name);
+}
+
+async function readCodeFiles(event) {
+  const selected = [...(event.target.files || [])];
+  event.target.value = '';
+  if (!selected.length || !project) return;
+  const supported = selected.filter(supportedProgramFile);
+  const oversized = supported.filter(file => file.size > MAX_PROGRAM_FILE_BYTES);
+  const readable = supported.filter(file => file.size <= MAX_PROGRAM_FILE_BYTES);
+  if (!readable.length) return toast(oversized.length ? '所选程序文件过大，单个文件请控制在2 MB以内' : '没有找到支持的文本程序文件', 'error');
+  const materials = project.paper.materials;
+  const records = new Map((materials.codeFiles || []).map(item => [String(item.path || item.name).toLowerCase(), item]));
+  for (const file of readable) {
+    const path = file.webkitRelativePath || file.name;
+    records.set(path.toLowerCase(), {
+      name: file.name,
+      path,
+      extension: programFileExtension(file.name),
+      size: file.size,
+      content: await file.text(),
+    });
+  }
+  materials.codeFiles = [...records.values()];
+  rebuildProgramCodeText(materials);
+  if (project.paper.factSheet.analyzedAt) bumpFactRevision('程序资料已修改');
+  await persistProject({ immediate: true });
+  $('code-file-summary').textContent = `已选 ${materials.codeFiles.length} 个文件，可继续追加`;
+  renderCodeFileList(materials.codeFiles);
+  const skipped = selected.length - readable.length;
+  toast(`已加入 ${readable.length} 个程序文件${skipped ? `，跳过 ${skipped} 个不支持或过大的文件` : ''}`, 'success');
+}
+
+function removeCodeFile(path) {
+  if (!project) return;
+  const materials = project.paper.materials;
+  materials.codeFiles = (materials.codeFiles || []).filter(item => (item.path || item.name) !== path);
+  rebuildProgramCodeText(materials);
+  if (project.paper.factSheet.analyzedAt) bumpFactRevision('程序资料已修改');
+  $('code-file-summary').textContent = materials.codeFiles.length ? `已选 ${materials.codeFiles.length} 个文件，可继续追加` : '尚未选择，可分多次追加';
+  renderCodeFileList(materials.codeFiles);
+  persistProject();
+}
+
+function renderCodeFileList(codeFiles = []) {
   const target = $('code-file-list');
   if (!target) return;
-  const names = filenames.map(name => String(name || '')).filter(Boolean);
-  if (!names.length) { target.innerHTML = ''; return; }
-  const visible = names.slice(0, 100);
-  const extra = names.length - visible.length;
-  target.innerHTML = `<strong>已选文件</strong>${visible.map(name => `<span>${escapeHtml(name)}</span>`).join('')}${extra > 0 ? `<span>其余 ${extra} 个文件已读取</span>` : ''}`;
+  const records = codeFiles.map(item => typeof item === 'string' ? { name: item, path: item, size: 0 } : item).filter(item => item?.name || item?.path);
+  if (!records.length) { target.innerHTML = ''; return; }
+  target.innerHTML = `<strong>已选文件（仅这些文件会交给AI分析）</strong>${records.map(item => {
+    const path = String(item.path || item.name);
+    const size = Number(item.size) ? ` · ${Math.max(1, Math.round(Number(item.size) / 1024))} KB` : '';
+    return `<span class="selected-file-item"><span>${escapeHtml(path)}${escapeHtml(size)}</span><button class="selected-file-remove" type="button" data-remove-code-file="${escapeHtml(path)}" aria-label="移除${escapeHtml(path)}">移除</button></span>`;
+  }).join('')}`;
+}
+
+async function readSourceDocumentFile(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file || !project) return;
+  const extension = programFileExtension(file.name);
+  try {
+    let text = '';
+    if (extension === 'docx') {
+      if (!globalThis.mammoth?.extractRawText) throw new Error('DOCX读取组件尚未加载，请刷新页面后重试');
+      const result = await globalThis.mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+      text = result.value || '';
+    } else if (extension === 'txt' || extension === 'md') text = await file.text();
+    else throw new Error('请使用DOCX、TXT或MD文件；旧版DOC请先在WPS中另存为DOCX');
+    text = String(text || '').replace(/\u0000/g, '').trim();
+    if (!text) throw new Error('文件中没有读取到可分析的文字');
+    const materials = project.paper.materials;
+    materials.sourceDocumentFilename = file.name;
+    materials.sourceDocumentText = text.slice(0, 100000);
+    materials.sourceBackgroundText = '';
+    $('source-file-summary').textContent = `已读取：${file.name}（${materials.sourceDocumentText.length}字，分析时仅提取背景方向）`;
+    $('btn-clear-source-file').disabled = false;
+    resetHardwareAnalysis('任务书或开题报告已更新');
+    await persistProject({ immediate: true });
+    toast('背景资料已读取，分析器件时只提取课题背景和研究方向', 'success');
+  } catch (error) {
+    $('source-file-summary').textContent = '读取失败，请检查文件格式';
+    toast(error.message || '背景资料读取失败', 'error');
+  }
+}
+
+function clearSourceDocument() {
+  if (!project) return;
+  const materials = project.paper.materials;
+  materials.sourceDocumentFilename = '';
+  materials.sourceDocumentText = '';
+  materials.sourceBackgroundText = '';
+  $('source-file-summary').textContent = '支持 DOCX、TXT、MD；旧版DOC请先用WPS另存为DOCX';
+  $('btn-clear-source-file').disabled = true;
+  resetHardwareAnalysis('任务书或开题报告已清除');
+  persistProject();
+  toast('背景资料已清除', 'success');
 }
 
 function binaryString(bytes) {
@@ -1601,11 +1717,39 @@ function is51Controller(controller = '') {
   return /(?:STC|AT89|89C5|51\s*单片机)/i.test(String(controller));
 }
 
+function defaultDevelopmentTools(controller = '', codeFiles = []) {
+  const value = String(controller || '').toUpperCase();
+  const extensions = new Set((codeFiles || []).map(item => String(item?.extension || programFileExtension(item?.name || item)).toLowerCase()));
+  if (/STM32/.test(value)) return ['Keil 5', 'STM32CubeMX'];
+  if (is51Controller(value)) return ['Keil 5'];
+  if (/ARDUINO|ATMEGA328|ESP32/.test(value)) return ['Arduino IDE'];
+  if (/RP2040|RASPBERRY\s*PI\s*PICO/.test(value)) return extensions.has('py') ? ['Thonny'] : ['Arduino IDE'];
+  if (/GD32/.test(value)) return ['Keil 5'];
+  if (/CH32/.test(value)) return ['MounRiver Studio'];
+  if (/MSP430/.test(value)) return ['Code Composer Studio'];
+  if (/PIC\d|DSPIC/.test(value)) return ['MPLAB X IDE'];
+  if (/LPC|NXP|MK\d|MIMX/.test(value)) return ['MCUXpresso IDE'];
+  if (/RENESAS|RA\d|RX\d/.test(value)) return ['e² studio'];
+  if (/AVR|ATMEGA|ATTINY/.test(value)) return ['Microchip Studio'];
+  return [];
+}
+
+function mergeDevelopmentTools(existingText = '', tools = [], previousAutoTools = []) {
+  const previousLine = previousAutoTools.length ? `编译与配置软件：${previousAutoTools.join('、')}` : '';
+  const retainedLines = String(existingText || '').split('\n').map(item => item.trim()).filter(item => item && item !== previousLine);
+  const retained = retainedLines.join('\n');
+  const additions = unique(tools.map(item => String(item || '').trim()).filter(Boolean)).filter(item => !retained.toLowerCase().includes(item.toLowerCase()));
+  const automaticLine = additions.length ? `编译与配置软件：${additions.join('、')}` : '';
+  return { text: [retained, automaticLine].filter(Boolean).join('\n'), automaticTools: additions };
+}
+
 function inferController(title = '', devices = []) {
   const explicit = devices.find(item => /主控|单片机|STM32|STC|AT89|ESP32|Arduino/i.test(`${item.role || ''} ${item.model || ''}`))?.model;
   if (explicit) return explicit;
   const source = String(title || '');
   if (/ESP32/i.test(source)) return 'ESP32';
+  if (/Arduino\s*(?:UNO)?|ATmega328/i.test(source)) return 'Arduino UNO';
+  if (/RP2040|Raspberry\s*Pi\s*Pico/i.test(source)) return 'Raspberry Pi Pico (RP2040)';
   if (/AT89C?52|AT89/i.test(source)) return 'AT89C52';
   if (/51\s*单片机|STC/i.test(source)) return 'STC89C52RC';
   return 'STM32F103C8T6';
@@ -1639,13 +1783,23 @@ function fallbackMappings(controller, devices = []) {
   return mappings;
 }
 
+function controllerPinNotes(controller = '') {
+  const value = String(controller).toUpperCase();
+  if (is51Controller(value)) return ['51单片机P0口作通用I/O时需要外接10 kΩ上拉电阻，P3.0/P3.1优先保留给串口。'];
+  if (/STM32/.test(value)) return ['PA13和PA14默认保留给SWD下载调试接口，不自动分配给普通外设。'];
+  if (/ESP32/.test(value)) return ['ESP32的GPIO34、GPIO35、GPIO36和GPIO39仅作输入，GPIO6至GPIO11连接片上Flash，不用于普通外设。'];
+  if (/ARDUINO|ATMEGA328/.test(value)) return ['Arduino UNO的D0/D1用于硬件串口，A4/A5用于I2C总线，D11至D13用于SPI总线。'];
+  if (/RP2040|RASPBERRY\s*PI\s*PICO/.test(value)) return ['RP2040的GP26、GP27和GP28可用于ADC输入，数字外设应根据复用功能选择对应GP引脚。'];
+  return [];
+}
+
 function hardwareDefaults(controller, powerNotes = [], fixedFacts = []) {
   const defaults = is51Controller(controller)
     ? ['51单片机采用独立最小系统电路，系统各模块必须共地。']
     : [`${controller}按最小系统开发板使用，开发板接收5V DC输入并通过板载稳压获得3.3V，5V与3.3V外设共地。`];
   return {
     powerNotes: unique([...powerNotes.map(sanitizeTechnicalText), ...defaults]),
-    fixedFacts: unique([...fixedFacts.map(sanitizeTechnicalText), '凡电路需要上拉电阻时统一使用10 kΩ。', 'TFT彩屏统一使用1.8寸规格，不使用2.8寸TFT。']),
+    fixedFacts: unique([...fixedFacts.map(sanitizeTechnicalText), ...controllerPinNotes(controller), '凡电路需要上拉电阻时统一使用10 kΩ。', 'TFT彩屏统一使用1.8寸规格，不使用2.8寸TFT。']),
   };
 }
 
@@ -1675,8 +1829,11 @@ async function analyzeHardware(event) {
       userDevices: lines(materials.devicesText),
       userFunctions: lines(materials.functionsText),
       userConnections: materials.connectionsText || '用户无需填写，请根据器件通信方式和主控可用资源提出待确认的引脚建议',
-      sourceCodeOrLogic: String(materials.codeText || '未提供').slice(0, 30000),
+      sourceCodeOrLogic: Prompts.buildSourceCodeExcerpt(materials.codeFiles, materials.codeText, 30000),
       otherNotes: materials.sourceNotes || '未提供',
+      supplementalDocumentFilename: materials.sourceDocumentFilename || '',
+      supplementalDocumentText: String(materials.sourceDocumentText || '').slice(0, 80000),
+      selectedProgramFiles: (materials.codeFiles || []).map(item => ({ name: item.name, path: item.path, extension: item.extension, size: item.size })),
       schematicFilename: materials.schematicFilename || '',
       schematicText: String(materials.schematicText || '').slice(0, 100000),
     }), { reasoning: false, maxTokens: 7000, jsonMode: true, signal: requestController.signal, requestLabel: '器件与引脚分析', timeoutMs: 100000 });
@@ -1705,10 +1862,20 @@ async function analyzeHardware(event) {
       ? userFunctionLines.map((name, index) => ({ id: `function-user-${index + 1}`, name, deviceModels: [] }))
       : aiFunctions;
     const controller = sanitizeTechnicalText(String(result.controller || inferController(project.title, devices)).trim());
+    const aiDevelopmentTools = Array.isArray(result.developmentTools)
+      ? result.developmentTools
+      : String(result.developmentTools || '').split(/[、，,;；\n]/);
+    const requiredDevelopmentTools = defaultDevelopmentTools(controller, materials.codeFiles);
+    const developmentTools = requiredDevelopmentTools.length ? requiredDevelopmentTools : unique(aiDevelopmentTools);
+    const mergedTools = mergeDevelopmentTools(materials.toolsText, developmentTools, materials.autoDevelopmentTools || []);
+    materials.toolsText = mergedTools.text;
+    materials.autoDevelopmentTools = mergedTools.automaticTools;
+    const backgroundNotes = sanitizeTechnicalText(String(result.backgroundNotes || '').trim());
+    if (materials.sourceDocumentText) materials.sourceBackgroundText = backgroundNotes;
     if (!devices.some(item => item.model.toLowerCase() === controller.toLowerCase())) devices.unshift({ id: makeId('device'), model: controller, role: is51Controller(controller) ? '主控单片机' : '主控最小系统开发板', interfaceType: 'GPIO' });
     const previousMappings = new Map((project.paper.factSheet.mappings || []).filter(item => item.source === 'user').map(item => [mappingKey(item), item]));
     const schematicPinText = String(materials.schematicText || '').toUpperCase();
-    const schematicPins = new Set(schematicPinText.match(/\b(?:P[A-G]\d{1,2}|GPIO\d{1,2}|P\d\.\d)\b/g) || []);
+    const schematicPins = new Set(schematicPinText.match(/\b(?:P[A-G]\d{1,2}|GPIO\d{1,2}|P\d\.\d|GP\d{1,2}|D\d{1,2}|A[0-5])\b/g) || []);
     let mappings = (Array.isArray(result.mappings) ? result.mappings : []).map((item, index) => {
       const device = String(item.device || item.deviceModel || '').trim();
       const interfaceType = String(item.interfaceType || item.interface || 'GPIO').trim();
@@ -1759,7 +1926,7 @@ async function analyzeHardware(event) {
     renderPaper();
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }));
     toast('器件和引脚建议已整理，请核对红色项目', 'success');
-    if (inlineStatus) { inlineStatus.textContent = '分析完成，已生成器件清单和引脚建议'; inlineStatus.className = 'inline-task-status is-success'; }
+    if (inlineStatus) { inlineStatus.textContent = `分析完成，已生成器件、引脚${developmentTools.length ? '并补充开发软件' : ''}`; inlineStatus.className = 'inline-task-status is-success'; }
   } catch (error) {
     toast(error.message || '器件与引脚分析失败', 'error');
     if (inlineStatus) { inlineStatus.textContent = `分析失败：${error.message || '请检查API后重试'}`; inlineStatus.className = 'inline-task-status is-error'; }
@@ -3635,7 +3802,7 @@ function bindEvents() {
   $('paper-outline-file').addEventListener('change', readOutlineReferenceFile);
   $('btn-analyze-scheme-source').addEventListener('click', analyzeImportedScheme);
   $('paper-materials-form').addEventListener('input', event => {
-    if (['paper-code-folder', 'paper-scheme-source', 'paper-scheme-file', 'paper-outline-file', 'paper-scheme-text'].includes(event.target.id)) return;
+    if (['paper-code-folder', 'paper-source-file', 'paper-scheme-source', 'paper-scheme-file', 'paper-outline-file', 'paper-scheme-text'].includes(event.target.id)) return;
     capturePaperMaterials({ invalidate: true });
     if (['paper-references', 'paper-use-references', 'paper-reference-count'].includes(event.target.id)) renderReferenceTool();
   });
@@ -3661,7 +3828,13 @@ function bindEvents() {
   });
   $('btn-standalone-clear-results').addEventListener('click', clearStandaloneReferenceResults);
   $('btn-copy-standalone-references').addEventListener('click', copyStandaloneReferences);
-  $('paper-code-folder').addEventListener('change', readCodeFolder);
+  $('paper-code-folder').addEventListener('change', readCodeFiles);
+  $('code-file-list').addEventListener('click', event => {
+    const button = event.target.closest('[data-remove-code-file]');
+    if (button) removeCodeFile(button.dataset.removeCodeFile);
+  });
+  $('paper-source-file').addEventListener('change', readSourceDocumentFile);
+  $('btn-clear-source-file').addEventListener('click', clearSourceDocument);
   $('paper-schematic-file').addEventListener('change', readSchematicFile);
   $('btn-reanalyze-pins').addEventListener('click', analyzeHardware);
   $('pin-mapping-body').addEventListener('change', event => { if (event.target.matches('[data-mapping-pin]')) updateMappingPin(event.target); });

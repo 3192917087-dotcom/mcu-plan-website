@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f6f8f7">
-  <title>单片机方案与论文工作台 V2</title>
+  <title>雄鸡工作室｜单片机方案与论文</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="styles.css?v=20260826-11">
+  <link rel="stylesheet" href="styles.css?v=20260830-1">
 </head>
 <body>
   <a class="skip-link" href="#workspace-main">跳到主要内容</a>
@@ -16,7 +16,7 @@
         <span class="brand-mark" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M7 3h8l4 4v14H7z"/><path d="M15 3v5h5M10 12h6M10 16h6"/></svg>
         </span>
-        <span><strong>研作台</strong><small>单片机方案与论文</small></span>
+        <span><strong>雄鸡工作室</strong><small>单片机方案与论文</small></span>
       </button>
 
       <nav class="main-nav" aria-label="主要功能">
@@ -232,10 +232,16 @@
                   <summary><span>补充资料</span><small>程序、参考文献、测试、照片和学校要求</small><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg></summary>
                   <div class="advanced-content field-grid">
                     <div class="field field-wide">
-                      <span>程序文件夹 <small>读取其中的 .c 和 .h 文件</small></span>
-                      <label class="file-drop" for="paper-code-folder"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/><path d="M12 10v6M9 13h6"/></svg><strong>选择程序文件夹</strong><small id="code-file-summary">尚未选择</small></label>
-                      <input class="sr-only" id="paper-code-folder" type="file" webkitdirectory multiple accept=".c,.h,text/plain">
+                      <span>程序文件 <small>可在文件夹中按需多选，支持常见单片机、Arduino、ESP32及汇编工程</small></span>
+                      <label class="file-drop" for="paper-code-folder"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/><path d="M12 10v6M9 13h6"/></svg><strong>选择需要分析的程序文件</strong><small id="code-file-summary">尚未选择，可分多次追加</small></label>
+                      <input class="sr-only" id="paper-code-folder" type="file" multiple accept=".c,.h,.cc,.cpp,.cxx,.hh,.hpp,.hxx,.ino,.pde,.s,.asm,.a51,.src,.inc,.py,.ld,.lds,.ioc,.cfg,.conf,.ini,.json,.yaml,.yml,.toml,.dts,.overlay,.kconfig,.mk,.cmake,.txt,.uvprojx,.uvoptx,.ewp,text/plain">
                       <div id="code-file-list" class="selected-file-list" aria-live="polite"></div>
+                    </div>
+                    <div class="field field-wide">
+                      <span>任务书或开题报告 <small>可选，仅提取课题背景、研究方向和设计约束，不把其中功能覆盖方案</small></span>
+                      <label class="file-drop file-drop-compact" for="paper-source-file"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v5h5M9 12h7M9 16h7"/></svg><strong>导入背景资料</strong><small id="source-file-summary">支持 DOCX、TXT、MD；旧版DOC请先用WPS另存为DOCX</small></label>
+                      <input class="sr-only" id="paper-source-file" type="file" accept=".docx,.txt,.md,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+                      <div class="compact-file-actions"><button class="button button-secondary" id="btn-clear-source-file" type="button" disabled>清除背景资料</button></div>
                     </div>
                     <div class="field field-wide">
                       <span>PDF原理图 <small>先提取可读文字，再由AI整理器件和引脚；扫描图需先转为可复制文字</small></span>
@@ -272,9 +278,9 @@
                       </section>
                     </div>
                     <label class="field" for="paper-test-info"><span>测试记录</span><textarea id="paper-test-info" rows="5" placeholder="已有测试数据、操作步骤或测试条件"></textarea></label>
-                    <label class="field" for="paper-tools"><span>调试工具</span><textarea id="paper-tools" rows="5" placeholder="例如：Keil、示波器、万用表、串口助手"></textarea></label>
+                    <label class="field" for="paper-tools"><span>调试工具 <small>分析器件后自动补充对应编译与配置软件</small></span><textarea id="paper-tools" rows="5" placeholder="例如：Keil 5、STM32CubeMX、示波器、万用表、串口助手"></textarea></label>
                     <label class="field" for="paper-photo-notes"><span>实物与照片说明</span><textarea id="paper-photo-notes" rows="4" placeholder="已有实物图、需要预留的展示图"></textarea></label>
-                    <label class="field" for="paper-source-notes"><span>其他说明</span><textarea id="paper-source-notes" rows="4" placeholder="任务书、学校要求或实际制作情况"></textarea></label>
+                    <label class="field" for="paper-source-notes"><span>其他说明</span><textarea id="paper-source-notes" rows="4" placeholder="可手动补充课题背景、研究方向、学校要求或实际制作情况"></textarea></label>
                   </div>
                 </details>
 
@@ -368,7 +374,7 @@
   <script src="vendor/pdf.min.js"></script>
   <script>if (globalThis.pdfjsLib) globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';</script>
   <script src="vendor/docx.umd.js"></script>
-  <script src="docx-export.js?v=20260826-11"></script>
-  <script type="module" src="app.js?v=20260826-11"></script>
+  <script src="docx-export.js?v=20260830-1"></script>
+  <script type="module" src="app.js?v=20260830-1"></script>
 </body>
 </html>

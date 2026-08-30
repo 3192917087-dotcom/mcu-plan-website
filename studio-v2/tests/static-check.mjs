@@ -9,6 +9,7 @@ const storage = await readFile(new URL('../storage.js', import.meta.url), 'utf8'
 const referenceLibrary = await readFile(new URL('../reference-library.js', import.meta.url), 'utf8');
 const pdfWorker = await readFile(new URL('../vendor/pdf.worker.min.js', import.meta.url), 'utf8');
 const mockServer = await readFile(new URL('./mock-server.mjs', import.meta.url), 'utf8');
+const pinData = await readFile(new URL('../pin-data.js', import.meta.url), 'utf8');
 const referencedIds = [...app.matchAll(/\$\('([^']+)'\)/g)].map(match => match[1]);
 const htmlIds = [...html.matchAll(/id="([^"]+)"/g)].map(match => match[1]);
 const dynamicIds = new Set(['ack-ai-conflicts']);
@@ -27,8 +28,16 @@ const assertions = [
   ['默认硬件规则完整', prompts.includes('最小系统开发板') && prompts.includes('10 kΩ') && prompts.includes('1.8寸')],
   ['9898中转站专用预设', app.includes('newapi9898') && app.includes('gpt-5.5') && html.includes('9898.ai 中转站（GPT）') && app.includes('https://www.9898.ai/v1')],
   ['PDF原理图读取入口', html.includes('id="paper-schematic-file"') && app.includes('extractPdfTextFallback') && prompts.includes('schematicText')],
-  ['STM32F103完整I2C复用脚', /i2c_scl:\s*\['PB6','PB8','PB10'\]/.test(await readFile(new URL('../pin-data.js', import.meta.url), 'utf8')) && /i2c_sda:\s*\['PB7','PB9','PB11'\]/.test(await readFile(new URL('../pin-data.js', import.meta.url), 'utf8'))],
+  ['STM32F103完整I2C复用脚', /i2c_scl:\s*\['PB6','PB8','PB10'\]/.test(pinData) && /i2c_sda:\s*\['PB7','PB9','PB11'\]/.test(pinData)],
   ['程序文件显示具体名称', html.includes('id="code-file-list"') && app.includes('renderCodeFileList')],
+  ['程序文件按需多选并支持多平台类型', !html.includes('webkitdirectory') && html.includes('.ino,.pde,.s,.asm,.a51') && app.includes('PROGRAM_FILE_EXTENSIONS') && app.includes('data-remove-code-file') && app.includes('MAX_PROGRAM_TOTAL_CHARS')],
+  ['多程序文件按文件均衡送入AI', prompts.includes('function buildSourceCodeExcerpt') && prompts.includes('Math.floor(limit / records.length)') && app.includes('Prompts.buildSourceCodeExcerpt(materials.codeFiles')],
+  ['任务书和开题报告只提取背景方向', html.includes('id="paper-source-file"') && html.includes('id="btn-clear-source-file"') && app.includes('readSourceDocumentFile') && app.includes('clearSourceDocument') && app.includes('sourceDocumentText') && prompts.includes('不得从该文档提取、补充或覆盖器件清单、功能要求、引脚和测试结果') && prompts.includes('backgroundNotes')],
+  ['主控开发软件自动匹配', app.includes("if (/STM32/.test(value)) return ['Keil 5', 'STM32CubeMX']") && app.includes("if (is51Controller(value)) return ['Keil 5']") && app.includes("/ARDUINO|ATMEGA328|ESP32/.test(value)") && prompts.includes('developmentTools')],
+  ['自动开发软件可随主控替换', app.includes('autoDevelopmentTools') && app.includes('previousAutoTools') && app.includes('materials.autoDevelopmentTools = mergedTools.automaticTools')],
+  ['多主控引脚库按具体系列区分', pinData.includes('stm32f407zg') && pinData.includes('stm32f407ve') && pinData.includes('rp2040') && pinData.includes("'D0','D1','D2'") && pinData.includes("'GPIO0','GPIO1','GPIO2','GPIO3'") && pinData.includes('未识别到具体STM32封装时不套用其他型号的GPIO')],
+  ['主控特有限制写入确认事实', app.includes('function controllerPinNotes') && app.includes('P0口作通用I/O') && app.includes('GPIO34、GPIO35、GPIO36和GPIO39仅作输入') && app.includes('A4/A5用于I2C总线')],
+  ['品牌名称更新为雄鸡工作室', html.includes('<strong>雄鸡工作室</strong>') && app.includes("APP_TITLE = '雄鸡工作室｜单片机方案与论文'")],
   ['PDF worker已内置', html.includes('vendor/pdf.worker.min.js') && pdfWorker.includes('WorkerMessageHandler')],
   ['真实引脚优先保留', app.includes('allPins(controller)') && app.includes('真实GPIO优先保留')],
   ['原理图引脚不被误判', app.includes("source: schematicPins.has(proposed) ? 'schematic' : 'ai'") && app.includes('原理图识别')],

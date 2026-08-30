@@ -602,6 +602,10 @@ svg {
 .selected-file-list:empty { display: none; }
 .selected-file-list span { overflow-wrap: anywhere; }
 .selected-file-list strong { color: var(--text); font-weight: 650; }
+.selected-file-item { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 7px; border-radius: 7px; background: white; }
+.selected-file-item span { min-width: 0; flex: 1; }
+.selected-file-remove { min-width: 44px; min-height: 44px; display: inline-grid; place-items: center; flex: 0 0 auto; border: 0; border-radius: 7px; color: var(--muted); background: transparent; font-size: 12px; font-weight: 700; cursor: pointer; }
+.selected-file-remove:hover, .selected-file-remove:focus-visible { color: var(--danger); background: var(--danger-soft); }
 .reference-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .reference-actions > span { color: var(--muted); font-size: 12px; }
 .reference-count-field { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
