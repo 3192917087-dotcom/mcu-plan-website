@@ -56,6 +56,16 @@ const FONT_LATIN = { ascii: LATIN_FONT, hAnsi: LATIN_FONT, eastAsia: LATIN_FONT,
 const FONT_MONO = { ascii: 'Consolas', hAnsi: 'Consolas', eastAsia: '等线', cs: 'Consolas' };
 let ACTIVE_REFERENCE_BOOKMARKS = null;
 
+// WPS生成的本科论文模板使用下面这组内置样式身份。仅把样式显示名称写成
+// “正文/标题 1”仍可能被WPS当成另一套样式，因此导出时统一改为真实内置ID。
+const WPS_BUILTIN_PARAGRAPH_STYLES = [
+  { from: 'Normal', to: '1', name: 'Normal' },
+  { from: 'Heading1', to: '2', name: 'heading 1' },
+  { from: 'Heading2', to: '3', name: 'heading 2' },
+  { from: 'Heading3', to: '4', name: 'heading 3' },
+  { from: 'Caption', to: '5', name: 'caption' },
+];
+
 function cleanText(value, maxLength = 200000) {
   return String(value || '')
     .replace(/\u0000/g, '')
@@ -226,14 +236,14 @@ function inlineRuns(text, options = {}) {
 
 function headingParagraph(text, level, { pageBreakBefore = false } = {}) {
   return new Paragraph({
-    heading: level === 1 ? HeadingLevel.HEADING_1 : level === 2 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3,
+    style: level === 1 ? 'Heading1' : level === 2 ? 'Heading2' : 'Heading3',
     pageBreakBefore,
     children: inlineRuns(text),
   });
 }
 
 function bodyParagraph(text, options = {}) {
-  const style = options.style || (options.noIndent ? 'ThesisBodyNoIndent' : options.font === FONT_LATIN ? 'ThesisBodyEnglish' : 'Normal');
+  const style = options.style || 'Normal';
   const paragraph = {
     style,
     children: inlineRuns(text, { bold: options.bold, italics: options.italics }),
@@ -267,6 +277,13 @@ function captionParagraph(text) {
   return new Paragraph({
     style: 'Caption',
     children: [bodyRun(text)],
+  });
+}
+
+function formulaParagraph(text) {
+  return new Paragraph({
+    style: 'ThesisFormula',
+    children: inlineRuns(text),
   });
 }
 
@@ -451,6 +468,11 @@ function contentBlocks(content) {
       blocks.push(annotationParagraph(line));
       continue;
     }
+    if (/[=＝]/.test(line) && /[（(]\s*\d+\s*[-－—.]\s*\d+\s*[）)]\s*$/.test(line)) {
+      flushParagraph();
+      blocks.push(formulaParagraph(line));
+      continue;
+    }
     if (/^(?:图|表)\s*\d+(?:[-.]\d+)?\s|^【(?:图|表)/.test(line)) {
       flushParagraph();
       blocks.push(captionParagraph(line));
@@ -566,14 +588,6 @@ function documentStyles() {
         paragraph: { alignment: AlignmentType.JUSTIFIED, indent: { firstLine: BODY_FIRST_LINE }, spacing: { before: 0, after: 0, line: BODY_LINE, lineRule: LineRuleType.AUTO }, widowControl: true },
       },
       {
-        id: 'ThesisBodyNoIndent',
-        name: '正文无缩进',
-        basedOn: 'Normal',
-        next: 'Normal',
-        quickFormat: true,
-        paragraph: { alignment: AlignmentType.JUSTIFIED, indent: { firstLine: 0 }, spacing: { before: 0, after: 0, line: BODY_LINE, lineRule: LineRuleType.AUTO }, widowControl: true },
-      },
-      {
         id: 'ThesisCoverType',
         name: '论文封面类型',
         basedOn: 'Normal',
@@ -601,14 +615,6 @@ function documentStyles() {
         paragraph: { alignment: AlignmentType.CENTER, spacing: { before: 360, after: 0, line: 360, lineRule: LineRuleType.AUTO }, indent: { firstLine: 0 } },
       },
       {
-        id: 'ThesisBodyEnglish',
-        name: '英文正文',
-        basedOn: 'Normal',
-        next: 'ThesisBodyEnglish',
-        quickFormat: true,
-        run: { font: FONT_LATIN, size: 24, color: '000000', language: { value: 'en-US' } },
-      },
-      {
         id: 'ThesisFrontHeading',
         name: '论文前置标题',
         basedOn: 'Normal',
@@ -621,7 +627,7 @@ function documentStyles() {
         id: 'ThesisFrontHeadingEnglish',
         name: '论文英文前置标题',
         basedOn: 'ThesisFrontHeading',
-        next: 'ThesisBodyEnglish',
+        next: 'Normal',
         quickFormat: true,
         run: { font: FONT_LATIN, size: 32, bold: true, color: '000000', language: { value: 'en-US' } },
       },
@@ -637,7 +643,7 @@ function documentStyles() {
       {
         id: 'ThesisKeywords',
         name: '论文关键词',
-        basedOn: 'ThesisBodyNoIndent',
+        basedOn: 'Normal',
         next: 'Normal',
         quickFormat: true,
         paragraph: { alignment: AlignmentType.LEFT, indent: { firstLine: 0 }, spacing: { before: 240, after: 0, line: BODY_LINE, lineRule: LineRuleType.AUTO } },
@@ -653,7 +659,7 @@ function documentStyles() {
       {
         id: 'Caption',
         name: '题注',
-        basedOn: 'ThesisBodyNoIndent',
+        basedOn: 'Normal',
         next: 'Normal',
         quickFormat: true,
         run: { font: FONT_BODY, size: 21, color: '000000' },
@@ -662,7 +668,7 @@ function documentStyles() {
       {
         id: 'ThesisFigurePlaceholder',
         name: '论文插图提示',
-        basedOn: 'ThesisBodyNoIndent',
+        basedOn: 'Normal',
         next: 'Normal',
         quickFormat: true,
         run: { font: FONT_BODY, size: 21, bold: true, color: '2F6757' },
@@ -671,7 +677,7 @@ function documentStyles() {
       {
         id: 'ThesisMermaidCode',
         name: 'Mermaid流程图代码',
-        basedOn: 'ThesisBodyNoIndent',
+        basedOn: 'Normal',
         next: 'Normal',
         quickFormat: true,
         run: { font: FONT_MONO, size: 19, color: '333333' },
@@ -680,7 +686,7 @@ function documentStyles() {
       {
         id: 'ThesisTableText',
         name: '论文表格文字',
-        basedOn: 'ThesisBodyNoIndent',
+        basedOn: 'Normal',
         next: 'ThesisTableText',
         quickFormat: true,
         run: { font: FONT_BODY, size: 21, color: '000000' },
@@ -696,9 +702,18 @@ function documentStyles() {
         paragraph: { alignment: AlignmentType.CENTER, indent: { firstLine: 0 }, spacing: { before: 0, after: 0, line: 300, lineRule: LineRuleType.AUTO } },
       },
       {
+        id: 'ThesisFormula',
+        name: '论文公式',
+        basedOn: 'Normal',
+        next: 'Normal',
+        quickFormat: true,
+        run: { font: FONT_BODY, size: 24, color: '000000' },
+        paragraph: { alignment: AlignmentType.CENTER, indent: { firstLine: 0 }, spacing: { before: 120, after: 120, line: BODY_LINE, lineRule: LineRuleType.AUTO }, keepLines: true },
+      },
+      {
         id: 'ThesisReference',
         name: '论文参考文献',
-        basedOn: 'ThesisBodyNoIndent',
+        basedOn: 'Normal',
         next: 'ThesisReference',
         quickFormat: true,
         paragraph: { alignment: AlignmentType.JUSTIFIED, indent: { left: BODY_FIRST_LINE, hanging: BODY_FIRST_LINE }, spacing: { before: 0, after: 0, line: BODY_LINE, lineRule: LineRuleType.AUTO } },
@@ -706,7 +721,7 @@ function documentStyles() {
       {
         id: 'ThesisList',
         name: '论文列表',
-        basedOn: 'ThesisBodyNoIndent',
+        basedOn: 'Normal',
         next: 'ThesisList',
         quickFormat: true,
         paragraph: { alignment: AlignmentType.JUSTIFIED, indent: { firstLine: 0 }, spacing: { before: 0, after: 0, line: BODY_LINE, lineRule: LineRuleType.AUTO } },
@@ -714,7 +729,7 @@ function documentStyles() {
       {
         id: 'ThesisPageNumber',
         name: '论文页码',
-        basedOn: 'ThesisBodyNoIndent',
+        basedOn: 'Normal',
         next: 'Normal',
         run: { font: FONT_LATIN, size: 18, color: '000000' },
         paragraph: { alignment: AlignmentType.CENTER, indent: { firstLine: 0 }, spacing: { before: 0, after: 0 } },
@@ -740,6 +755,44 @@ function numberingConfig() {
       { reference: 'thesis-decimal', levels: [{ level: 0, format: LevelFormat.DECIMAL, text: '%1.', alignment: AlignmentType.LEFT, style: { paragraph } }] },
     ],
   };
+}
+
+function replaceStyleReference(xml, from, to) {
+  const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let output = xml.replace(new RegExp(`w:styleId="${escaped}"`, 'g'), `w:styleId="${to}"`);
+  ['pStyle', 'basedOn', 'next', 'link'].forEach(tag => {
+    output = output.replace(new RegExp(`(<w:${tag}\\b[^>]*w:val=")${escaped}("[^>]*\\/?>)`, 'g'), `$1${to}$2`);
+  });
+  return output;
+}
+
+function canonicalizeWpsStyleDefinitions(stylesXml) {
+  let output = stylesXml;
+  WPS_BUILTIN_PARAGRAPH_STYLES.forEach(({ from, to, name }) => {
+    output = replaceStyleReference(output, from, to);
+    const styleBlock = new RegExp(`(<w:style\\b[^>]*w:styleId="${to}"[^>]*>[\\s\\S]*?<w:name w:val=")[^"]*("\\/>)`);
+    output = output.replace(styleBlock, `$1${name}$2`);
+  });
+  return output;
+}
+
+async function packWpsCompatibleDocx(doc) {
+  if (!Packer.compiler?.compile) throw new Error('DOCX样式转换组件不可用');
+  const zip = Packer.compiler.compile(doc);
+  const xmlPaths = Object.keys(zip.files).filter(path => path.startsWith('word/') && path.endsWith('.xml'));
+  await Promise.all(xmlPaths.map(async path => {
+    const file = zip.file(path);
+    if (!file) return;
+    let xml = await file.async('string');
+    if (path === 'word/styles.xml') xml = canonicalizeWpsStyleDefinitions(xml);
+    else WPS_BUILTIN_PARAGRAPH_STYLES.forEach(({ from, to }) => { xml = replaceStyleReference(xml, from, to); });
+    zip.file(path, xml);
+  }));
+  return zip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    compression: 'DEFLATE',
+  });
 }
 
 async function buildPaperDocx(input) {
@@ -825,7 +878,7 @@ async function buildPaperDocx(input) {
     ],
   });
   try {
-    return await Packer.toBlob(doc);
+    return await packWpsCompatibleDocx(doc);
   } finally {
     ACTIVE_REFERENCE_BOOKMARKS = null;
   }
@@ -852,7 +905,7 @@ async function buildSchemeDocx(input = {}) {
     numbering: numberingConfig(),
     sections: [{ properties: { page: pageSetup() }, children }],
   });
-  return Packer.toBlob(doc);
+  return packWpsCompatibleDocx(doc);
 }
 
 globalThis.PaperDocx = {
@@ -864,7 +917,7 @@ globalThis.PaperDocx = {
     page: 'A4 portrait',
     marginsMm: { top: 25, bottom: 25, left: 30, right: 25, header: 15, footer: 17.5 },
     body: '小四宋体/Times New Roman，1.5倍行距，首行缩进2字符',
-    styles: ['Normal（正文）', 'Heading1（标题 1）', 'Heading2（标题 2）', 'Heading3（标题 3）', 'Caption（题注）', 'ThesisTableText', 'ThesisReference', 'ThesisMermaidCode'],
+    styles: ['WPS内置正文（ID 1）', 'WPS内置标题1/2/3（ID 2/3/4）', 'WPS内置题注（ID 5）', 'ThesisTableText', 'ThesisFormula', 'ThesisReference', 'ThesisMermaidCode'],
     tables: '标准三线表（顶线、表头线、底线）',
   },
 };

@@ -10,6 +10,7 @@ const referenceLibrary = await readFile(new URL('../reference-library.js', impor
 const pdfWorker = await readFile(new URL('../vendor/pdf.worker.min.js', import.meta.url), 'utf8');
 const mockServer = await readFile(new URL('./mock-server.mjs', import.meta.url), 'utf8');
 const pinData = await readFile(new URL('../pin-data.js', import.meta.url), 'utf8');
+const paperQuality = await readFile(new URL('../paper-quality.js', import.meta.url), 'utf8');
 const referencedIds = [...app.matchAll(/\$\('([^']+)'\)/g)].map(match => match[1]);
 const htmlIds = [...html.matchAll(/id="([^"]+)"/g)].map(match => match[1]);
 const dynamicIds = new Set(['ack-ai-conflicts']);
@@ -27,7 +28,7 @@ const assertions = [
   ['第五章展示图按结果场景自适应', prompts.includes('groupResultScenes') && prompts.includes('同一器件、同一屏幕页面或同一动作状态不得反复安排图片') && app.includes('应恰好归入一个可观察展示场景') && !app.includes('功能展示图超过3张')],
   ['目录按课题采用轻微结构变化', prompts.includes('OUTLINE_VARIANTS') && prompts.includes('stableOutlineVariant') && prompts.includes('不要机械复制同一套默认目录') && prompts.includes('outlineVariationReference')],
   ['图表之间要求实质正文', prompts.includes('任意两项视觉内容之间') && prompts.includes('图与图、图与表、表与图、表与表均不得连续出现') && app.includes('consecutiveVisualIssues')],
-  ['插图占位与正文区分', prompts.includes('【非正文·插图位置：图名】') && docx.includes("name: '论文插图提示'")],
+  ['插图占位与正文区分', prompts.includes('【非正文·插图位置：图x-x 图名】') && docx.includes("name: '论文插图提示'")],
   ['引脚表不含信号方向列', prompts.includes('外设信号、主控引脚、连接说明') && prompts.includes('禁止“信号方向”列')],
   ['默认硬件规则完整', prompts.includes('最小系统开发板') && prompts.includes('10 kΩ') && prompts.includes('1.8寸')],
   ['9898中转站专用预设', app.includes('newapi9898') && app.includes('gpt-5.5') && html.includes('9898.ai 中转站（GPT）') && app.includes('https://www.9898.ai/v1')],
@@ -56,8 +57,9 @@ const assertions = [
   ['独立文献题目可清空并持久化', app.includes("standalone-reference-title', 'standalone-reference-notes'") && app.includes('standaloneReferenceState.title = event.target.value')],
   ['重复型号只建立一套器件计划', app.includes('plannedDeviceKeys') && app.includes('plannedDevices.forEach') && prompts.includes('seenDeviceModels')],
   ['励志语去除今日并偏向逆风名句', html.includes('长风破浪会有时') && !html.includes('今日</span>') && prompts.includes('逆风翻盘风格')],
-  ['正文样式可由WPS统一修改', docx.includes("id: 'Normal'") && docx.includes("name: '正文'") && docx.includes('正文的字号、缩进、行距和对齐完全由段落样式控制') && !/function bodyParagraph[\s\S]{0,700}spacing:\s*\{/.test(docx)],
-  ['标题题注及表格均绑定可修改样式', docx.includes("name: '标题 1'") && docx.includes("name: '标题 2'") && docx.includes("name: '标题 3'") && docx.includes("id: 'Caption'") && docx.includes("name: '题注'") && docx.includes("style: 'Caption'") && docx.includes("style: rowIndex === 0 ? 'ThesisTableHeader' : 'ThesisTableText'")],
+  ['正文只绑定WPS内置正文样式', docx.includes("options.style || 'Normal'") && docx.includes('正文的字号、缩进、行距和对齐完全由段落样式控制') && docx.includes("{ from: 'Normal', to: '1', name: 'Normal' }") && docx.includes('packWpsCompatibleDocx') && !docx.includes('ThesisBodyNoIndent') && !docx.includes('ThesisBodyEnglish') && !/function bodyParagraph[\s\S]{0,700}spacing:\s*\{/.test(docx)],
+  ['标题题注及表格均绑定WPS真实内置样式', docx.includes("{ from: 'Heading1', to: '2', name: 'heading 1' }") && docx.includes("{ from: 'Heading2', to: '3', name: 'heading 2' }") && docx.includes("{ from: 'Heading3', to: '4', name: 'heading 3' }") && docx.includes("{ from: 'Caption', to: '5', name: 'caption' }") && docx.includes("style: level === 1 ? 'Heading1' : level === 2 ? 'Heading2' : 'Heading3'") && docx.includes("style: 'Caption'") && docx.includes("style: rowIndex === 0 ? 'ThesisTableHeader' : 'ThesisTableText'")],
+  ['最终检查只显示当前遗留问题', app.includes('normalized.paper.quality.issues = mergeFinalQualityIssues') && app.includes('论文最终检查通过') && app.includes('最终仍有') && paperQuality.includes('isResolvedQualityConclusion') && prompts.includes('如果没有遗留问题，必须返回空数组')],
   ['正文长段生成与导出均受控', prompts.includes('单段不得超过380个中文字符') && prompts.includes('段落之间使用一个空行分隔') && app.includes('function longProseParagraphIssues') && app.includes('paragraph-length-') && docx.includes('function splitLongBodyParagraph')],
   ['文献库完整导入551条', referenceLibrary.includes('count:551') && (referenceLibrary.match(/"id":"lib-/g) || []).length === 551],
   ['独立文献工具入口完整', ['view-tools', 'standalone-reference-form', 'standalone-reference-title', 'standalone-reference-count', 'standalone-reference-list', 'btn-copy-standalone-references'].every(id => html.includes(`id="${id}"`)) && app.includes("currentRoute === 'tools'")],
@@ -78,8 +80,10 @@ const assertions = [
   ['推荐请求总会恢复按钮状态', /async function recommendReferences[\s\S]+?finally\s*\{[\s\S]+?button\.disabled = false/.test(app)],
   ['第三章不再生成重复硬件框架图', !prompts.includes("makeArtifact('hardware-block'") && app.includes('第三章不得重复生成系统硬件组成图')],
   ['引脚表按器件拆分', prompts.includes('deviceMappings') && prompts.includes('引脚连接关系表') && prompts.includes('不与其他器件合并')],
-  ['每张图表固定编号且只引用一次', app.includes('FIGURE_ARTIFACT_TYPES') && app.includes('figureNumber') && app.includes('artifactFigureReferenceIssues') && prompts.includes('每张图和每张表都已给出编号') && prompts.includes('如表x-x所示')],
-  ['全文图表引用台账校验', app.includes('function artifactCitationLedgerIssues') && app.includes('visual-missing-') && app.includes('visual-unknown-') && app.includes('artifactCitationLedgerIssues().forEach')],
+  ['每张图表公式固定编号且只引用一次', app.includes('FIGURE_ARTIFACT_TYPES') && app.includes('figureNumber') && app.includes('formulaNumber') && prompts.includes('如表x-x所示') && prompts.includes('如式（x-x）所示') && paperQuality.includes('artifact-raw-reference-count-')],
+  ['全文图表公式台账校验', app.includes('function artifactCitationLedgerIssues') && app.includes('artifactCitationLedgerIssues().forEach') && paperQuality.includes('validateArtifactLedger') && paperQuality.includes('artifact-figure-caption-') && paperQuality.includes('artifact-table-caption-') && paperQuality.includes('artifact-formula-display-') && paperQuality.includes('artifact-reference-unnumbered-')],
+  ['修复后重新复检并只发布最终问题', /runFinalAudit\(requestController\.signal, \{ allowRepairs: true, publishAsFinal: false \}\)[\s\S]+autoRepairImportantQuality[\s\S]+runFinalAudit\(requestController\.signal, \{ allowRepairs: false, publishAsFinal: true \}\)/.test(app) && app.includes('mergeFinalQualityIssues') && paperQuality.includes('!record.autoRepaired') && paperQuality.includes('!record.pendingFinalVerification') && html.includes('最终稿检查结果')],
+  ['重新生成会清空旧检查结果', app.includes('project.paper.quality = freshQuality()') && app.includes('QUALITY_ENGINE_VERSION') && app.includes('Number(loadedQuality.engineVersion) === QUALITY_ENGINE_VERSION')],
   ['参考文献按正文首次引用重排', app.includes('function synchronizeReferenceOrder') && app.includes('firstSeen') && app.includes('{{REF_')],
   ['DOCX参考文献使用SEQ与REF交叉引用', docx.includes('NumberedItemReference') && docx.includes('referenceField') && docx.includes('SimpleField') && docx.includes('new Bookmark') && docx.includes('SEQ ThesisReference')],
   ['参考文献编号字号继承正文样式', docx.includes('字号继承正文样式') && !docx.includes("bodyRun(String(number), { size: 24 })") && !docx.includes('citation ? 24')],

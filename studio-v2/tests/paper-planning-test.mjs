@@ -48,6 +48,7 @@ const summaries = cases.map(testCase => {
   const artifacts = buildArtifactPlan({ outline, devices, functions: testCase.functions, mappings: [] });
   const functionalFlows = artifacts.filter(item => item.type === 'flowchart' && item.sourceFactIds.length);
   const resultImages = artifacts.filter(item => item.type === 'result-image');
+  const testTables = artifacts.filter(item => item.type === 'test-table');
   const timingDiagrams = artifacts.filter(item => item.type === 'timing');
   timingDiagrams.forEach(item => {
     assert.match(item.instruction, /必须使用flowchart LR/);
@@ -61,8 +62,10 @@ const summaries = cases.map(testCase => {
   testCase.functions.forEach(func => {
     assert.equal(functionalFlows.filter(item => item.sourceFactIds.includes(func.id)).length, 1, `${func.id} flow coverage`);
     assert.equal(resultImages.filter(item => item.sourceFactIds.includes(func.id)).length, 1, `${func.id} image coverage`);
+    assert.equal(testTables.filter(item => item.sourceFactIds.includes(func.id)).length, 1, `${func.id} test-table coverage`);
   });
-  return { name: testCase.name, functions: testCase.functions.length, functionalFlowcharts: functionalFlows.length, resultImages: resultImages.length, softwareTertiaryCount };
+  testTables.forEach(item => assert.ok(item.sourceFactIds.length <= 8, `${item.title} must remain short`));
+  return { name: testCase.name, functions: testCase.functions.length, functionalFlowcharts: functionalFlows.length, resultImages: resultImages.length, testTables: testTables.length, softwareTertiaryCount };
 });
 
 assert.ok(summaries[0].functionalFlowcharts < summaries[1].functionalFlowcharts);
@@ -75,5 +78,11 @@ const structures = [
   '基于Arduino的温室环境调节系统', '基于STM32的停车场管理系统',
 ].map(title => buildProjectOutline({ title, devices, functions: cases[1].functions, targetBodyChars: 15000 }).slice(1, 5).map(chapter => chapter.title).join('|'));
 assert.ok(new Set(structures).size >= 2, 'outline variants should differ across project titles');
+
+const stcDevices = [{ id: 'mcu-51', model: 'STC89C52RC', role: '主控单片机' }, { id: 'sensor-1', model: 'DS18B20', role: '温度传感器' }];
+const stcOutline = buildProjectOutline({ title: '基于51单片机的温度监测系统', devices: stcDevices, functions: cases[0].functions, targetBodyChars: 15000 });
+const stcArtifacts = buildArtifactPlan({ outline: stcOutline, devices: stcDevices, functions: cases[0].functions, mappings: [] });
+assert.ok(stcArtifacts.some(item => item.title === '5V系统供电电路图'));
+assert.ok(!stcArtifacts.some(item => item.title === '5V输入与3.3V稳压供电电路图'));
 
 console.log(JSON.stringify({ summaries, outlineVariants: new Set(structures).size, status: 'ok' }));

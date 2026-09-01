@@ -311,6 +311,25 @@ function groupResultScenes(functions = []) {
   return [...groups.values()];
 }
 
+function testFunctionGroup(record) {
+  const source = record.source;
+  if (/APP|小程序|手机|远程|WiFi|蓝牙|云|联网|上传|下发|网络通信/.test(source)) return { key: 'remote', title: '远程通信与交互' };
+  if (/报警|蜂鸣|烟雾|气体|火焰|入侵|超限|异常|RFID|刷卡|门禁|指纹|密码|人脸/.test(source)) return { key: 'safety', title: '异常报警与安全' };
+  if (/继电器|水泵|灌溉|补水|排水|阀|风扇|通风|加热|制冷|降温|灯|照明|舵机|窗户|窗帘|门锁|道闸|电机|步进/.test(source)) return { key: 'actuation', title: '执行机构与联动控制' };
+  if (/按键|键盘|触摸|旋钮|本地设置|手动|自动模式|RTC|时钟|定时|预约/.test(source)) return { key: 'local', title: '本地交互与模式控制' };
+  return { key: 'monitoring', title: '数据采集与状态显示' };
+}
+
+function groupTestFunctions(functions = []) {
+  const groups = new Map();
+  uniqueFunctions(functions).map(functionRecord).forEach(record => {
+    const group = testFunctionGroup(record);
+    if (!groups.has(group.key)) groups.set(group.key, { ...group, records: [] });
+    groups.get(group.key).records.push(record);
+  });
+  return [...groups.values()];
+}
+
 export function buildArtifactPlan({ outline = [], devices = [], functions = [], mappings = [] } = {}) {
   const overall = findChapter(outline, 'overall');
   const hardware = findChapter(outline, 'hardware');
@@ -320,6 +339,7 @@ export function buildArtifactPlan({ outline = [], devices = [], functions = [], 
   const artifacts = [];
   const controllerDevice = devices.find(device => /主控|单片机/.test(`${device.role || ''} ${device.model || ''}`));
   const controllerName = modelName(controllerDevice) || modelName(devices.find(device => /STM32|STC|AT89|ESP32|Arduino/i.test(modelName(device))));
+  const is51Project = /(?:STC|AT89|AT90|89C5|51单片机|8051)/i.test(controllerName);
   const actualDevices = devices.map((device, index) => ({ ...device, id: device.id || 'device-' + (index + 1) }));
   if (controllerName && !actualDevices.some(device => modelName(device).toLowerCase() === controllerName.toLowerCase())) {
     actualDevices.unshift({ id: `device-controller-${controllerName}`, model: controllerName, role: '主控' });
@@ -357,7 +377,9 @@ export function buildArtifactPlan({ outline = [], devices = [], functions = [], 
         artifacts.push(makeArtifact('pin-table', hardware, `${name}引脚连接关系表`, `紧跟在${name}接口电路说明处，按“外设信号、主控引脚、连接说明”生成该器件专用三线表，不设置“信号方向”列，不与其他器件合并。只写已确认映射：${confirmedPins}；最多5列、8行数据。`, '', { sourceFactIds: [device.id], reason: `就近核对${name}的已确认引脚，避免第三章出现超长总表` }));
       }
     });
-    artifacts.push(makeArtifact('circuit', hardware, '5V输入与3.3V稳压供电电路图', '只保留“此处插入5V输入与3.3V稳压供电电路图”的简短独立提示，不写绘制步骤。', '', { sectionId: '3.2', reason: '说明开发板5V输入和板载3.3V稳压供电关系' }));
+    artifacts.push(is51Project
+      ? makeArtifact('circuit', hardware, '5V系统供电电路图', '只保留“此处插入5V系统供电电路图”的简短独立提示，不强行加入3.3V稳压关系，不写绘制步骤。', '', { sectionId: '3.2', reason: '说明51单片机系统的5V供电与共地关系' })
+      : makeArtifact('circuit', hardware, '5V输入与3.3V稳压供电电路图', '只保留“此处插入5V输入与3.3V稳压供电电路图”的简短独立提示，不写绘制步骤。', '', { sectionId: '3.2', reason: '说明开发板5V输入和板载3.3V稳压供电关系' }));
   }
   if (software) {
     artifacts.push(makeArtifact('software-architecture', software, '系统软件功能模块图', '直接生成简洁Mermaid代码，使用flowchart TD，用5至9个节点表达主程序、初始化、任务调度、数据采集处理、状态判断、联动控制、显示更新、通信处理、模式管理和异常处理等程序模块的调用层级。不得照搬第二章系统总体功能框架图的节点和连接方式，不逐个罗列传感器、继电器等硬件器件，不出现实际器件型号、硬件接线或引脚。', '', { sectionId: '4.1', reason: '说明程序内部的任务划分和软件模块调用层级，与第二章硬件及信息流框架区分' }));
@@ -378,9 +400,19 @@ export function buildArtifactPlan({ outline = [], devices = [], functions = [], 
     }
   }
   if (test) {
-    artifacts.push(makeArtifact('test-table', test, '系统功能测试表', '按功能分组，每表最多5列、10行，表题在表格上方。必须包含测试环境或输入条件、操作步骤、测试次数、量化结果/误差/响应时间和结论；表前说明测试方法，表后分析结果。', '', { sectionId: '5.4', sourceFactIds: distinctFunctions.map(func => func.id), reason: '使用量化数据验证每项确认功能' }));
     const scenes = groupResultScenes(distinctFunctions);
     if (!scenes.length) scenes.push({ title: '系统运行状态', records: [] });
+    const testGroups = groupTestFunctions(distinctFunctions);
+    if (!testGroups.length) testGroups.push({ title: '系统运行状态', records: [] });
+    testGroups.forEach(group => {
+      const chunks = group.records.length ? Array.from({ length: Math.ceil(group.records.length / 8) }, (_, index) => group.records.slice(index * 8, index * 8 + 8)) : [[]];
+      chunks.forEach((records, index) => {
+        const suffix = chunks.length > 1 ? `（第${index + 1}组）` : '';
+        const factIds = records.map(item => item.id);
+        const names = records.map(item => item.source);
+        artifacts.push(makeArtifact('test-table', test, `${group.title}${suffix}功能测试表`, `只验证以下同类功能：${names.join('、') || '系统基本运行'}。每表最多5列、8行数据，表题在表格上方；包含测试环境或输入条件、操作步骤或测试次数、量化结果/误差/响应时间和结论，表前说明测试方法，表后分析结果。`, '', { sectionId: '5.4', sourceFactIds: factIds, reason: '按测试职责归组量化数据，避免一张超长总表或为每个功能机械建表' }));
+      });
+    });
     scenes.forEach(scene => {
       const factIds = scene.records.map(item => item.id);
       const names = scene.records.map(item => item.source);
@@ -562,10 +594,10 @@ export function buildChapterMessages({ project, chapter, outline, artifacts, com
 2. 遵守章节职责，选型、硬件连接、程序逻辑、测试内容不得跨章重复。同一事实只在最合适的位置详细写一次，其他位置最多用一句承担衔接，不得换词复述。completedChapterDigest中已经出现的参数、原理、步骤、结论和图表不得再次详细展开。不得重复已经写过的二级或三级标题；相邻小节不能使用相同的段落开头、论证顺序或结论句式。若两个小节职责接近，应合并为一个完整论证，不要复制一套内容后换标题。
 3. 标题必须单独成行且不使用Markdown井号。二级标题严格写成“x.x 标题”，三级标题严格写成“x.x.x 标题”。必须完整保留requiredSections给出的标题并按顺序写作；不得自行增加三级标题。三级标题只承担目录已经确认的分类，不按每个器件、功能或测试项目继续细拆，同类内容在同一标题下用自然段组织。
 4. 不插入源代码，不用具体函数名作为主体介绍。
-5. 每个chapterArtifacts项目都必须在对应内容之后出现，不能遗漏。chapterArtifacts中的每张图和每张表都已给出编号；图前实质正文中必须恰好出现一次“如图x-x所示”，表前实质正文中必须恰好出现一次“如表x-x所示”，均需融入完整分析句，禁止单独成段、漏写、重复引用或自行改号。器件图、电路图、实物图和功能展示图只使用独占一行的“【非正文·插图位置：图名】”，下一行直接写“【非正文结束】”，不得添加拍摄、取景、构图、绘制步骤或冗长标注说明；该格式是给用户后续插图的醒目占位提示，不属于论文正文，连接依据必须写在正文中。框架图、软件结构图、程序流程图和通信时序图直接给出第7条规定的Mermaid代码，不写逐节点绘制说明。第三章不得生成硬件组成图或结构图。comparison-table、pin-table和test-table必须直接生成可用的Markdown表格；每个pin-table只写一个器件，使用“外设信号、主控引脚、连接说明”三列，禁止“信号方向”列。formula必须直接写出公式并解释变量、单位、参数来源和用途。所有非正文提示前后各空一行，绝不能接在正文句末。
+5. 每个chapterArtifacts项目都必须在对应内容之后出现，不能遗漏。chapterArtifacts中的每张图、每张表和每个公式都已给出唯一编号；图前实质正文中必须恰好出现一次“如图x-x所示”，表前实质正文中必须恰好出现一次“如表x-x所示”，公式前实质正文中必须恰好出现一次“如式（x-x）所示”，均需融入完整分析句，禁止单独成段、漏写、重复引用或自行改号。器件图、电路图、实物图和功能展示图使用独占一行的“【非正文·插图位置：图x-x 图名】”，下一行写“【非正文结束】”，再下一段单独写题注“图x-x 图名”；不得添加拍摄、取景、构图、绘制步骤或冗长标注说明。框架图、软件结构图、程序流程图和通信时序图使用“【非正文·Mermaid图：图x-x 图名】”包住第7条规定的Mermaid代码，在“【非正文结束】”后单独写同号题注。第三章不得生成硬件组成图或结构图。comparison-table、pin-table和test-table必须直接生成可用的Markdown表格，表题严格写成“表x-x 表名”；每个pin-table只写一个器件，使用“外设信号、主控引脚、连接说明”三列，禁止“信号方向”列。formula必须把公式独占一行并在行末写“（x-x）”，随后解释变量、单位、参数来源和用途。所有非正文提示、题注、表题和公式前后各空一行，绝不能接在正文句末。
 5.1 任意两项视觉内容之间都必须有至少一个不少于80字的实质正文段落。图与图、图与表、表与图、表与表均不得连续出现；中间段落需要分析前一项内容并自然引出后一项，不能只写“如下图/表所示”等过渡句。不同章节不得复用相同的图位标题、Mermaid代码、表格标题或图表说明；器件图片必须放在对应器件选型小节的正文分析之后，不能集中放在章节末尾或放到其他器件小节。
 6. 系统总体功能框架图只在第二章出现一次，使用硬件组成、数据方向和控制方向说明系统；第三章只用电路图和分器件引脚表表达硬件，不再生成同义结构图。第四章的系统软件功能模块图只写程序任务划分与调用层级，不逐个罗列硬件器件和型号，不得照搬第二章框架图的主要节点或连接关系。如果两张图只是更换标题而节点与连线基本相同，必须重画软件图。
-7. 框架图、结构图、流程图和时序图固定使用独占一行的“【非正文·Mermaid图：图名】”，下一行用三个反引号加mermaid开启代码围栏，末尾关闭代码围栏，再单独写“【非正文结束】”。系统总体功能框架图使用flowchart LR，系统软件功能模块图使用flowchart TD，均控制在9个节点以内。程序流程图必须使用flowchart TD，起点写成A([开始])，终点使用唯一的“([结束])”节点；主程序流程图表达系统调度，核心功能流程图按共享判断链覆盖一组相关功能，驱动的固定读写步骤优先用正文或一张代表性时序图说明，不能同时生成内容相近的驱动流程图和功能逻辑流程图。主干自上而下，分支在1至2步内汇合，主流程6至9个节点、核心功能5至9个节点，最多2个判断节点，判断分支只用“是/否”等短标签。每个节点使用4至12字短句，不画交叉回线、多个结束节点或无出口分支。通信或严格时序图必须使用flowchart LR，让时间从左向右横向推进，包含开始、发起、应答、数据传输、异常或超时处理和唯一结束节点，禁止使用sequenceDiagram或flowchart TD画成纵向时序。所有Mermaid图禁止subgraph、style、classDef、HTML标签、重复节点和无意义堆叠。
+7. 框架图、结构图、流程图和时序图固定使用独占一行的“【非正文·Mermaid图：图x-x 图名】”，下一行用三个反引号加mermaid开启代码围栏，末尾关闭代码围栏，再单独写“【非正文结束】”和题注“图x-x 图名”。系统总体功能框架图使用flowchart LR，系统软件功能模块图使用flowchart TD，均控制在9个节点以内。程序流程图必须使用flowchart TD，起点写成A([开始])，终点使用唯一的“([结束])”节点；主程序流程图表达系统调度，核心功能流程图按共享判断链覆盖一组相关功能，驱动的固定读写步骤优先用正文或一张代表性时序图说明，不能同时生成内容相近的驱动流程图和功能逻辑流程图。主干自上而下，分支在1至2步内汇合，主流程6至9个节点、核心功能5至9个节点，最多2个判断节点，判断分支只用“是/否”等短标签。每个节点使用4至12字短句，不画交叉回线、多个结束节点或无出口分支。通信或严格时序图必须使用flowchart LR，让时间从左向右横向推进，包含开始、发起、应答、数据传输、异常或超时处理和唯一结束节点，禁止使用sequenceDiagram或flowchart TD画成纵向时序。所有Mermaid图禁止subgraph、style、classDef、HTML标签、重复节点和无意义堆叠。
 8. 时序图只用于确有通信或严格时序的功能，必须横向绘制。公式只用于真实计算，必须解释变量、单位、参数来源和用途。
 9. 表格使用标准Markdown表格，表题“表x-x 表名”单独一行并放在表格之前。每张表最多5列、10行数据；内容较多时必须主动按功能、模块或测试项目拆成多张表，并为每张表补一段承接分析，绝不能输出超长表格后再依赖导出端截断。表格前后必须有实质分析，不能让两张表连续出现。导出端会统一转换为三线表，不要在表格中模拟竖线装饰或合并单元格。
 10. 禁止“系统尚未实现”“功能未完成”“受条件限制未测试”等自曝式表述；不得虚构型号、引脚和引用出版信息。
@@ -644,6 +676,8 @@ export function buildAuditMessages(project) {
       '所有通信或严格时序图都使用flowchart LR按时间从左向右横向展开，没有sequenceDiagram或纵向时序图',
       '测试包含现实的量化数据和不超过5列10行的表格',
       '每张图都按给定图号在对应正文中恰好出现一次“如图x-x所示”，第二章器件图也没有漏引',
+      '每张表都按给定表号在对应正文中恰好出现一次“如表x-x所示”，表题、表名和数据表一一对应',
+      '每个计划公式都按给定编号在对应正文中恰好出现一次“如式（x-x）所示”，公式编号、变量、单位和用途完整',
       '任何两张图、两张表或图表之间都有实质正文段落，不存在连续视觉内容',
       '不同图表和Mermaid图内容不重复，器件图片位于对应器件选型小节，第五章没有对同一器件、界面或动作状态重复安排展示图',
       '每个流程图均为简洁可复制的Mermaid代码，并包含必要的是/否分支、异常路径或回路线',
@@ -657,9 +691,9 @@ export function buildAuditMessages(project) {
   return [
     {
       role: 'system',
-      content: `你是单片机本科论文技术一致性审稿人。只检查明确问题，不做无目标润色。重点查找跨章重复或同义复述、同章重复段落、器件型号/引脚/接口矛盾、目录漏写、图表遗漏、测试数据矛盾和摘要违规。最多返回16个最重要问题。
+      content: `你是单片机本科论文技术一致性审稿人。只检查当前终稿中真实存在且仍未解决的明确问题，不做无目标润色。重点查找跨章重复或同义复述、同章重复段落、器件型号/引脚/接口矛盾、目录漏写、图表公式遗漏、测试数据矛盾和摘要违规。编号、引用次数、题注和表题由本地程序作最终确定性校验，你只判断图表公式是否与本节内容和确认事实相符，不自行重编号。最多返回16个最重要问题。
 
-跨章重复、硬件矛盾、连续图表、正文单段超过380字、流程图缺少开始/结束、摘要超出300至500字以及关键图表遗漏必须标为blocking。正文长段修复时只按观点转换处加入空行，不删减技术内容，也不能把每句话机械拆段。能够安全修复时，find必须是待修改章节中唯一出现的完整原文片段，replace应按确认事实修正，不能仅做同义改写。硬件矛盾只能以用户确认事实为准修复；除51单片机外主控按最小系统开发板、5V输入经板载稳压得到3.3V、上拉电阻统一10 kΩ、TFT屏统一1.8寸。禁止修改确认的型号、引脚和功能。无法用唯一片段安全修复时repairable为false，交由后续章节级自动修复。只返回JSON：{"summary":"","issues":[{"chapterId":"3","severity":"blocking|warning","type":"hardware|duplicate|diagram|test|abstract|wording","message":"","repairable":true,"find":"原文唯一片段","replace":"替换文本"}]}`,
+issues数组只能放入需要修改的缺陷。确认正确、与事实一致、无矛盾、无需修复、已经修复的问题不得写入issues，也不得用blocking或warning表达正向结论；如果没有遗留问题，必须返回空数组。跨章重复、硬件矛盾、连续图表、正文单段超过380字、流程图缺少开始/结束、摘要超出300至500字以及关键图表遗漏必须标为blocking。正文长段修复时只按观点转换处加入空行，不删减技术内容，也不能把每句话机械拆段。能够安全修复时，find必须是待修改章节中唯一出现的完整原文片段，replace应按确认事实修正，不能仅做同义改写。硬件矛盾只能以用户确认事实为准修复；除51单片机外主控按最小系统开发板、5V输入经板载稳压得到3.3V、上拉电阻统一10 kΩ、TFT屏统一1.8寸。禁止修改确认的型号、引脚和功能。无法用唯一片段安全修复时repairable为false，交由后续章节级自动修复。只返回JSON：{"summary":"","issues":[{"chapterId":"3","severity":"blocking|warning","type":"hardware|duplicate|diagram|test|abstract|wording","message":"","repairable":true,"find":"原文唯一片段","replace":"替换文本"}]}`,
     },
     { role: 'user', content: JSON.stringify(payload, null, 2) },
   ];

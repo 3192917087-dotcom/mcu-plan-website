@@ -1,8 +1,15 @@
 import * as Store from './storage.js?v=20260826-1';
-import * as Prompts from './prompts.js?v=20260830-5';
+import * as Prompts from './prompts.js?v=20260901-3';
 import { allPins, compatiblePins, validateMappings } from './pin-data.js?v=20260830-1';
 import { REFERENCE_LIBRARY, REFERENCE_LIBRARY_META } from './reference-library.js?v=20260826-2';
 import * as Rules from '../studio-next/rules.js?v=20260824-6';
+import {
+  FIGURE_ARTIFACT_TYPES,
+  TABLE_ARTIFACT_TYPES,
+  mergeFinalQualityIssues,
+  synchronizeArtifactPresentation,
+  validateArtifactLedger,
+} from './paper-quality.js?v=20260901-3';
 
 const PAGE_CONFIG = globalThis.MCU_PAGE_CONFIG || {};
 const APP_TITLE = '雄鸡工作室｜单片机方案与论文';
@@ -14,6 +21,7 @@ const MOTIVATION_REFRESH_MAX_MS = 4 * 60 * 1000;
 const MOTIVATION_SCHEDULE_VERSION = 2;
 const MOTIVATION_AI_INTERVAL = 4;
 const MIN_BODY_CHARS = 15000;
+const QUALITY_ENGINE_VERSION = 2;
 const MAX_PROGRAM_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_PROGRAM_TOTAL_CHARS = 240000;
 const PROGRAM_FILE_EXTENSIONS = new Set([
@@ -308,12 +316,26 @@ function freshGeneration() {
   };
 }
 
+function freshQuality() {
+  return {
+    engineVersion: QUALITY_ENGINE_VERSION,
+    issues: [],
+    aiIssues: [],
+    checkedAt: '',
+    aiCheckedAt: '',
+    bodyChars: 0,
+    auditStage: '',
+    resultStage: '',
+    autoRepaired: 0,
+  };
+}
+
 function createBlankProject(name = '未命名项目', start = 'paper') {
   const now = nowIso();
   const title = name === '未命名项目' ? '' : name;
   const outline = [];
   return {
-    schemaVersion: 27,
+    schemaVersion: 28,
     id: makeId('project'),
     name,
     title,
@@ -355,7 +377,7 @@ function createBlankProject(name = '未命名项目', start = 'paper') {
       referenceRecords: [],
       titleEn: '', abstractCn: '', abstractEn: '', keywords: '', keywordsEn: '', acknowledgment: '',
       generation: freshGeneration(),
-      quality: { issues: [], checkedAt: '', bodyChars: 0 },
+      quality: freshQuality(),
     },
   };
 }
@@ -384,7 +406,23 @@ function normalizeProject(source, options = {}) {
     normalized.paper.factSheet = { ...base.paper.factSheet, ...(clone(source.paper?.factSheet) || {}) };
     normalized.paper.outlinePlanning = { ...base.paper.outlinePlanning, ...(clone(source.paper?.outlinePlanning) || {}) };
     normalized.paper.generation = { ...freshGeneration(), ...(clone(source.paper?.generation) || {}) };
-    normalized.paper.quality = { ...base.paper.quality, ...(clone(source.paper?.quality) || {}) };
+    const loadedQuality = clone(source.paper?.quality) || {};
+    const qualityIsCurrent = Number(loadedQuality.engineVersion) === QUALITY_ENGINE_VERSION;
+    normalized.paper.quality = qualityIsCurrent
+      ? { ...freshQuality(), ...loadedQuality }
+      : freshQuality();
+    if (qualityIsCurrent) {
+      normalized.paper.quality.aiIssues = mergeFinalQualityIssues([], normalized.paper.quality.aiIssues || []);
+      normalized.paper.quality.issues = mergeFinalQualityIssues([], normalized.paper.quality.issues || []);
+    }
+    if (!qualityIsCurrent && normalized.paper.generation.status === 'completed') {
+      normalized.paper.generation.message = '已有论文内容已保留；质量规则已更新，下次生成时会按终稿规则重新检查。';
+      normalized.paper.generation.auditCompleted = false;
+    }
+    if (normalized.paper.generation.status === 'completed' && !normalized.paper.quality.checkedAt && /(?:仍有|检查出)\s*\d+\s*项/.test(normalized.paper.generation.message || '')) {
+      normalized.paper.generation.message = '已有论文内容已保留；质量规则已更新，下次生成时会按终稿规则重新检查。';
+      normalized.paper.generation.auditCompleted = false;
+    }
     // 旧版本曾把三级标题数量作为质量问题；当前目录按项目事实动态生成，
     // 因此加载旧项目时移除已经失效的历史提醒，避免误导用户。
     const isLegacyHeadingCountIssue = issue => /三级标题过多|合并同类内容/.test(issue?.message || '');
@@ -2046,9 +2084,6 @@ function artifactPlanKey(item) {
   return `${item.chapterId}|${item.type}|${title}`;
 }
 
-const FIGURE_ARTIFACT_TYPES = new Set(['device-image', 'result-image', 'circuit', 'system-framework', 'software-architecture', 'flowchart', 'timing']);
-const TABLE_ARTIFACT_TYPES = new Set(['comparison-table', 'pin-table', 'test-table']);
-
 function mergeRequiredArtifacts(outline, planned = []) {
   const facts = project.paper.factSheet;
   const devices = [...(facts.devices || [])];
@@ -2148,6 +2183,7 @@ function generationArtifactPlanIssues(artifacts = []) {
   if (!hasType('test-table', '5') || !hasType('result-image', '5')) errors.push('第五章缺少量化测试表或功能展示图');
   const functionalFlowcharts = artifacts.filter(item => item.type === 'flowchart' && item.chapterId === '4' && (item.sourceFactIds || []).length);
   const resultImages = artifacts.filter(item => item.type === 'result-image' && item.chapterId === '5');
+  const testTables = artifacts.filter(item => item.type === 'test-table' && item.chapterId === '5');
   if (artifacts.some(item => item.type === 'formula' && item.chapterId !== '4')) errors.push('公式应放在第四章软件设计，不应放在第五章');
   const actualDevices = (project.paper.factSheet.devices || []).map((device, index) => ({ ...device, id: device.id || 'device-' + (index + 1) }));
   const controller = project.paper.factSheet.controller;
@@ -2176,8 +2212,10 @@ function generationArtifactPlanIssues(artifacts = []) {
   (project.paper.factSheet.functions || []).forEach(func => {
     const flowCoverage = functionalFlowcharts.filter(item => (item.sourceFactIds || []).includes(func.id)).length;
     const imageCoverage = resultImages.filter(item => (item.sourceFactIds || []).includes(func.id)).length;
+    const testCoverage = testTables.filter(item => (item.sourceFactIds || []).includes(func.id)).length;
     if (flowCoverage !== 1) errors.push(`功能“${func.name}”应恰好归入一条独立程序逻辑链，当前为${flowCoverage}条`);
     if (imageCoverage !== 1) errors.push(`功能“${func.name}”应恰好归入一个可观察展示场景，当前为${imageCoverage}个`);
+    if (testCoverage !== 1) errors.push(`功能“${func.name}”应恰好归入一张量化测试表，当前为${testCoverage}张`);
   });
   artifacts.filter(item => item.required).forEach(item => {
     if (String(item.instruction || '').length < 12) errors.push(`${item.title}的生成要求缺失`);
@@ -2190,6 +2228,16 @@ function prepareGenerationArtifacts() {
   const errors = generationArtifactPlanIssues(artifacts);
   if (!errors.length) project.paper.artifacts = artifacts;
   return errors;
+}
+
+function synchronizeAllArtifactPresentation() {
+  const chapters = project.paper.chapters || {};
+  (project.paper.outline || []).forEach(chapter => {
+    const saved = chapters[chapter.id];
+    if (!saved?.content) return;
+    const artifacts = (project.paper.artifacts || []).filter(item => String(item.chapterId) === String(chapter.id));
+    saved.content = synchronizeArtifactPresentation(saved.content, artifacts);
+  });
 }
 
 function desiredBodyChars() {
@@ -2857,89 +2905,30 @@ function missingRequiredHeadings(chapter, content) {
   });
 }
 
+function artifactAnchorIndex(content, artifact) {
+  const text = String(content || '');
+  let index = -1;
+  if (FIGURE_ARTIFACT_TYPES.has(artifact.type) && artifact.figureNumber) {
+    index = text.search(new RegExp(`【非正文·(?:插图位置|Mermaid(?:图|流程图)?)[：:]\\s*图\\s*${escapeRegExp(artifact.figureNumber).replace('-', '\\s*[-－—.]\\s*')}\\s+${escapeRegExp(artifact.title)}\\s*】`));
+  } else if (TABLE_ARTIFACT_TYPES.has(artifact.type) && artifact.tableNumber) {
+    index = text.search(new RegExp(`^\\s*表\\s*${escapeRegExp(artifact.tableNumber).replace('-', '\\s*[-－—.]\\s*')}\\s+${escapeRegExp(artifact.title)}\\s*$`, 'm'));
+  } else if (artifact.type === 'formula' && artifact.formulaNumber) {
+    index = text.search(new RegExp(`^.*[=＝].*[（(]\\s*${escapeRegExp(artifact.formulaNumber).replace('-', '\\s*[-－—.]\\s*')}\\s*[）)]\\s*$`, 'm'));
+  }
+  if (index < 0) index = text.indexOf(artifact.title);
+  return index;
+}
+
 function artifactInstructionBlock(content, artifact) {
   const text = String(content || '');
-  const index = text.indexOf(artifact.title);
+  const index = artifactAnchorIndex(text, artifact);
   if (index < 0) return '';
   const end = text.indexOf('【非正文结束】', index);
-  return text.slice(index, end >= 0 ? end + '【非正文结束】'.length : Math.min(text.length, index + 2400));
-}
-
-function artifactFigureReferenceIssues(content, artifacts = []) {
-  const text = String(content || '');
-  const issues = [];
-  artifacts.filter(item => FIGURE_ARTIFACT_TYPES.has(item.type) && item.figureNumber).forEach(artifact => {
-    const numberPattern = String(artifact.figureNumber).replace('-', '\\s*[-－—]\\s*');
-    const matches = [...text.matchAll(new RegExp(`如图\\s*${numberPattern}\\s*所示`, 'g'))];
-    if (!matches.length) issues.push(`${artifact.title}缺少正文中的“如图${artifact.figureNumber}所示”`);
-    if (matches.length > 1) issues.push(`${artifact.title}的“如图${artifact.figureNumber}所示”出现${matches.length}次，只能保留一次`);
-    const artifactIndex = text.indexOf(artifact.title);
-    if (matches.length === 1 && artifactIndex >= 0 && matches[0].index > artifactIndex) issues.push(`${artifact.title}应先在正文中引用，再放置图位或Mermaid图`);
-  });
-  return issues;
-}
-
-function stripVisualBlocksForCitationScan(content = '') {
-  return String(content || '')
-    .replace(/【非正文(?:·[^】]*)?】[\s\S]*?【非正文结束】/g, '\n')
-    .replace(/```mermaid[\s\S]*?```/gi, '\n');
+  return text.slice(Math.max(0, index - 400), end >= 0 ? end + '【非正文结束】'.length : Math.min(text.length, index + 2400));
 }
 
 function artifactCitationLedgerIssues() {
-  const expected = new Map();
-  const duplicatePlans = [];
-  (project.paper.artifacts || []).forEach(artifact => {
-    const kind = FIGURE_ARTIFACT_TYPES.has(artifact.type) ? 'figure' : TABLE_ARTIFACT_TYPES.has(artifact.type) ? 'table' : '';
-    const number = String(kind === 'figure' ? artifact.figureNumber || '' : artifact.tableNumber || '').replace(/[－—.]/g, '-').trim();
-    if (!kind || !number) return;
-    const key = `${kind}:${number}`;
-    if (expected.has(key)) duplicatePlans.push({ kind, number, chapterId: artifact.chapterId, title: artifact.title });
-    else expected.set(key, { ...artifact, kind, number });
-  });
-
-  const citations = new Map();
-  const collect = (chapter, kind, match) => {
-    const number = `${match[1]}-${match[2]}`;
-    const key = `${kind}:${number}`;
-    const list = citations.get(key) || [];
-    list.push({ chapterId: String(chapter.id), index: match.index });
-    citations.set(key, list);
-  };
-  const patterns = {
-    figure: /(?:如|见|由|结合)?\s*图\s*(\d+)\s*[-－—.]\s*(\d+)\s*(?:中\s*)?所示/g,
-    table: /(?:如|见|由|结合)?\s*表\s*(\d+)\s*[-－—.]\s*(\d+)\s*(?:中\s*)?所示/g,
-  };
-  Object.values(project.paper.chapters || {}).forEach(chapter => {
-    const text = stripVisualBlocksForCitationScan(chapter?.content || '');
-    Object.entries(patterns).forEach(([kind, pattern]) => {
-      for (const match of text.matchAll(pattern)) collect(chapter, kind, match);
-    });
-  });
-
-  const issues = [];
-  duplicatePlans.forEach(item => issues.push({
-    id: `visual-plan-duplicate-${item.kind}-${item.number}`,
-    severity: 'blocking',
-    chapterId: String(item.chapterId || ''),
-    message: `${item.kind === 'figure' ? '图' : '表'}${item.number}在图表计划中重复，必须只保留一个编号`,
-  }));
-  expected.forEach((artifact, key) => {
-    const found = citations.get(key) || [];
-    const label = `${artifact.kind === 'figure' ? '图' : '表'}${artifact.number}`;
-    if (!found.length) {
-      issues.push({ id: `visual-missing-${key}`, severity: 'blocking', chapterId: String(artifact.chapterId || ''), message: `${artifact.title || label}缺少正文中的“如${artifact.kind === 'figure' ? '图' : '表'}${artifact.number}所示”引用` });
-      return;
-    }
-    if (found.length > 1) issues.push({ id: `visual-repeat-${key}`, severity: 'blocking', chapterId: String(found[0].chapterId || artifact.chapterId || ''), message: `${label}在正文中引用了${found.length}次，只能出现一次` });
-    const wrongChapter = found.find(item => String(item.chapterId) !== String(artifact.chapterId));
-    if (wrongChapter) issues.push({ id: `visual-chapter-${key}`, severity: 'blocking', chapterId: String(wrongChapter.chapterId), message: `${label}应在第${artifact.chapterId}章引用，当前出现在第${wrongChapter.chapterId}章` });
-  });
-  citations.forEach((found, key) => {
-    if (expected.has(key)) return;
-    const [kind, number] = key.split(':');
-    found.forEach(item => issues.push({ id: `visual-unknown-${kind}-${number}-${item.chapterId}`, severity: 'blocking', chapterId: item.chapterId, message: `正文引用了未建立计划的${kind === 'figure' ? '图' : '表'}${number}` }));
-  });
-  return issues;
+  return validateArtifactLedger({ artifacts: project.paper.artifacts || [], chapters: project.paper.chapters || {} });
 }
 
 function mermaidFlowIssues(block, artifactTitle = '流程图') {
@@ -3024,18 +3013,14 @@ function consecutiveVisualIssues(content = '') {
 }
 
 function artifactDetailIssues(content, artifacts = []) {
-  const issues = [...artifactFigureReferenceIssues(content, artifacts)];
+  const issues = [];
   artifacts.forEach(artifact => {
     if (artifact.sectionId) {
       const sectionMatch = String(content || '').match(new RegExp(`^${escapeRegExp(artifact.sectionId)}\\s+`, 'm'));
-      const titlePattern = new RegExp(escapeRegExp(artifact.title), 'g');
-      const titleMatches = [...String(content || '').matchAll(titlePattern)];
-      if (titleMatches.length === 0) {
+      const artifactIndex = artifactAnchorIndex(content, artifact);
+      if (artifactIndex < 0) {
         issues.push(`${artifact.title}缺少插图位置`);
-      } else {
-        if (sectionMatch && titleMatches[0].index < sectionMatch.index) issues.push(`${artifact.title}没有放在${artifact.sectionId}对应正文之后`);
-        if (titleMatches.length > 1) issues.push(`${artifact.title}出现多次，应只保留一个插入位置`);
-      }
+      } else if (sectionMatch && artifactIndex < sectionMatch.index) issues.push(`${artifact.title}没有放在${artifact.sectionId}对应正文之后`);
     }
     const block = artifactInstructionBlock(content, artifact);
     if (!block) {
@@ -3045,7 +3030,7 @@ function artifactDetailIssues(content, artifacts = []) {
     if (artifact.type === 'flowchart') {
       issues.push(...mermaidFlowIssues(block, artifact.title));
     } else if (artifact.type === 'device-image' || artifact.type === 'result-image' || artifact.type === 'circuit') {
-      if (!/待插入|此处插入/.test(block)) issues.push(`${artifact.title}缺少简短插图提示`);
+      if (!/插图位置|待插入|此处插入/.test(block)) issues.push(`${artifact.title}缺少简短插图提示`);
     } else if (['system-framework', 'software-architecture'].includes(artifact.type)) {
       issues.push(...mermaidStructureIssues(block, artifact.title));
     } else if (artifact.type === 'timing') {
@@ -3063,10 +3048,11 @@ function artifactDetailIssues(content, artifacts = []) {
 
 async function ensureChapterStructureAndArtifacts(chapter, content, signal) {
   const chapterArtifacts = (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id);
-  let bestContent = content;
+  let bestContent = synchronizeArtifactPresentation(content, chapterArtifacts);
   for (let pass = 0; pass < 2; pass += 1) {
     const missingHeadings = missingRequiredHeadings(chapter, bestContent);
-    const detailIssues = artifactDetailIssues(bestContent, chapterArtifacts);
+    const ledgerIssues = validateArtifactLedger({ artifacts: chapterArtifacts, chapters: { [chapter.id]: { id: chapter.id, content: bestContent } } }).map(item => item.message);
+    const detailIssues = unique([...artifactDetailIssues(bestContent, chapterArtifacts), ...ledgerIssues]);
     const duplicateIssues = unique([...internalDuplicateIssues(bestContent), ...crossChapterDuplicateIssues(chapter.id, bestContent), ...consecutiveVisualIssues(bestContent)]);
     const paragraphIssues = longProseParagraphIssues(bestContent);
     if (!missingHeadings.length && !detailIssues.length && !duplicateIssues.length && !paragraphIssues.length) return bestContent;
@@ -3075,12 +3061,13 @@ async function ensureChapterStructureAndArtifacts(chapter, content, signal) {
         role: 'system',
         content: `你是本科论文章节质量补强编辑。请在不删减有效正文、不改变确认事实、不增加新器件/引脚/功能的前提下，修复指定章节的标题、图表说明和跨章重复问题。优先补齐problemsToRepair中列出的每一项图表、公式、表格或Mermaid流程图，不得遗漏。requiredSections中的二级、三级标题必须全部出现且顺序不变，三级标题数量以目录为准，不得擅自压缩。对标记为跨章重复的段落必须按照本章唯一职责重新组织：删除在前文已经完整介绍的参数、原理、接线或程序步骤，只保留一句必要衔接，再补入本章专属分析，禁止仅替换同义词。
 
-每个缺失或说明不足的图表都要放在对应正文之后。正文每段只表达一个主要观点，通常120至300字；超过380字必须在观点转换处用空行拆分，不删减技术内容，也不把每句话机械拆段。artifacts中的每张图都按figureNumber在图前正文中恰好引用一次“如图x-x所示”，每张表都按tableNumber在表前正文中恰好引用一次“如表x-x所示”，不得漏引、复用编号或单独成段。程序流程图使用flowchart TD，开始和结束各一个且使用圆角终止节点，主干自上而下、最多9个节点和2个判断节点，分支尽快汇合；系统总体功能框架图使用flowchart LR表达硬件组成及信息流，系统软件功能模块图使用flowchart TD表达程序任务及调用层级，不得逐个重复硬件节点或照搬第二章连接关系；通信或严格时序图必须使用flowchart LR按时间从左向右横向展开，禁止sequenceDiagram和flowchart TD。所有Mermaid图保持简洁，禁止subgraph、style、classDef和HTML。第三章不得生成硬件组成图或总体结构图。器件图、电路图、实物图和功能展示图只保留独占一行的“【非正文·插图位置：图名】”以及下一行“【非正文结束】”，不得写拍摄、绘制、构图或取景说明。每张引脚表只对应一个器件并紧跟该器件电路说明，不得包含“信号方向”列。选型对比表、引脚表和测试表必须直接生成可用的Markdown表格并在表前后分析；公式必须直接写出并解释变量、单位、参数来源和用途。任意两张图或表之间必须补入不少于80字的实质正文段落，禁止连续图图、图表或表表。只输出补强后的完整本章正文，不输出章标题、解释或质量评价。`,
+每个缺失或说明不足的图表都要放在对应正文之后。正文每段只表达一个主要观点，通常120至300字；超过380字必须在观点转换处用空行拆分，不删减技术内容，也不把每句话机械拆段。artifacts中的每张图都按figureNumber在图前正文中恰好引用一次“如图x-x所示”，每张表都按tableNumber在表前正文中恰好引用一次“如表x-x所示”，每个公式都按formulaNumber在公式前正文中恰好引用一次“如式（x-x）所示”，不得漏引、复用编号或单独成段。程序流程图使用flowchart TD，开始和结束各一个且使用圆角终止节点，主干自上而下、最多9个节点和2个判断节点，分支尽快汇合；系统总体功能框架图使用flowchart LR表达硬件组成及信息流，系统软件功能模块图使用flowchart TD表达程序任务及调用层级，不得逐个重复硬件节点或照搬第二章连接关系；通信或严格时序图必须使用flowchart LR按时间从左向右横向展开，禁止sequenceDiagram和flowchart TD。所有Mermaid图保持简洁，禁止subgraph、style、classDef和HTML。第三章不得生成硬件组成图或总体结构图。器件图、电路图、实物图和功能展示图使用独占一行的“【非正文·插图位置：图x-x 图名】”、下一行“【非正文结束】”以及随后独占一行的“图x-x 图名”题注；Mermaid图使用带相同图号图名的非正文标记并在代码块后保留同号题注；不得写拍摄、绘制、构图或取景说明。每张引脚表只对应一个器件并紧跟该器件电路说明，不得包含“信号方向”列。选型对比表、引脚表和测试表必须直接生成可用的Markdown表格并使用准确的“表x-x 表名”表题；公式必须独占一行、行末写“（x-x）”，并解释变量、单位、参数来源和用途。任意两张图或表之间必须补入不少于80字的实质正文段落，禁止连续图图、图表或表表。只输出补强后的完整本章正文，不输出章标题、解释或质量评价。`,
       },
       { role: 'user', content: JSON.stringify({ pass: pass + 1, chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections }, chapterResponsibility: Prompts.chapterResponsibilities?.(chapter.kind) || '', confirmedFacts: project.paper.factSheet, completedChapterLedger: completedDigest(), chapterArtifacts, problemsToRepair: [...missingHeadings.map(item => `缺少目录标题：${item}`), ...detailIssues, ...duplicateIssues, ...paragraphIssues], existingChapter: bestContent }, null, 2) },
     ], { reasoning: false, maxTokens: 16000, signal, requestLabel: `第${chapter.id}章内容质量补强${pass ? '复核' : ''}` });
-    const revised = normalizeChapterText(raw, chapter);
-    const revisedProblems = missingRequiredHeadings(chapter, revised).length + artifactDetailIssues(revised, chapterArtifacts).length + internalDuplicateIssues(revised).length + crossChapterDuplicateIssues(chapter.id, revised).length + consecutiveVisualIssues(revised).length;
+    const revised = synchronizeArtifactPresentation(normalizeChapterText(raw, chapter), chapterArtifacts);
+    const revisedLedger = validateArtifactLedger({ artifacts: chapterArtifacts, chapters: { [chapter.id]: { id: chapter.id, content: revised } } });
+    const revisedProblems = missingRequiredHeadings(chapter, revised).length + artifactDetailIssues(revised, chapterArtifacts).length + revisedLedger.length + internalDuplicateIssues(revised).length + crossChapterDuplicateIssues(chapter.id, revised).length + consecutiveVisualIssues(revised).length;
     const originalProblems = missingHeadings.length + detailIssues.length + duplicateIssues.length;
     if (countBodyChars(revised) < Math.max(700, Math.floor(countBodyChars(bestContent) * 0.72)) || revisedProblems >= originalProblems) break;
     bestContent = revised;
@@ -3118,7 +3105,7 @@ function renderGeneration() {
     ? generation.message
     : checkedIssues.length
       ? `论文已生成，检查出${blockingIssueCount}项重点问题${warningIssueCount ? `和${warningIssueCount}项提醒` : ''}；当前稿仍可下载`
-      : '论文已生成并完成检查';
+      : '论文最终检查通过';
   $('generation-message').textContent = generation.lastError || (generation.status === 'completed' ? completedMessage : generation.message) || '点击开始后先自动规划论文结构，再逐章生成并保存。';
   $('generation-progress').style.width = `${generation.percent}%`;
   const screenNotice = $('generation-screen-notice');
@@ -3199,6 +3186,7 @@ async function generateOneChapter(chapter, signal) {
     generation.message = '第' + chapter.id + '章正文已保存，图表补强稍后自动处理';
     await saveGenerationCheckpoint();
   }
+  content = synchronizeArtifactPresentation(content, (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id));
   if (countBodyChars(content) < 700) throw new Error(`第${chapter.id}章返回内容过短，未覆盖已保存内容`);
   project.paper.chapters[chapter.id] = {
     id: chapter.id,
@@ -3238,7 +3226,7 @@ async function expandBodyIfNeeded(signal) {
     ], { reasoning: false, maxTokens: 8000, signal, requestLabel: `第${target.id}章补写` });
     const addition = normalizeChapterText(raw, target);
     if (countBodyChars(addition) < 500) break;
-    saved.content = `${saved.content.trim()}\n\n${addition.trim()}`;
+    saved.content = synchronizeArtifactPresentation(`${saved.content.trim()}\n\n${addition.trim()}`, (project.paper.artifacts || []).filter(item => item.chapterId === target.id));
     saved.updatedAt = nowIso();
     await saveGenerationCheckpoint();
   }
@@ -3317,7 +3305,7 @@ function applyAuditRepairs(audit) {
   return repaired;
 }
 
-async function runFinalAudit(signal) {
+async function runFinalAudit(signal, { allowRepairs = false, publishAsFinal = false } = {}) {
   const generation = project.paper.generation;
   generation.phase = 'audit';
   generation.activeRequestLabel = '技术一致性复核';
@@ -3326,18 +3314,26 @@ async function runFinalAudit(signal) {
   try {
     const raw = await callAi(Prompts.buildAuditMessages(project), { reasoning: true, maxTokens: 9000, jsonMode: true, signal, requestLabel: '技术一致性复核' });
     const audit = await parseAiJson(raw, { signal, requestLabel: '技术一致性复核', maxTokens: 9000 });
-    const issues = Array.isArray(audit.issues) ? audit.issues.slice(0, 16).map((item, index) => ({ id: `ai-audit-${index + 1}`, severity: item.severity === 'blocking' ? 'blocking' : 'warning', type: item.type || 'technical', chapterId: String(item.chapterId || ''), message: String(item.message || '').trim(), repairable: Boolean(item.repairable), find: String(item.find || ''), replace: String(item.replace || ''), source: 'ai' })).filter(item => item.message) : [];
-    const repaired = applyAuditRepairs({ issues });
+    const issues = mergeFinalQualityIssues([], Array.isArray(audit.issues) ? audit.issues.slice(0, 16).map((item, index) => ({ id: `ai-audit-${index + 1}`, severity: item.severity === 'blocking' ? 'blocking' : 'warning', type: item.type || 'technical', chapterId: String(item.chapterId || ''), message: String(item.message || '').trim(), repairable: Boolean(item.repairable), find: String(item.find || ''), replace: String(item.replace || ''), source: 'ai' })).filter(item => item.message) : []);
+    const repaired = allowRepairs ? applyAuditRepairs({ issues }) : 0;
+    if (repaired) synchronizeAllArtifactPresentation();
     project.paper.quality.aiSummary = String(audit.summary || '').trim();
-    project.paper.quality.aiIssues = issues;
+    project.paper.quality.aiIssues = issues.filter(issue => !issue.autoRepaired);
     project.paper.quality.autoRepaired = repaired;
+    project.paper.quality.auditStage = publishAsFinal ? 'final' : 'pre-repair';
+    project.paper.quality.aiCheckedAt = nowIso();
     generation.auditCompleted = true;
     await saveGenerationCheckpoint();
+    return { issues, repaired, completed: true };
   } catch (error) {
     if (signal.aborted) throw error;
-    project.paper.quality.aiIssues = [{ id: makeId('issue'), severity: 'warning', type: 'audit', chapterId: '', message: `技术复核暂未完成：${error.message}`, source: 'system' }];
+    project.paper.quality.aiIssues = publishAsFinal
+      ? [{ id: makeId('issue'), severity: 'warning', type: 'audit', chapterId: '', message: `最终技术复检暂未完成：${error.message}`, source: 'system' }]
+      : [];
+    project.paper.quality.auditStage = publishAsFinal ? 'final-incomplete' : 'pre-repair-incomplete';
     generation.auditCompleted = false;
     await saveGenerationCheckpoint();
+    return { issues: project.paper.quality.aiIssues, repaired: 0, completed: false };
   }
 }
 
@@ -3495,13 +3491,18 @@ function uniqueQualityIssues(issues) {
   });
 }
 
-function runLocalQuality() {
+function runLocalQuality({ publish = true } = {}) {
   const local = localQualityIssues();
-  const ai = (project.paper.quality.aiIssues || []).filter(issue => !issue.autoRepaired);
-  project.paper.quality.issues = uniqueQualityIssues([...local, ...ai]);
-  project.paper.quality.bodyChars = totalBodyChars();
-  project.paper.quality.checkedAt = nowIso();
-  return project.paper.quality;
+  const combined = mergeFinalQualityIssues(local, project.paper.quality.aiIssues || []);
+  const result = { ...project.paper.quality, issues: combined, bodyChars: totalBodyChars() };
+  if (publish) {
+    project.paper.quality.engineVersion = QUALITY_ENGINE_VERSION;
+    project.paper.quality.issues = combined;
+    project.paper.quality.bodyChars = result.bodyChars;
+    project.paper.quality.checkedAt = nowIso();
+    project.paper.quality.resultStage = 'final';
+  }
+  return result;
 }
 
 function frontMatterSnapshot() {
@@ -3542,13 +3543,14 @@ async function repairChapterBlockingIssues(chapter, problems, signal) {
       role: 'system',
       content: `你是单片机本科论文重点问题修复编辑。只修复problems列出的重点问题，保持本章全部有效正文、目录标题顺序、确认器件、引脚和功能不变，输出修复后的完整本章正文，不输出章标题、解释或评价。
 
-必须执行：删除重复和系统未完成式表述；修复与确认事实矛盾的硬件描述；正文每段只讲一个主要观点，通常120至300字，超过380字必须在观点转换处用空行拆段，禁止删减内容或逐句拆段；任意图/表之间补入不少于80字的实质分析段落；artifacts中的每张图按figureNumber在图前正文中恰好引用一次“如图x-x所示”，每张表按tableNumber在表前正文中恰好引用一次“如表x-x所示”；器件图、电路图、实物图和功能图只保留独占一行的“【非正文·插图位置：图名】”和下一行“【非正文结束】”；框架图、结构图和流程图直接使用简洁Mermaid，流程图的开始和结束各一个且为圆角终止节点，主干自上而下、最多9个节点和2个判断节点；第三章不得生成硬件组成图或总体结构图；每张引脚表只对应一个器件并紧跟其电路说明，不得有“信号方向”列；测试必须有量化表格；超过5列或10行数据的表格必须按功能或模块拆分成多张表，并保持每张表前后有正文分析。除51单片机外主控按最小系统开发板描述，5V输入经板载稳压得到3.3V，所有模块共地，凡上拉电阻统一10 kΩ，TFT统一1.8寸。禁止新增标题、器件、引脚、功能或文献。`,
+必须执行：删除重复和系统未完成式表述；修复与确认事实矛盾的硬件描述；正文每段只讲一个主要观点，通常120至300字，超过380字必须在观点转换处用空行拆段，禁止删减内容或逐句拆段；任意图/表之间补入不少于80字的实质分析段落；artifacts中的每张图按figureNumber在图前正文中恰好引用一次“如图x-x所示”，每张表按tableNumber在表前正文中恰好引用一次“如表x-x所示”，每个公式按formulaNumber在公式前正文中恰好引用一次“如式（x-x）所示”；器件图、电路图、实物图和功能图使用“【非正文·插图位置：图x-x 图名】”、下一行“【非正文结束】”和随后独占一行的同号题注；Mermaid图使用带图号图名的非正文标记，代码块结束后保留同号题注；框架图、结构图和流程图直接使用简洁Mermaid，流程图的开始和结束各一个且为圆角终止节点，主干自上而下、最多9个节点和2个判断节点；第三章不得生成硬件组成图或总体结构图；每张引脚表只对应一个器件并紧跟其电路说明，不得有“信号方向”列；表题严格使用“表x-x 表名”，测试必须有量化表格；公式必须独占一行并在行末写“（x-x）”，随后说明变量、单位和用途；超过5列或10行数据的表格必须按功能或模块拆分成多张表，并保持每张表前后有正文分析。除51单片机外主控按最小系统开发板描述，5V输入经板载稳压得到3.3V，所有模块共地，凡上拉电阻统一10 kΩ，TFT统一1.8寸。禁止新增标题、器件、引脚、功能或文献。`,
     },
     { role: 'user', content: JSON.stringify({ title: project.title, chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections }, responsibility: Prompts.chapterResponsibilities?.(chapter.kind) || '', problems, confirmedFacts: project.paper.factSheet, artifacts: (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id), references: chapter.kind === 'introduction' ? project.paper.referenceRecords : [], existingChapter: before }, null, 2) },
   ], { reasoning: false, maxTokens: 16000, signal, requestLabel: `自动修复第${chapter.id}章重点问题`, timeoutMs: 150000 });
   const candidate = normalizeChapterText(raw, chapter);
-  if (countBodyChars(candidate) < Math.max(700, Math.floor(countBodyChars(before) * 0.78))) return false;
-  saved.content = candidate;
+  const normalizedCandidate = synchronizeArtifactPresentation(candidate, (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id));
+  if (countBodyChars(normalizedCandidate) < Math.max(700, Math.floor(countBodyChars(before) * 0.78))) return false;
+  saved.content = normalizedCandidate;
   if (chapter.kind === 'introduction') synchronizeReferenceOrder();
   const afterCount = localQualityIssues().filter(issue => issue.severity === 'blocking' && issue.chapterId === chapter.id).length;
   if (afterCount > beforeCount) {
@@ -3556,13 +3558,19 @@ async function repairChapterBlockingIssues(chapter, problems, signal) {
     return false;
   }
   saved.updatedAt = nowIso();
-  return candidate !== before;
+  const changed = normalizedCandidate !== before;
+  if (changed) {
+    (project.paper.quality.aiIssues || []).forEach(issue => {
+      if (String(issue.chapterId || '') === String(chapter.id)) issue.pendingFinalVerification = true;
+    });
+  }
+  return changed;
 }
 
-async function autoRepairImportantQuality(signal) {
+async function autoRepairImportantQuality(signal, { maxPasses = 2 } = {}) {
   let changedAny = false;
-  for (let pass = 0; pass < 2; pass += 1) {
-    const quality = runLocalQuality();
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    const quality = runLocalQuality({ publish: false });
     const blockers = quality.issues.filter(issue => issue.severity === 'blocking');
     if (!blockers.length) break;
     const generation = project.paper.generation;
@@ -3577,7 +3585,15 @@ async function autoRepairImportantQuality(signal) {
       changedThisPass ||= totalBodyChars() > beforeChars;
     }
     const frontProblems = blockers.filter(issue => !issue.chapterId && /摘要|关键词|英文论文题目|致谢/.test(issue.message));
-    if (frontProblems.length) changedThisPass ||= await repairFrontMatterIssues(frontProblems.map(item => item.message), signal);
+    if (frontProblems.length) {
+      const frontChanged = await repairFrontMatterIssues(frontProblems.map(item => item.message), signal);
+      changedThisPass ||= frontChanged;
+      if (frontChanged) {
+        (project.paper.quality.aiIssues || []).forEach(issue => {
+          if (!issue.chapterId && /摘要|关键词|英文论文题目|致谢/.test(issue.message || '')) issue.pendingFinalVerification = true;
+        });
+      }
+    }
     const chapterIds = unique(blockers.map(issue => issue.chapterId).filter(Boolean));
     for (const chapterId of chapterIds) {
       const chapter = project.paper.outline.find(item => item.id === chapterId);
@@ -3587,7 +3603,7 @@ async function autoRepairImportantQuality(signal) {
       await saveGenerationCheckpoint();
     }
     changedAny ||= changedThisPass;
-    const remaining = runLocalQuality().issues.filter(issue => issue.severity === 'blocking').length;
+    const remaining = runLocalQuality({ publish: false }).issues.filter(issue => issue.severity === 'blocking').length;
     if (!changedThisPass || remaining >= blockers.length) break;
   }
   return changedAny;
@@ -3600,8 +3616,13 @@ function renderQuality() {
   panel.hidden = !quality?.checkedAt && !issues.length;
   if (panel.hidden) return;
   const blockers = issues.filter(item => item.severity === 'blocking').length;
-  $('quality-summary').textContent = `${quality.bodyChars?.toLocaleString('zh-CN') || 0}字 · ${blockers ? `${blockers}项重点问题` : '未发现阻断问题'}`;
-  $('quality-issues').innerHTML = issues.length ? issues.map(issue => `<div class="quality-issue"><span class="issue-tag ${issue.severity === 'blocking' ? 'is-danger' : ''}">${issue.severity === 'blocking' ? '重点' : '提醒'}</span><span>${issue.chapterId ? `第${escapeHtml(issue.chapterId)}章：` : ''}${escapeHtml(issue.message)}</span></div>`).join('') : '<p>本地规则和技术复核没有发现明显问题。</p>';
+  const warningCount = issues.length - blockers;
+  $('quality-summary').textContent = issues.length
+    ? `${quality.bodyChars?.toLocaleString('zh-CN') || 0}字 · 最终仍有${blockers ? `${blockers}项重点问题` : ''}${blockers && warningCount ? '和' : ''}${warningCount ? `${warningCount}项提醒` : ''}`
+    : '论文最终检查通过';
+  $('quality-issues').innerHTML = issues.length
+    ? issues.map(issue => `<div class="quality-issue"><span class="issue-tag ${issue.severity === 'blocking' ? 'is-danger' : ''}">${issue.severity === 'blocking' ? '重点' : '提醒'}</span><span>${issue.chapterId ? `第${escapeHtml(issue.chapterId)}章：` : ''}${escapeHtml(issue.message)}</span></div>`).join('')
+    : '<p class="quality-pass"><span aria-hidden="true">✓</span> 论文最终检查通过</p>';
 }
 
 async function generatePaper() {
@@ -3636,6 +3657,7 @@ async function generatePaper() {
   generation.lastError = '';
   generation.inputRevision = project.factRevision;
   generation.message = '正在根据目标字数、器件和功能规划论文结构';
+  project.paper.quality = freshQuality();
   startGenerationClock();
   await saveGenerationCheckpoint();
   try {
@@ -3672,16 +3694,17 @@ async function generatePaper() {
     }
     await generateExtras(requestController.signal);
     synchronizeReferenceOrder();
-    await runFinalAudit(requestController.signal);
+    synchronizeAllArtifactPresentation();
+    await runFinalAudit(requestController.signal, { allowRepairs: true, publishAsFinal: false });
     synchronizeReferenceOrder();
+    synchronizeAllArtifactPresentation();
     generation.phase = 'quality';
     generation.activeRequestLabel = '检查并自动修复重点问题';
     generation.message = '正在检查标题、图表间距、硬件事实、摘要、引用与字数';
     await saveGenerationCheckpoint();
-    runLocalQuality();
-    let autoRepaired = false;
+    runLocalQuality({ publish: false });
     try {
-      autoRepaired = await autoRepairImportantQuality(requestController.signal);
+      await autoRepairImportantQuality(requestController.signal);
     } catch (error) {
       if (requestController.signal.aborted) throw error;
       // 质量修复属于增强阶段。API在此阶段超时不能抹掉已保存的完整章节，保留问题清单供用户继续修复。
@@ -3692,8 +3715,32 @@ async function generatePaper() {
       generation.message = '正文已生成，质量修复请求未完成，已保留当前稿并可下载';
       await saveGenerationCheckpoint();
     }
-    if (autoRepaired) await runFinalAudit(requestController.signal);
     synchronizeReferenceOrder();
+    synchronizeAllArtifactPresentation();
+    await runFinalAudit(requestController.signal, { allowRepairs: false, publishAsFinal: true });
+    const finalBlockingIssues = runLocalQuality({ publish: false }).issues.filter(item => item.severity === 'blocking');
+    if (finalBlockingIssues.length) {
+      try {
+        generation.phase = 'quality';
+        generation.activeRequestLabel = '修复终稿遗留问题';
+        generation.message = `终稿复检仍有${finalBlockingIssues.length}项重点问题，正在进行最后一轮针对性修复`;
+        await saveGenerationCheckpoint();
+        const finalChanged = await autoRepairImportantQuality(requestController.signal, { maxPasses: 1 });
+        if (finalChanged) {
+          synchronizeReferenceOrder();
+          synchronizeAllArtifactPresentation();
+          await runFinalAudit(requestController.signal, { allowRepairs: false, publishAsFinal: true });
+        }
+      } catch (error) {
+        if (requestController.signal.aborted) throw error;
+        project.paper.quality.aiIssues = [
+          ...(project.paper.quality.aiIssues || []),
+          { id: makeId('final-repair-warning'), severity: 'warning', type: 'quality-repair', chapterId: '', message: `终稿遗留问题修复请求未完成：${error.message || 'API请求失败'}`, source: 'system' },
+        ];
+      }
+    }
+    synchronizeReferenceOrder();
+    synchronizeAllArtifactPresentation();
     runLocalQuality();
     generation.status = 'completed';
     generation.phase = 'export';
@@ -3702,7 +3749,7 @@ async function generatePaper() {
     generation.activeRequestLabel = '';
     generation.completedAt = nowIso();
     const blockers = project.paper.quality.issues.filter(item => item.severity === 'blocking').length;
-    generation.message = blockers ? `论文已生成并自动修复，仍有${blockers}项需要根据实物确认` : project.paper.quality.issues.length ? `论文已生成并自动修复，另有${project.paper.quality.issues.length}项普通提醒` : '论文已生成并完成自动修复与复检';
+    generation.message = blockers ? `论文已生成并自动修复，仍有${blockers}项需要根据实物确认` : project.paper.quality.issues.length ? `论文已生成并自动修复，另有${project.paper.quality.issues.length}项普通提醒` : '论文最终检查通过';
     generation.lastError = '';
     await saveGenerationCheckpoint();
     toast('论文已生成，正在准备DOCX', 'success');
