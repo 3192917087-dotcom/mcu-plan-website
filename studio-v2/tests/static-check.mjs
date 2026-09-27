@@ -11,6 +11,7 @@ const pdfWorker = await readFile(new URL('../vendor/pdf.worker.min.js', import.m
 const mockServer = await readFile(new URL('./mock-server.mjs', import.meta.url), 'utf8');
 const pinData = await readFile(new URL('../pin-data.js', import.meta.url), 'utf8');
 const paperQuality = await readFile(new URL('../paper-quality.js', import.meta.url), 'utf8');
+const activeRules = await readFile(new URL('../../studio-next/rules.js', import.meta.url), 'utf8');
 const referencedIds = [...app.matchAll(/\$\('([^']+)'\)/g)].map(match => match[1]);
 const htmlIds = [...html.matchAll(/id="([^"]+)"/g)].map(match => match[1]);
 const dynamicIds = new Set(['ack-ai-conflicts']);
@@ -31,6 +32,9 @@ const assertions = [
   ['插图占位与正文区分', prompts.includes('【非正文·插图位置：图x-x 图名】') && docx.includes("name: '论文插图提示'")],
   ['引脚表不含信号方向列', prompts.includes('外设信号、主控引脚、连接说明') && prompts.includes('禁止“信号方向”列')],
   ['默认硬件规则完整', prompts.includes('最小系统开发板') && prompts.includes('10 kΩ') && prompts.includes('1.8寸')],
+  ['人体检测默认器件统一为TCRT5000', activeRules.includes("suggestion: 'TCRT5000'") && activeRules.includes('普通人体检测优先 TCRT5000') && activeRules.includes('TCRT5000') && !activeRules.includes('HC-SR501') && prompts.includes('人体检测类项目的默认器件为“TCRT5000') && prompts.includes('不得自行输出HC-SR501或LD2410')],
+  ['方案功能排除工程配套项', prompts.includes('功能边界是硬性规则') && prompts.includes('不得把工程配套、连接条件或元件作用当成功能') && app.includes('normalizeSchemeFunctions') && app.includes('SCHEME_SUPPORT_ONLY_START_PATTERN') && app.includes('方案功能校验')],
+  ['方案强制替换旧人体传感器型号', app.includes('normalizeSchemeModelText') && app.includes("replace(/HC\\s*[-_ ]?\\s*SR501/gi, 'TCRT5000')") && prompts.includes('不得自行输出HC-SR501或LD2410')],
   ['9898中转站专用预设', app.includes('newapi9898') && app.includes('gpt-5.5') && html.includes('9898.ai 中转站（GPT）') && app.includes('https://www.9898.ai/v1')],
   ['PDF原理图读取入口', html.includes('id="paper-schematic-file"') && app.includes('extractPdfTextFallback') && prompts.includes('schematicText')],
   ['STM32F103完整I2C复用脚', /i2c_scl:\s*\['PB6','PB8','PB10'\]/.test(pinData) && /i2c_sda:\s*\['PB7','PB9','PB11'\]/.test(pinData)],

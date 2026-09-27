@@ -1,4 +1,4 @@
-import * as Rules from './rules.js?v=20260824-6';
+import * as Rules from './rules.js?v=20260927-2';
 
 const PAGE_CONFIG = globalThis.MCU_PAGE_CONFIG || {};
 const API_SETTINGS_KEY = 'mcu-paper-studio.api-settings.v1';

@@ -47,7 +47,7 @@ const DeviceLibrary = (() => {
         {
           name: '人体感应',
           items: [
-            { name: 'HC-SR501', desc: '红外热释电 · 学生项目首选 · ¥3-5' },
+            { name: 'TCRT5000', desc: '红外反射式人体接近检测 · 学生项目首选' },
             { name: 'HLK-LD2410', desc: '24GHz 毫米波雷达 · 人体存在/微动/静止' },
           ],
         },

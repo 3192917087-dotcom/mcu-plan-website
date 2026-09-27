@@ -17,7 +17,7 @@ export const SCHEME_LEVELS = Object.freeze({
 
 export const SCHEME_IRON_RULES = Object.freeze([
   Object.freeze({ id: 'no-4g', pattern: /(?:SIM7600|\b4G\b)/i, suggestion: 'ESP-01S WiFi', reason: '默认方案优先低成本、免 SIM 卡' }),
-  Object.freeze({ id: 'no-mmwave', pattern: /LD2410|毫米波/i, suggestion: 'HC-SR501', reason: '默认人体检测采用低成本红外方案' }),
+  Object.freeze({ id: 'no-mmwave', pattern: /LD2410|毫米波/i, suggestion: 'TCRT5000', reason: '默认人体检测采用低成本红外方案' }),
   Object.freeze({ id: 'simple-fall', pattern: /MPU6050/i, suggestion: 'SW-520D', reason: '基础跌倒/倾斜检测优先简单方案' }),
   Object.freeze({ id: 'avoid-premium-sensors', pattern: /AS608|MAX30102|TCS34725/i, suggestion: '从器件库选择满足需求的简单替代器件', reason: '默认面向本科项目的成本和实现难度' }),
   Object.freeze({ id: 'simple-driver', pattern: /TB6612|L298N/i, suggestion: '5V 继电器或与负载匹配的简单驱动', reason: '默认执行机构优先简单、可验证的驱动方式' }),
@@ -48,7 +48,7 @@ export const SCHEME_SYSTEM_PROMPT = String.raw`
 
 【默认选型铁律】
 1. 默认不推荐 4G/SIM7600，远程传输优先 ESP-01S WiFi。
-2. 默认不推荐 LD2410，普通人体检测优先 HC-SR501。
+2. 默认不推荐 LD2410，普通人体检测优先 TCRT5000。
 3. 基础倾斜/跌倒检测默认不用 MPU6050，优先 SW-520D。
 4. 默认避免 AS608、MAX30102、TCS34725 等成本或实现难度较高的器件，除非题目明确需要。
 5. 默认避免 TB6612/L298N 等复杂双路驱动，普通开关型负载优先简单且匹配的驱动方案。
@@ -169,7 +169,7 @@ export const PAPER_BASE_SYSTEM_PROMPT = String.raw`
 
 const DEVICE_PATTERNS = Object.freeze({
   controller: /主控|控制器|单片机|STM32|STC\d|AT89|ESP32|ESP8266|Arduino|PIC\d|MSP430/i,
-  sensor: /传感|检测|采集|测量|温度|湿度|光照|烟雾|气体|水位|压力|加速度|红外|超声|RFID|摄像|DHT\d*|DS18B20|BH1750|MQ-?\d+|HC-SR04|HC-SR501|MPU6050/i,
+  sensor: /传感|检测|采集|测量|温度|湿度|光照|烟雾|气体|水位|压力|加速度|红外|超声|RFID|摄像|DHT\d*|DS18B20|BH1750|MQ-?\d+|HC-SR04|TCRT5000|MPU6050/i,
   actuator: /执行|驱动|继电器|电机|风扇|水泵|舵机|蜂鸣器|加热|阀|灯|MOS|三极管|SG90|ULN2003/i,
   display: /显示|OLED|LCD|TFT|数码管|屏/i,
   communication: /通信|WiFi|蓝牙|ZigBee|LoRa|NB-IoT|ESP-01|HC-05|NRF24|串口|UART|RS485|CAN/i,

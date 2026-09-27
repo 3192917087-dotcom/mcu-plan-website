@@ -1,8 +1,8 @@
 import * as Store from './storage.js?v=20260826-1';
-import * as Prompts from './prompts.js?v=20260901-3';
+import * as Prompts from './prompts.js?v=20260927-2';
 import { allPins, compatiblePins, validateMappings } from './pin-data.js?v=20260830-1';
 import { REFERENCE_LIBRARY, REFERENCE_LIBRARY_META } from './reference-library.js?v=20260826-2';
-import * as Rules from '../studio-next/rules.js?v=20260824-6';
+import * as Rules from '../studio-next/rules.js?v=20260927-2';
 import {
   FIGURE_ARTIFACT_TYPES,
   TABLE_ARTIFACT_TYPES,
@@ -90,6 +90,55 @@ function sanitizeTechnicalText(value) {
     .replace(/ESP\s*[-_]?\s*8266/gi, 'ESP-01S')
     .replace(/(^|[^\d.])96\s*寸\s*OLED/gi, '$10.96寸OLED')
     .replace(/2\.8\s*寸\s*TFT/gi, '1.8寸TFT');
+}
+
+// 方案中的“功能”必须是可观察、可验证的系统行为。工程配套件和连接条件
+// 可以保留在器件/硬件事实中，但不能占用功能条目，否则会直接污染客户方案。
+const SCHEME_FUNCTION_ACTION_PATTERN = /采集|检测|监测|显示|上传|下发|远程|查看|控制|报警|提醒|记录|存储|查询|设置|调节|识别|计时|切换|保护|测量|执行|联动|采样|告警|交互|管理|开关|启停|调速|调光|定位|追踪|统计|反馈|支持|实现|完成|提供|运行|启动|停止/;
+const SCHEME_SUPPORT_PATTERN = /上拉|下拉|电阻|电容|电感|晶振|稳压|供电|电源|共地|复位|下载|烧录|调试|排针|杜邦线|面包板|PCB|焊接/i;
+const SCHEME_SUPPORT_ONLY_START_PATTERN = /^(?:使用|采用|配置|增加|设置|连接|接入|通过|由)?\s*(?:\d+(?:\.\d+)?\s*[kKＫ]?\s*(?:Ω|欧姆)?\s*)?(?:上拉|下拉)?(?:电阻(?!式)|电容(?!式)|电感(?!式)|晶振|稳压(?:模块)?|电源(?:模块)?|复位(?:按键|电路)?|下载(?:接口|器)|烧录(?:器|接口)|调试(?:接口|器)|排针|杜邦线|面包板|PCB|焊接)/i;
+
+function normalizeSchemeFunctionText(value) {
+  return sanitizeTechnicalText(typeof value === 'string' ? value : value?.name || value?.description || '')
+    .replace(/HC\s*[-_ ]?\s*SR501/gi, 'TCRT5000')
+    .replace(/^\s*(?:功能|要求)\s*[:：]\s*/i, '')
+    .replace(/^\s*\d+\s*[.、)）]\s*/, '')
+    .replace(/[。；;]+$/, '')
+    .trim();
+}
+
+function normalizeSchemeModelText(value) {
+  return sanitizeTechnicalText(value).replace(/HC\s*[-_ ]?\s*SR501/gi, 'TCRT5000').trim();
+}
+
+function isValidSchemeFunction(value) {
+  const text = normalizeSchemeFunctionText(value);
+  if (text.length < 6 || !SCHEME_FUNCTION_ACTION_PATTERN.test(text)) return false;
+  // 这些内容本身是设计约束，不论是否带“通信/连接”等词，都不能成为独立功能。
+  if (/(?:上拉|下拉|共地|复位(?:按键|电路)?|下载(?:接口|器)|烧录|调试接口)/i.test(text)) return false;
+  if (SCHEME_SUPPORT_ONLY_START_PATTERN.test(text)) return false;
+  if (SCHEME_SUPPORT_PATTERN.test(text) && !SCHEME_FUNCTION_ACTION_PATTERN.test(text)) return false;
+  return true;
+}
+
+function normalizeSchemeFunctions(items) {
+  const result = [];
+  const seen = new Set();
+  (Array.isArray(items) ? items : []).forEach(item => {
+    const text = normalizeSchemeFunctionText(item);
+    if (!isValidSchemeFunction(text)) return;
+    const key = text.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    result.push(text);
+  });
+  return result;
+}
+
+function schemeFunctionDiagnostics(items) {
+  const raw = Array.isArray(items) ? items : [];
+  const valid = normalizeSchemeFunctions(raw);
+  return { rawCount: raw.length, valid, removedCount: Math.max(0, raw.length - valid.length) };
 }
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
@@ -455,8 +504,8 @@ function normalizeProject(source, options = {}) {
     normalized.paper.factSheet.mappings = (normalized.paper.factSheet.mappings || []).map(item => ({ ...item, device: sanitizeTechnicalText(item.device) }));
     if (normalized.scheme.structured) {
       normalized.scheme.structured.title = sanitizeTechnicalText(normalized.scheme.structured.title);
-      normalized.scheme.structured.devices = (normalized.scheme.structured.devices || []).map(item => ({ ...item, model: sanitizeTechnicalText(item.model), role: sanitizeTechnicalText(item.role) }));
-      normalized.scheme.structured.functions = (normalized.scheme.structured.functions || []).map(item => sanitizeTechnicalText(typeof item === 'string' ? item : item.name || item.description || ''));
+      normalized.scheme.structured.devices = (normalized.scheme.structured.devices || []).map(item => ({ ...item, model: normalizeSchemeModelText(item.model), role: sanitizeTechnicalText(item.role) }));
+      normalized.scheme.structured.functions = normalizeSchemeFunctions(normalized.scheme.structured.functions);
       normalized.scheme.text = schemeText(normalized.scheme.structured);
     }
     if (normalized.paper.outlineTemplate !== Prompts.DEFAULT_OUTLINE_ID) {
@@ -1194,13 +1243,32 @@ async function generateScheme(event) {
     const functionCount = project.scheme.countMode === 'custom'
       ? project.scheme.functionCount
       : Math.max(5, Math.min(12, 5 + Math.floor(Math.random() * 6)));
-    const raw = await callAi(Prompts.buildSchemeMessages({ title: project.scheme.title, requirements: project.scheme.requirements, functionCount, preferences: project.scheme.preferences }), { reasoning: false, maxTokens: 5000, jsonMode: true, signal: requestController.signal, requestLabel: '方案生成' });
-    const result = await parseAiJson(raw, { signal: requestController.signal, requestLabel: '方案生成', maxTokens: 5000 });
+    let raw = await callAi(Prompts.buildSchemeMessages({ title: project.scheme.title, requirements: project.scheme.requirements, functionCount, preferences: project.scheme.preferences }), { reasoning: false, maxTokens: 5000, jsonMode: true, signal: requestController.signal, requestLabel: '方案生成' });
+    let result = await parseAiJson(raw, { signal: requestController.signal, requestLabel: '方案生成', maxTokens: 5000 });
+    let functionCheck = schemeFunctionDiagnostics(result.functions);
+    // 模型偶尔会把上拉电阻、电源、复位等配套项误放进功能。先在本地过滤；
+    // 若过滤后不足最低功能数，再自动请求一次严格结果，避免让用户手动反复重试。
+    const minimumValidFunctions = Math.min(3, functionCount);
+    if (functionCheck.valid.length < minimumValidFunctions) {
+      const retryRaw = await callAi(Prompts.buildSchemeMessages({
+        title: project.scheme.title,
+        requirements: project.scheme.requirements,
+        functionCount,
+        preferences: project.scheme.preferences,
+        qualityGuard: `上一版功能中有工程配套项或重复项，过滤后只有${functionCheck.valid.length}条；请只返回至少${minimumValidFunctions}条可观察、可制作的系统功能`,
+      }), { reasoning: false, maxTokens: 5000, jsonMode: true, signal: requestController.signal, requestLabel: '方案功能校验' });
+      const retryResult = await parseAiJson(retryRaw, { signal: requestController.signal, requestLabel: '方案功能校验', maxTokens: 5000 });
+      const retryCheck = schemeFunctionDiagnostics(retryResult.functions);
+      if (retryCheck.valid.length > functionCheck.valid.length) {
+        result = retryResult;
+        functionCheck = retryCheck;
+      }
+    }
     const devices = (Array.isArray(result.devices) ? result.devices : []).map(item => typeof item === 'string'
-      ? { model: sanitizeTechnicalText(item.replace(/[（(].*$/, '').trim()), role: item.match(/[（(]([^）)]+)[）)]/)?.[1] || '外设' }
-      : { model: sanitizeTechnicalText(String(item.model || item.name || '').trim()), role: sanitizeTechnicalText(String(item.role || item.purpose || '外设').trim()) }).filter(item => item.model);
-    const functions = (Array.isArray(result.functions) ? result.functions : []).map(item => sanitizeTechnicalText(typeof item === 'string' ? item : item.name || item.description || '')).filter(Boolean);
-    if (!devices.length || !functions.length) throw new Error('方案内容不完整，请重新生成');
+      ? { model: normalizeSchemeModelText(item.replace(/[（(].*$/, '').trim()), role: item.match(/[（(]([^）)]+)[）)]/)?.[1] || '外设' }
+      : { model: normalizeSchemeModelText(String(item.model || item.name || '').trim()), role: sanitizeTechnicalText(String(item.role || item.purpose || '外设').trim()) }).filter(item => item.model);
+    const functions = functionCheck.valid;
+    if (!devices.length || functions.length < minimumValidFunctions) throw new Error('方案功能不足或包含工程配套项，请重新生成');
     project.scheme.structured = { title: sanitizeTechnicalText(result.title || project.scheme.title), devices, functions };
     project.scheme.text = schemeText(project.scheme.structured);
     project.scheme.status = 'ready';
