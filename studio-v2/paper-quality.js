@@ -1,3 +1,5 @@
+import { hasChapterRole } from './outline-policy.js?v=20261018-3';
+
 export const FIGURE_ARTIFACT_TYPES = new Set([
   'device-image', 'result-image', 'circuit', 'system-framework', 'software-architecture', 'flowchart', 'timing',
 ]);
@@ -75,8 +77,8 @@ function markdownTableBlocks(text = '') {
     const start = offset;
     let end = start + line.length;
     while (index + 1 < lines.length && /^\s*\|.*\|\s*$/.test(lines[index + 1])) {
+      offset += lines[index].length + 1;
       index += 1;
-      offset += line.length + 1;
       end = offset + lines[index].length;
     }
     records.push({ start, end });
@@ -117,14 +119,15 @@ function rawReferencePattern(kind, number) {
   const numbered = numberPattern(number);
   return kind === 'formula'
     ? new RegExp(`式\\s*[（(]\\s*${numbered}\\s*[）)]`, 'g')
-    : new RegExp(`${kindLabel(kind)}\\s*${numbered}`, 'g');
+    : new RegExp(`${kindLabel(kind)}\\s*${numbered}(?!\\d)`, 'g');
 }
 
 function issue(id, chapterId, message) {
   return { id, severity: 'blocking', chapterId: String(chapterId || ''), message, source: 'local' };
 }
 
-export function validateArtifactLedger({ artifacts = [], chapters = {} } = {}) {
+export function validateArtifactLedger({ artifacts = [], chapters = {}, outline = [] } = {}) {
+  const softwareChapterIds = outline.length ? outline.filter(chapter => hasChapterRole(chapter,'software')).map(chapter => String(chapter.id)) : ['4'];
   const expected = new Map();
   const issues = [];
   const orderedNumbers = new Map();
@@ -205,7 +208,10 @@ export function validateArtifactLedger({ artifacts = [], chapters = {} } = {}) {
     }
 
     if (artifact.kind === 'figure') {
-      const blocks = (visualBlocks.get(artifact.chapterId) || []).filter(record => record.label.includes(String(artifact.title || '')));
+      const blocks = (visualBlocks.get(artifact.chapterId) || []).filter(record => {
+        const match = record.label.match(/^图\s*(\d+)\s*[-－—.]\s*(\d+)\s+(.+)$/);
+        return match ? `${Number(match[1])}-${Number(match[2])}` === artifact.number : record.label === artifact.title;
+      });
       const captions = (figureCaptions.get(artifact.chapterId) || []).filter(record => record.number === artifact.number && record.title === artifact.title);
       if (blocks.length !== 1) issues.push(issue(`artifact-figure-block-${key}`, artifact.chapterId, `${artifact.title}应有且只有一个非正文图位或Mermaid图块，当前为${blocks.length}个`));
       if (blocks.length === 1 && !new RegExp(`^图\\s*${escapeRegExp(artifact.number)}\\s+${escapeRegExp(artifact.title)}$`).test(blocks[0].label)) {
@@ -249,12 +255,13 @@ export function validateArtifactLedger({ artifacts = [], chapters = {} } = {}) {
     });
     const unnumberedFormulaLines = prose.split('\n').map(line => line.trim()).filter(line =>
       line.length > 3 && line.length < 220 && /[A-Za-z][A-Za-z0-9_{}]*\s*[=＝]/.test(line) && /[+\-*/×÷%]/.test(line)
+      && !/^(?:式中|其中|这里|上述式中|在式中)[，,:：\s]/.test(line)
       && !/[（(]\s*\d+\s*[-－—.]\s*\d+\s*[）)]\s*$/.test(line));
     unnumberedFormulaLines.forEach((line, index) => {
-      issues.push(issue(`artifact-formula-unnumbered-${chapterId}-${index}`, chapterId, `第${chapterId}章存在未编号公式“${line.slice(0, 48)}”，公式必须纳入第四章计划并使用固定编号`));
+      issues.push(issue(`artifact-formula-unnumbered-${chapterId}-${index}`, chapterId, `第${chapterId}章存在未编号公式“${line.slice(0, 48)}”，公式必须纳入软件或控制逻辑计划并使用固定编号`));
     });
-    if (chapterId !== '4' && (equations.get(chapterId) || []).length) {
-      issues.push(issue(`artifact-formula-wrong-chapter-${chapterId}`, chapterId, `第${chapterId}章出现编号公式，公式只能放在第四章软件设计`));
+    if (!softwareChapterIds.includes(chapterId) && (equations.get(chapterId) || []).length) {
+      issues.push(issue(`artifact-formula-wrong-chapter-${chapterId}`, chapterId, `第${chapterId}章出现编号公式，公式应放在目录安排的软件或控制逻辑内容处`));
     }
 
     (visualBlocks.get(chapterId) || []).forEach((record, index) => {
@@ -345,8 +352,11 @@ export function synchronizeArtifactPresentation(content = '', artifacts = []) {
 export function mergeFinalQualityIssues(localIssues = [], aiIssues = []) {
   const seen = new Set();
   return [...(localIssues || []), ...(aiIssues || [])]
-    .filter(record => record && !record.autoRepaired && !record.pendingFinalVerification && record.message)
+    .filter(record => record && !record.autoRepaired && record.resolved !== true && !['resolved', 'fixed', 'repaired', 'passed'].includes(record.status) && record.message)
     .filter(record => !isResolvedQualityConclusion(record.message))
+    .map(record => record.pendingFinalVerification && !record.verificationReminder
+      ? { ...record, severity: 'warning', verificationReminder: true, message: `修改后尚待最终复核：${record.message}` }
+      : record)
     .filter(record => {
       const key = `${record.chapterId || ''}|${record.message}`;
       if (seen.has(key)) return false;
@@ -360,6 +370,8 @@ export function mergeFinalQualityIssues(localIssues = [], aiIssues = []) {
 export function isResolvedQualityConclusion(message = '') {
   const text = String(message).replace(/\s+/g, '').replace(/[，,；;。.!！]+$/g, '');
   if (!text) return false;
+  // A positive clause must not hide an unresolved issue later in the same message.
+  if (/(?:但是|但|然而|不过|仍|尚|建议|缺少|缺失|遗漏|不一致|未完成|未解决|待确认|待复核|必须|应当|(?<!不)需要)/.test(text)) return false;
   return [
     /(?:与|同).{0,30}(?:事实|方案|确认信息|实际|前文)?.{0,12}(?:一致|相符|吻合).{0,16}(?:无|未发现|不存在)(?:明显)?(?:矛盾|冲突|问题)/,
     /(?:描述|内容|接线|引脚|型号|接口|逻辑).{0,20}(?:正确|一致|相符|吻合).{0,16}(?:无需|不需要)(?:修复|修改|调整)/,

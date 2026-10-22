@@ -58,7 +58,7 @@ const summaries = cases.map(testCase => {
   const softwareArchitecture = artifacts.find(item => item.type === 'software-architecture');
   assert.match(framework.instruction, /硬件组成、数据方向和控制方向/);
   assert.match(softwareArchitecture.instruction, /程序模块的调用层级/);
-  assert.match(softwareArchitecture.instruction, /不得照搬第二章系统总体功能框架图/);
+  assert.match(softwareArchitecture.instruction, /不得照搬总体方案小节的系统总体功能框架图/);
   testCase.functions.forEach(func => {
     assert.equal(functionalFlows.filter(item => item.sourceFactIds.includes(func.id)).length, 1, `${func.id} flow coverage`);
     assert.equal(resultImages.filter(item => item.sourceFactIds.includes(func.id)).length, 1, `${func.id} image coverage`);
@@ -77,7 +77,8 @@ const structures = [
   '基于单片机的智能鱼缸控制系统', '基于ESP32的居家安全监测系统',
   '基于Arduino的温室环境调节系统', '基于STM32的停车场管理系统',
 ].map(title => buildProjectOutline({ title, devices, functions: cases[1].functions, targetBodyChars: 15000 }).slice(1, 5).map(chapter => chapter.title).join('|'));
-assert.ok(new Set(structures).size >= 2, 'outline variants should differ across project titles');
+assert.equal(new Set(structures).size, 1, '未提供参考目录时采用统一默认结构，三级标题仍按项目变化');
+assert.ok(buildProjectOutline().every(chapter=>chapter.sections.at(-1).endsWith('本章小结')));
 
 const stcDevices = [{ id: 'mcu-51', model: 'STC89C52RC', role: '主控单片机' }, { id: 'sensor-1', model: 'DS18B20', role: '温度传感器' }];
 const stcOutline = buildProjectOutline({ title: '基于51单片机的温度监测系统', devices: stcDevices, functions: cases[0].functions, targetBodyChars: 15000 });

@@ -731,6 +731,13 @@ svg {
 .chapter-empty { display: grid; gap: 5px; padding: 28px 20px; text-align: center; color: var(--muted); }
 .chapter-empty strong { color: var(--ink); font-size: 15px; }
 .chapter-empty span { font-size: 13px; line-height: 1.6; }
+.outline-preview { margin-top: 16px; padding: 16px 20px; border: 1px solid var(--border); border-radius: var(--radius); background: white; }
+.outline-preview summary { cursor: pointer; font-weight: 650; line-height: 1.7; }
+.outline-preview summary span { margin-left: 12px; color: var(--muted); font-size: 13px; font-weight: 400; }
+.outline-preview h4 { margin: 20px 0 8px; font-size: 15px; }
+.outline-preview p { margin: 6px 0; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.outline-preview .outline-h3 { padding-left: 1.5em; color: var(--muted); }
+#outline-reference-usage { border-top: 1px solid var(--border); margin-top: 18px; }
 .chapter-row { display: grid; grid-template-columns: 38px minmax(0,1fr) auto; align-items: center; gap: 13px; min-height: 72px; padding: 10px 18px; border-bottom: 1px solid var(--border); }
 .chapter-row:last-child { border-bottom: 0; }
 .chapter-number { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; color: var(--faint); background: var(--bg); font-size: 12px; font-weight: 750; }
@@ -900,3 +907,7 @@ svg {
   .daily-motivation-track { left: 0; transform: none !important; animation: none !important; }
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+/* The extracted outline stays inspectable and editable before any body writing. */
+.outline-import-text { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; line-height:1.7; width:100%; min-height:16rem; max-height:36rem; overflow:auto; resize:vertical; margin:8px 0 12px; }
+.outline-import-issues { margin:12px 0; padding:12px 12px 12px 30px; color:#8c471d; background:#fff7ed; border:1px solid #fed7aa; border-radius:8px; overflow-wrap:anywhere; max-height:14rem; overflow:auto; }
+.outline-import-issues li + li { margin-top:6px; }

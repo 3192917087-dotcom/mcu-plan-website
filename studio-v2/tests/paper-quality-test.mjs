@@ -105,8 +105,36 @@ const merged = mergeFinalQualityIssues(
     { chapterId: '3', severity: 'warning', message: '接线描述正确，无需修改。' },
   ],
 );
-assert.deepEqual(merged.map(item => item.message), ['最终仍存在的问题', '最终AI提醒']);
+assert.deepEqual(merged.map(item => item.message), ['最终仍存在的问题', '修改后尚待最终复核：等待最终复核', '最终AI提醒']);
+assert.equal(merged[1].severity, 'warning', '尚未复核的修改只能显示为提醒，不能冒充已经通过');
+assert.deepEqual(mergeFinalQualityIssues(merged), merged, '重复展示不能重复添加待复核提示');
+assert.deepEqual(mergeFinalQualityIssues([], [
+  { message: '已修复', status: 'fixed' },
+  { message: '已解决', resolved: true },
+  { message: '问题仍存在', resolved: false },
+]), [{ message: '问题仍存在', resolved: false }]);
 assert.equal(isResolvedQualityConclusion('ESP-01S使用PA9和PA10，与确认信息一致，未发现矛盾。'), true);
 assert.equal(isResolvedQualityConclusion('ESP-01S引脚与确认信息不一致，存在矛盾。'), false);
+assert.equal(isResolvedQualityConclusion('DHT11接线描述正确，无需修改。但MQ-2供电描述缺少限制。'), false, '正确结论不能掩盖同条提醒中的真实问题');
+
+// Exact numbers and device names: 2-1 must not include 2-10, LED must not include OLED.
+const manyArtifacts = [];
+const manyBlocks = [];
+for (let i = 1; i <= 12; i++) {
+  const title = i === 1 ? 'LED器件图' : i === 2 ? '0.96寸OLED器件图' : `器件${i}图`;
+  manyArtifacts.push({ id: `f${i}`, type: 'device-image', chapterId: '2', figureNumber: `2-${i}`, title });
+  manyArtifacts.push({ id: `t${i}`, type: 'comparison-table', chapterId: '2', tableNumber: `2-${i}`, title: `选型${i}` });
+  manyBlocks.push(`相关器件如图2-${i}所示。\n\n【非正文·插图位置：图2-${i} ${title}】\n【非正文结束】\n\n图2-${i} ${title}\n\n候选器件如表2-${i}所示。\n\n表2-${i} 选型${i}\n\n| 型号 | 说明 |\n|---|---|\n| A | ${'较长的单元格用于验证表格位置计算'.repeat(i)} |\n| B | 短 |`);
+}
+const manyChapters = { 2: { id: '2', content: manyBlocks.join('\n\n') } };
+assert.deepEqual(validateArtifactLedger({ artifacts: manyArtifacts, chapters: manyChapters }), [], '长短表格行、两位编号、相似器件名称均不得产生误报');
+manyChapters[2].content += '\n\n重复引用如图2-1所示。';
+assert.ok(validateArtifactLedger({ artifacts: manyArtifacts, chapters: manyChapters }).some(item => item.id === 'artifact-reference-count-figure:2-1'), '真正的重复引用仍需报告');
+
+const explained = structuredClone(goodChapters);
+explained[4].content += '\n\n式中，v为声速，常温下取v=340m/s；t为高电平持续时间。';
+assert.deepEqual(validateArtifactLedger({ artifacts, chapters: explained }), [], '变量解释和带斜线单位不是未编号公式');
+explained[4].content += '\n\nd = v * t / 2';
+assert.ok(validateArtifactLedger({ artifacts, chapters: explained }).some(item => item.id.startsWith('artifact-formula-unnumbered')), '真实的未编号独立公式仍需报告');
 
 console.log(JSON.stringify({ artifacts: artifacts.length, brokenIssues: broken.length, unplannedIssues: unplanned.length, status: 'ok' }));

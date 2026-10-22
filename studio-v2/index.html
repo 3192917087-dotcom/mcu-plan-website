@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f6f8f7">
   <title>雄鸡工作室｜单片机方案与论文</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="styles.css?v=20260901-3">
+  <link rel="stylesheet" href="styles.css?v=20261022-1">
 </head>
 <body>
   <a class="skip-link" href="#workspace-main">跳到主要内容</a>
@@ -144,13 +144,13 @@
                   <label class="count-field" id="scheme-count-wrap" hidden><span class="sr-only">功能数量</span><input id="scheme-count" type="number" min="3" max="20" value="8"></label>
                 </fieldset>
                 <section class="scheme-preferences" aria-labelledby="scheme-preferences-title">
-                  <div class="section-title compact-section-title"><span>可选约束</span><h2 id="scheme-preferences-title">指定项目常用配置</h2><p>不选择时由系统按题目确定；已选择内容和附加要求优先。</p></div>
+                  <div class="section-title compact-section-title"><span>可选约束</span><h2 id="scheme-preferences-title">指定项目常用配置</h2><p>APP和云平台均未选时不添加通信模块，附加要求优先。</p></div>
                   <div class="preference-grid">
                     <label class="field" for="scheme-controller"><span>主控</span><select id="scheme-controller"><option value="auto">自动选择</option><option>STM32F103C8T6</option><option>STM32F407ZGT6</option><option>STC89C52RC</option><option>AT89C52</option><option>ESP32</option></select></label>
                     <label class="field" for="scheme-display"><span>屏幕</span><select id="scheme-display"><option value="auto">自动选择</option><option value="none">不使用屏幕</option><option>0.96寸OLED</option><option>LCD1602</option><option>1.8寸TFT</option><option>数码管</option></select></label>
                     <details class="multi-select" data-multi-select="programmingSoftware"><summary><span>编程软件</span><strong data-multi-summary>自动选择</strong></summary><div class="multi-select-panel"><label><input type="checkbox" value="Keil 5">Keil 5</label><label><input type="checkbox" value="STM32CubeMX">STM32CubeMX</label><label><input type="checkbox" value="IAR">IAR</label><label><input type="checkbox" value="Arduino IDE">Arduino IDE</label></div></details>
-                    <details class="multi-select" data-multi-select="appSoftware"><summary><span>APP设计软件</span><strong data-multi-summary>不指定</strong></summary><div class="multi-select-panel"><label><input type="checkbox" value="MIT App Inventor">MIT App Inventor</label><label><input type="checkbox" value="Android Studio">Android Studio</label><label><input type="checkbox" value="微信小程序">微信小程序</label></div></details>
-                    <details class="multi-select" data-multi-select="cloudPlatforms"><summary><span>云平台</span><strong data-multi-summary>不使用</strong></summary><div class="multi-select-panel"><label><input type="checkbox" value="OneNET">OneNET</label><label><input type="checkbox" value="阿里云IoT">阿里云IoT</label><label><input type="checkbox" value="巴法云">巴法云</label><label><input type="checkbox" value="私有物联网服务器">私有物联网服务器</label></div></details>
+                    <details class="multi-select" data-multi-select="appSoftware"><summary><span>APP设计软件</span><strong data-multi-summary>不使用</strong></summary><div class="multi-select-panel"><label><input type="checkbox" value="MIT App Inventor">MIT App Inventor</label><label><input type="checkbox" value="Android Studio">Android Studio</label><label><input type="checkbox" value="微信小程序">微信小程序</label></div></details>
+                    <details class="multi-select" data-multi-select="cloudPlatforms"><summary><span>云平台</span><strong data-multi-summary>不使用</strong></summary><div class="multi-select-panel"><label><input type="checkbox" value="OneNET">OneNET</label><label><input type="checkbox" value="阿里云IoT">阿里云IoT</label><label><input type="checkbox" value="巴法云">巴法云</label><label><input type="checkbox" value="点灯科技 Blinker">点灯科技 Blinker</label><label><input type="checkbox" value="私有物联网服务器">私有物联网服务器</label></div></details>
                   </div>
                 </section>
                 <div class="form-footer"><span class="autosave-note"><span class="save-dot" aria-hidden="true"></span>自动保存</span><button class="button button-primary button-large" type="submit">生成方案</button></div>
@@ -250,13 +250,18 @@
                       <textarea class="sr-only" id="paper-schematic-text" aria-label="原理图提取文字"></textarea>
                     </div>
                     <div class="field field-wide outline-reference-field">
-                      <span>参考目录 <small>可选，AI会参考结构后生成一版项目目录</small></span>
-                      <textarea id="paper-outline-reference" rows="7" placeholder="可粘贴学校目录或往届论文目录；不提供时按本科论文六章职责规划"></textarea>
+                      <label for="paper-outline-reference">参考目录 <small>可选，保留学校目录的章节安排和内容方向</small></label>
+                      <textarea id="paper-outline-reference" class="outline-import-text" rows="10" spellcheck="false" placeholder="粘贴目录或导入文件，AI解读后的目录直接显示在这里，可使用或修改。未提供时使用默认六章目录。"></textarea>
                       <div class="scheme-file-actions compact-file-actions">
                         <label class="button button-secondary" for="paper-outline-file">导入目录文件</label>
-                        <input class="sr-only" id="paper-outline-file" type="file" accept=".docx,.txt,.md,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
-                        <small id="outline-file-summary">支持 DOCX、TXT、MD</small>
+                        <input class="sr-only" id="paper-outline-file" type="file" multiple accept=".docx,.txt,.md,.pdf,.png,.jpg,.jpeg,.webp,.bmp,image/png,image/jpeg,image/webp,image/bmp,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+                        <button type="button" class="button button-secondary" id="btn-analyze-outline-reference">AI解读目录</button>
+                        <button type="button" class="button button-secondary" id="btn-cancel-outline-reference" hidden>取消</button>
+                        <small id="outline-file-summary">支持图片、DOCX、PDF、TXT、MD，可多选</small>
                       </div>
+                      <p id="outline-import-status" class="inline-task-status" role="status" aria-live="polite"></p>
+                      <ul id="outline-import-issues" class="outline-import-issues" hidden></ul>
+                      <button type="button" class="button button-primary" id="btn-confirm-outline-reference" hidden>直接使用此目录</button>
                     </div>
                     <label class="reference-use-option" for="paper-use-references">
                       <input id="paper-use-references" type="checkbox" checked>
@@ -310,6 +315,11 @@
               <div class="progress-track" aria-label="论文生成进度"><span id="generation-progress" style="width:0%"></span></div>
               <div class="phase-line" id="generation-phases"></div>
               <div class="chapter-list" id="chapter-list"></div>
+              <details class="outline-preview" id="outline-preview" hidden>
+                <summary>查看论文目录<span id="outline-preview-status"></span></summary>
+                <div id="outline-preview-content"></div>
+                <div id="outline-reference-usage"></div>
+              </details>
 
               <div class="quality-panel" id="quality-panel" hidden>
                 <header><h3>最终稿检查结果</h3><span id="quality-summary" role="status" aria-live="polite" aria-atomic="true"></span></header>
@@ -375,6 +385,6 @@
   <script>if (globalThis.pdfjsLib) globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';</script>
   <script src="vendor/docx.umd.js"></script>
   <script src="docx-export.js?v=20260901-3"></script>
-  <script type="module" src="app.js?v=20260927-2"></script>
+  <script type="module" src="app.js?v=20261022-1"></script>
 </body>
 </html>

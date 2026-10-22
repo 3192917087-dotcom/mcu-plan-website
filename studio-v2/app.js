@@ -1,5 +1,12 @@
 import * as Store from './storage.js?v=20260826-1';
-import * as Prompts from './prompts.js?v=20260927-2';
+import * as Prompts from './prompts.js?v=20261018-3';
+import { OUTLINE_POLICY_VERSION, parseReferenceOutline, referenceAdoptionIssues, validateOutlineStructure, chapterRoles, hasChapterRole, findRoleChapter, selectionChapter, activeChapterRecords, applyPlannedOutline, chapterProgressLabel, insertChapterSupplement, normalizeReferenceUsage, completePartialIntroduction, effectiveReferenceText, ensurePcbOutline, pcbDesignPolicy, synchronizePaperOrganization, organizationCoverageIssues } from './outline-policy.js?v=20261018-3';
+import { REFERENCE_IMPORT_VERSION, readReferenceFiles, buildReferenceInterpretationMessages, validateReferenceInterpretation, referenceReviewState, confirmReferenceInterpretation, referenceEditorText, updateReferenceEditorText } from './reference-import.js?v=20261019-2';
+import { devicePlanGroups, matchesDevice, paperMaterialPreflight } from './paper-preflight.js?v=20261017-2';
+import { buildSchemePolicy, schemeResultIssues } from './scheme-policy.js?v=20261011-2';
+import { requestAi, resolveAiProfile, taskFromLabel } from './ai-runtime.js?v=20261017-1';
+import { schemaForTask, AI_SCHEMAS } from './ai-schemas.js?v=20261018-2';
+import { inputStamp, briefInput, buildKimiBriefMessages, buildConfirmedWritingBrief, validateKimiBrief, withKimiContext, buildKimiPatchMessages, buildKimiAuditMessages, applyKimiPatch } from './kimi-workflow.js?v=20261018-3';
 import { allPins, compatiblePins, validateMappings } from './pin-data.js?v=20260830-1';
 import { REFERENCE_LIBRARY, REFERENCE_LIBRARY_META } from './reference-library.js?v=20260826-2';
 import * as Rules from '../studio-next/rules.js?v=20260927-2';
@@ -9,7 +16,7 @@ import {
   mergeFinalQualityIssues,
   synchronizeArtifactPresentation,
   validateArtifactLedger,
-} from './paper-quality.js?v=20260901-3';
+} from './paper-quality.js?v=20261018-3';
 
 const PAGE_CONFIG = globalThis.MCU_PAGE_CONFIG || {};
 const APP_TITLE = '雄鸡工作室｜单片机方案与论文';
@@ -21,7 +28,7 @@ const MOTIVATION_REFRESH_MAX_MS = 4 * 60 * 1000;
 const MOTIVATION_SCHEDULE_VERSION = 2;
 const MOTIVATION_AI_INTERVAL = 4;
 const MIN_BODY_CHARS = 15000;
-const QUALITY_ENGINE_VERSION = 2;
+const QUALITY_ENGINE_VERSION = 4;
 const MAX_PROGRAM_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_PROGRAM_TOTAL_CHARS = 240000;
 const PROGRAM_FILE_EXTENSIONS = new Set([
@@ -57,6 +64,7 @@ let schemeStep = 'input';
 let paperStep = 'materials';
 let requestController = null;
 let requestTask = '';
+let generationApiConfig = null;
 let saveTimer = null;
 let saveQueue = Promise.resolve();
 let generationClock = null;
@@ -300,7 +308,7 @@ function countBodyChars(value) {
     .replace(/^\s*\|.*\|\s*$/gm, '')
     .replace(/[\s`*_#|\-]/g, '').length;
 }
-function totalBodyChars() { return Object.values(project?.paper?.chapters || {}).reduce((sum, chapter) => sum + countBodyChars(chapter.content), 0); }
+function totalBodyChars() { return activeChapterRecords(project?.paper).reduce((sum, chapter) => sum + countBodyChars(chapter.content), 0); }
 function formatTime(totalSeconds) {
   const seconds = Math.max(0, Number(totalSeconds) || 0);
   const hours = Math.floor(seconds / 3600);
@@ -432,10 +440,10 @@ function createBlankProject(name = '未命名项目', start = 'paper') {
 }
 
 function inferChapterKind(title = '') {
-  if (/绪论|引言/.test(title)) return 'introduction';
+  if (/绪论|引言|前言/.test(title)) return 'introduction';
   if (/需求|可行性/.test(title)) return 'requirement';
   if (/总体|方案/.test(title)) return 'overall';
-  if (/软硬件|实现/.test(title)) return 'implementation';
+  if (/软硬件/.test(title)) return 'implementation';
   if (/硬件|电路/.test(title)) return 'hardware';
   if (/软件|程序/.test(title)) return 'software';
   if (/测试|调试/.test(title)) return 'test';
@@ -643,10 +651,10 @@ function bumpFactRevision(reason = '资料已修改') {
   project.paper.outlinePlanning = { status: 'stale', generatedAt: '', summary: `${reason}，生成论文时将重新规划结构`, lastError: '', source: '', inputRevision: '' };
   project.paper.titleEn = '';
   project.paper.artifacts = [];
-  Object.values(project.paper.chapters || {}).forEach(chapter => {
+  activeChapterRecords(project.paper).forEach(chapter => {
     if (chapter?.content) chapter.status = 'stale';
   });
-  if (Object.values(project.paper.chapters || {}).some(chapter => chapter?.content)) {
+  if (activeChapterRecords(project.paper).some(chapter => chapter?.content)) {
     project.paper.generation.status = 'stale';
     project.paper.generation.message = `${reason}，原有正文已保留，继续生成时会更新受影响章节`;
   }
@@ -657,8 +665,8 @@ function invalidateOutlinePlan(reason = '参考目录已修改') {
   project.paper.outlineConfirmedAt = '';
   project.paper.outlinePlanning = { status: 'stale', generatedAt: '', summary: `${reason}，生成论文时将重新规划结构`, lastError: '', source: '', inputRevision: '' };
   project.paper.artifacts = [];
-  Object.values(project.paper.chapters || {}).forEach(chapter => { if (chapter?.content) chapter.status = 'stale'; });
-  if (Object.values(project.paper.chapters || {}).some(chapter => chapter?.content)) {
+  activeChapterRecords(project.paper).forEach(chapter => { if (chapter?.content) chapter.status = 'stale'; });
+  if (activeChapterRecords(project.paper).some(chapter => chapter?.content)) {
     project.paper.generation.status = 'stale';
     project.paper.generation.message = `${reason}，原有正文已保留，下次生成时会自动更新结构`;
   }
@@ -887,129 +895,40 @@ async function wait(milliseconds, signal) {
   });
 }
 
-function extractAiContent(data, { jsonMode = false } = {}) {
-  const message = data?.choices?.[0]?.message || data?.message || {};
-  const flatten = value => {
-    if (typeof value === 'string') return value;
-    if (Array.isArray(value)) return value.map(item => typeof item === 'string' ? item : item?.text || item?.content || '').filter(Boolean).join('\n');
-    return value?.text || value?.content || '';
-  };
-  const direct = [flatten(message.content), flatten(data?.output_text), flatten(data?.result), flatten(data?.content)].find(value => String(value || '').trim());
-  if (direct) return String(direct);
-  if (Array.isArray(data?.output)) {
-    const output = data.output.flatMap(item => item?.content || []).map(item => item?.text || item?.content || '').filter(Boolean).join('\n');
-    if (output.trim()) return output;
-  }
-  const reasoningText = flatten(message.reasoning_content || message.reasoning || data?.reasoning_content);
-  if (jsonMode && /[\[{]/.test(reasoningText)) {
-    try { parseJsonResponse(reasoningText); return reasoningText; } catch (error) {}
-  }
-  return '';
-}
+function paperApiConfig() { return generationApiConfig || loadApiSettings(); }
+function isKimiWorkflow() { return resolveAiProfile(paperApiConfig()).id === 'kimi-k3'; }
 
-async function callAi(messages, { reasoning = false, maxTokens = 8192, jsonMode = false, signal, requestLabel = '生成内容', configOverride = null, timeoutMs = 0 } = {}) {
-  const config = configOverride || loadApiSettings();
-  if (!config.apiUrl || !config.apiKey || !config.chatModel) throw new Error('尚未填写API，请点击右上角“API未设置”完成配置');
-  const isDeepSeek = config.provider === 'deepseek' || /api\.deepseek\.com/i.test(config.apiUrl);
-  const basePayload = {
-    model: reasoning ? (config.reasoningModel || config.chatModel) : config.chatModel,
-    messages,
-    stream: false,
-    max_tokens: Math.min(Math.max(256, Number(maxTokens) || 8192), 32768),
-  };
-  if (isDeepSeek) {
-    basePayload.thinking = { type: reasoning ? 'enabled' : 'disabled' };
-    if (!reasoning) basePayload.temperature = 0.35;
-    if (jsonMode) basePayload.response_format = { type: 'json_object' };
-  } else if (config.provider === 'moonshot' || config.provider === 'zhipu') {
-    basePayload.temperature = 1;
-    if (reasoning && config.provider === 'zhipu') basePayload.thinking = { type: 'enabled' };
-    if (jsonMode && config.provider === 'zhipu') basePayload.response_format = { type: 'json_object' };
-  } else if (config.provider === 'openai') {
-    delete basePayload.max_tokens;
-    basePayload.max_completion_tokens = Math.min(Math.max(256, Number(maxTokens) || 8192), 32768);
-    if (jsonMode) basePayload.response_format = { type: 'json_object' };
-  } else if (!reasoning) basePayload.temperature = 0.35;
-
-  const firstTimeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : reasoning ? 4 * 60 * 1000 : 3 * 60 * 1000;
-  const timeouts = [firstTimeout, Math.max(45 * 1000, Math.min(2 * 60 * 1000, Math.round(firstTimeout * 0.72)))];
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const payload = clone(basePayload);
-    if (attempt > 0) {
-      payload.model = config.chatModel;
-      if (payload.thinking) payload.thinking = { type: 'disabled' };
-      if (isDeepSeek) payload.temperature = 0.25;
-      payload.messages = [...messages, { role: 'user', content: jsonMode ? '上次没有得到最终结果。请跳过推理过程，直接返回完整、合法的JSON。' : '上次没有得到最终正文。请跳过推理过程，直接返回完整最终内容。' }];
-    }
-    const controller = new AbortController();
-    const forwardAbort = () => controller.abort(signal?.reason || new DOMException('已暂停', 'AbortError'));
-    signal?.addEventListener('abort', forwardAbort, { once: true });
-    const timeout = setTimeout(() => controller.abort(new DOMException(`${requestLabel}等待超时`, 'TimeoutError')), timeouts[attempt]);
-    setOperationStatus('busy', `${requestLabel}${attempt ? '正在自动重试' : '进行中'}`);
-    if (project?.paper?.generation && requestTask === 'paper-generation') {
-      project.paper.generation.activeRequestLabel = `${requestLabel}${attempt ? '（重试）' : ''}`;
-      project.paper.generation.updatedAt = nowIso();
-      renderGeneration();
-    }
-    try {
-      const response = await fetch(config.apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      const raw = await response.text();
-      let data = {};
-      try { data = raw ? JSON.parse(raw) : {}; } catch (error) {}
-      if (!response.ok) {
-        const message = data?.error?.message || data?.message || raw.slice(0, 300);
-        if (attempt === 0 && response.status === 400 && /temperature/i.test(message)) {
-          delete basePayload.temperature;
-          await wait(300, signal);
-          continue;
+async function callAi(messages, { reasoning = false, maxTokens = 8192, jsonMode = false, signal, requestLabel = '生成内容', configOverride = null, timeoutMs = 0, task = '', schema = null, onPartial = null } = {}) {
+  const config = configOverride || (requestTask === 'paper-generation' ? paperApiConfig() : loadApiSettings());
+  const requestTaskType = task || taskFromLabel(requestLabel, jsonMode);
+  const quiet = requestTaskType === 'motivation';
+  let lastProgressAt = 0;
+  try {
+    const result = await requestAi(config, messages, {
+      reasoning, maxTokens, jsonMode, signal, requestLabel, timeoutMs, task: requestTaskType,
+      schema: schema || (jsonMode ? schemaForTask(requestTaskType, requestLabel) : null),
+      onProgress: async progress => {
+        if (Date.now() - lastProgressAt < 1500 && !['complete', 'retrying', 'continuing'].includes(progress.phase)) return;
+        lastProgressAt = Date.now();
+        const phase = { connecting: '正在连接', thinking: '正在分析', writing: '正在输出', retrying: '正在恢复请求', continuing: '正在续写' }[progress.phase] || '已完成';
+        if (!quiet) setOperationStatus(progress.phase === 'complete' ? 'success' : 'busy', `${requestLabel}：${phase}`);
+        if (project?.paper?.generation && requestTask === 'paper-generation' && !configOverride) {
+          project.paper.generation.activeRequestLabel = `${requestLabel}（${phase}）`;
+          project.paper.generation.updatedAt = nowIso();
+          renderGeneration();
         }
-        const retryable = [408, 425, 429, 500, 502, 503, 504].includes(response.status);
-        if (retryable && attempt === 0) {
-          await wait(1800, signal);
-          continue;
-        }
-        throw new Error(classifyApiFailure(message, response.status));
-      }
-      const content = extractAiContent(data, { jsonMode });
-      if (!String(content).trim()) {
-        const emptyError = new Error('AI没有返回最终文本');
-        emptyError.code = 'EMPTY_AI_CONTENT';
-        throw emptyError;
-      }
-      setOperationStatus('success', `${requestLabel}已完成`);
-      return sanitizeTechnicalText(String(content).replace(/<think>[\s\S]*?<\/think>/gi, '').trim());
-    } catch (error) {
-      if (signal?.aborted) {
-        setOperationStatus('idle');
-        throw signal.reason || new DOMException('已暂停', 'AbortError');
-      }
-      const timeoutError = error?.name === 'TimeoutError' || controller.signal.aborted;
-      if ((timeoutError || error instanceof TypeError || error?.code === 'EMPTY_AI_CONTENT') && attempt === 0) {
-        await wait(1200, signal);
-        continue;
-      }
-      if (timeoutError) {
-        setOperationStatus('error', `${requestLabel}超时`);
-        throw new Error(`${requestLabel}等待时间过长，已保留当前进度`);
-      }
-      if (error instanceof TypeError) {
-        setOperationStatus('error', `${requestLabel}连接失败`);
-        throw new Error('浏览器无法连接该API。请检查接口地址、网络以及厂家是否允许网页跨域调用（CORS）');
-      }
-      setOperationStatus('error', `${requestLabel}失败`);
-      throw error;
-    } finally {
-      clearTimeout(timeout);
-      signal?.removeEventListener('abort', forwardAbort);
-    }
+        if (onPartial && progress.text && progress.phase !== 'complete') await onPartial(progress.text);
+      },
+    });
+    return sanitizeTechnicalText(result.text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim());
+  } catch (error) {
+    if (!quiet) setOperationStatus(signal?.aborted ? 'idle' : 'error', `${requestLabel}未完成`);
+    if (signal?.aborted) throw signal.reason || error;
+    // EMPTY_AI_CONTENT and length failures are handled by the provider adapter, never accepted as finished text.
+    if (error.status) error.message = classifyApiFailure(error.message, error.status);
+    if (error instanceof TypeError) error.message = '浏览器无法连接该API。请检查接口地址、网络以及厂家是否允许网页跨域调用（CORS）';
+    throw error;
   }
-  setOperationStatus('error', `${requestLabel}失败`);
-  throw new Error(`${requestLabel}失败，请稍后继续`);
 }
 
 async function parseAiJson(raw, { signal, requestLabel = '整理数据', maxTokens = 7000 } = {}) {
@@ -1145,7 +1064,7 @@ function renderMultiSelectSummary(details) {
   const selected = qsa('input[type="checkbox"]:checked', details).map(input => input.value);
   const summary = qs('[data-multi-summary]', details);
   if (!summary) return;
-  const emptyLabel = details.dataset.multiSelect === 'programmingSoftware' ? '自动选择' : details.dataset.multiSelect === 'cloudPlatforms' ? '不使用' : '不指定';
+  const emptyLabel = details.dataset.multiSelect === 'programmingSoftware' ? '自动选择' : '不使用';
   summary.textContent = selected.length ? selected.join('、') : emptyLabel;
   summary.title = summary.textContent;
 }
@@ -1242,34 +1161,37 @@ async function generateScheme(event) {
   try {
     const functionCount = project.scheme.countMode === 'custom'
       ? project.scheme.functionCount
-      : Math.max(5, Math.min(12, 5 + Math.floor(Math.random() * 6)));
-    let raw = await callAi(Prompts.buildSchemeMessages({ title: project.scheme.title, requirements: project.scheme.requirements, functionCount, preferences: project.scheme.preferences }), { reasoning: false, maxTokens: 5000, jsonMode: true, signal: requestController.signal, requestLabel: '方案生成' });
-    let result = await parseAiJson(raw, { signal: requestController.signal, requestLabel: '方案生成', maxTokens: 5000 });
-    let functionCheck = schemeFunctionDiagnostics(result.functions);
-    // 模型偶尔会把上拉电阻、电源、复位等配套项误放进功能。先在本地过滤；
-    // 若过滤后不足最低功能数，再自动请求一次严格结果，避免让用户手动反复重试。
-    const minimumValidFunctions = Math.min(3, functionCount);
-    if (functionCheck.valid.length < minimumValidFunctions) {
-      const retryRaw = await callAi(Prompts.buildSchemeMessages({
+      : 5 + Math.floor(Math.random() * 6);
+    const policy = buildSchemePolicy({ functionCount, requirements: project.scheme.requirements, preferences: project.scheme.preferences });
+    let structured = null;
+    let previousResult = null;
+    let validationIssues = [];
+    // 新方案在数量和配置全部合格后才保存。重试沿用同一随机数量，
+    // 不截掉多出的功能，也不让配套项占用用户指定的名额。
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const requestLabel = attempt ? '方案功能校验' : '方案生成';
+      const maxTokens = policy.functionCount > 12 ? 7000 : 5000;
+      const raw = await callAi(Prompts.buildSchemeMessages({
         title: project.scheme.title,
         requirements: project.scheme.requirements,
-        functionCount,
+        functionCount: policy.functionCount,
         preferences: project.scheme.preferences,
-        qualityGuard: `上一版功能中有工程配套项或重复项，过滤后只有${functionCheck.valid.length}条；请只返回至少${minimumValidFunctions}条可观察、可制作的系统功能`,
-      }), { reasoning: false, maxTokens: 5000, jsonMode: true, signal: requestController.signal, requestLabel: '方案功能校验' });
-      const retryResult = await parseAiJson(retryRaw, { signal: requestController.signal, requestLabel: '方案功能校验', maxTokens: 5000 });
-      const retryCheck = schemeFunctionDiagnostics(retryResult.functions);
-      if (retryCheck.valid.length > functionCheck.valid.length) {
-        result = retryResult;
-        functionCheck = retryCheck;
-      }
+        policy,
+        previousResult,
+        qualityGuard: validationIssues.join('；'),
+      }), { reasoning: false, maxTokens, jsonMode: true, signal: requestController.signal, requestLabel });
+      const result = await parseAiJson(raw, { signal: requestController.signal, requestLabel, maxTokens });
+      const devices = (Array.isArray(result.devices) ? result.devices : []).map(item => typeof item === 'string'
+        ? { model: normalizeSchemeModelText(item.replace(/[（(].*$/, '').trim()), role: item.match(/[（(]([^）)]+)[）)]/)?.[1] || '外设' }
+        : { model: normalizeSchemeModelText(String(item?.model || item?.name || '').trim()), role: sanitizeTechnicalText(String(item?.role || item?.purpose || '外设').trim()) }).filter(item => item.model);
+      const functionCheck = schemeFunctionDiagnostics(result.functions);
+      const candidate = { title: sanitizeTechnicalText(result.title || project.scheme.title), devices, functions: functionCheck.valid };
+      validationIssues = schemeResultIssues(candidate, policy);
+      if (!validationIssues.length) { structured = candidate; break; }
+      previousResult = candidate;
     }
-    const devices = (Array.isArray(result.devices) ? result.devices : []).map(item => typeof item === 'string'
-      ? { model: normalizeSchemeModelText(item.replace(/[（(].*$/, '').trim()), role: item.match(/[（(]([^）)]+)[）)]/)?.[1] || '外设' }
-      : { model: normalizeSchemeModelText(String(item.model || item.name || '').trim()), role: sanitizeTechnicalText(String(item.role || item.purpose || '外设').trim()) }).filter(item => item.model);
-    const functions = functionCheck.valid;
-    if (!devices.length || functions.length < minimumValidFunctions) throw new Error('方案功能不足或包含工程配套项，请重新生成');
-    project.scheme.structured = { title: sanitizeTechnicalText(result.title || project.scheme.title), devices, functions };
+    if (!structured) throw new Error(`方案未满足填写条件：${validationIssues.join('；')}。请检查附加要求与配置是否冲突，或调整功能数量后重试`);
+    project.scheme.structured = structured;
     project.scheme.text = schemeText(project.scheme.structured);
     project.scheme.status = 'ready';
     project.scheme.generatedAt = nowIso();
@@ -1473,8 +1395,8 @@ function capturePaperMaterials({ invalidate = true } = {}) {
   if (!project) return;
   const materials = project.paper.materials;
   const previousHardware = JSON.stringify({ title: project.title, devicesText: materials.devicesText, functionsText: materials.functionsText, codeText: materials.codeText, sourceNotes: materials.sourceNotes, sourceDocumentText: materials.sourceDocumentText });
-  const previousOutlineReference = materials.outlineReferenceText || '';
   const previousTargetBodyChars = Number(materials.targetBodyChars) || MIN_BODY_CHARS;
+  const previousTestInformation = JSON.stringify([materials.testInfo || '', materials.toolsText || '', materials.photoNotes || '']);
   const previousReferences = JSON.stringify({ text: materials.referencesText || '', use: materials.useReferencesInPaper !== false, count: clampReferenceCount(materials.referenceRecommendationCount) });
   project.title = $('paper-title-input')?.value.trim() || project.title || '';
   materials.devicesText = sanitizeTechnicalText($('paper-devices')?.value.trim() || '');
@@ -1486,19 +1408,28 @@ function capturePaperMaterials({ invalidate = true } = {}) {
   materials.toolsText = $('paper-tools')?.value.trim() || '';
   materials.photoNotes = $('paper-photo-notes')?.value.trim() || '';
   materials.sourceNotes = $('paper-source-notes')?.value.trim() || '';
-  materials.outlineReferenceText = $('paper-outline-reference')?.value.trim() || '';
+  const outlineReferenceChanged=updateReferenceEditorText(materials,$('paper-outline-reference')?.value || '');
   materials.targetBodyChars = Math.max(MIN_BODY_CHARS, Math.min(40000, Number($('paper-target-chars')?.value) || MIN_BODY_CHARS));
-  if (previousOutlineReference !== materials.outlineReferenceText) materials.outlineReferenceFilename = '';
+  if (outlineReferenceChanged) renderOutlineImportStatus({updateEditor:false});
   updateProjectNameFromTitle();
   const nextHardware = JSON.stringify({ title: project.title, devicesText: materials.devicesText, functionsText: materials.functionsText, codeText: materials.codeText, sourceNotes: materials.sourceNotes, sourceDocumentText: materials.sourceDocumentText });
   const nextReferences = JSON.stringify({ text: materials.referencesText || '', use: materials.useReferencesInPaper !== false, count: materials.referenceRecommendationCount });
   if (invalidate && previousHardware !== nextHardware) resetHardwareAnalysis('器件资料已修改');
-  else if (invalidate && previousOutlineReference !== materials.outlineReferenceText) invalidateOutlinePlan('参考目录已修改');
+  else if (invalidate && outlineReferenceChanged) invalidateOutlinePlan('参考目录已修改');
   else if (invalidate && previousTargetBodyChars !== materials.targetBodyChars) invalidateOutlinePlan('正文目标字数已修改');
   else if (invalidate && previousReferences !== nextReferences && project.paper.chapters?.['1']?.content) {
     project.paper.chapters['1'].status = 'stale';
     project.paper.generation.status = 'stale';
     project.paper.generation.message = '参考文献设置已修改，第一章需要更新';
+  }
+  if (invalidate && previousTestInformation !== JSON.stringify([materials.testInfo, materials.toolsText, materials.photoNotes])) {
+    for (const chapter of project.paper.outline || []) {
+      if (hasChapterRole(chapter, 'test') && project.paper.chapters?.[chapter.id]?.content) project.paper.chapters[chapter.id].status = 'stale';
+    }
+    if (activeChapterRecords(project.paper).some(chapter => chapter.status === 'stale')) {
+      project.paper.generation.status = 'stale';
+      project.paper.generation.message = '测试资料已修改，继续生成时将更新对应章节';
+    }
   }
   persistProject();
 }
@@ -1546,7 +1477,7 @@ function renderPaper() {
   $('paper-tools').value = materials.toolsText || '';
   $('paper-photo-notes').value = materials.photoNotes || '';
   $('paper-source-notes').value = materials.sourceNotes || '';
-  $('paper-outline-reference').value = materials.outlineReferenceText || '';
+  $('paper-outline-reference').value = referenceEditorText(materials);
   $('paper-target-chars').value = String(Math.max(MIN_BODY_CHARS, Math.min(40000, Number(materials.targetBodyChars) || MIN_BODY_CHARS)));
   $('paper-scheme-text').value = materials.schemeRawText || '';
   $('scheme-file-summary').textContent = materials.schemeFilename ? `已读取：${materials.schemeFilename}` : materials.schemeRawText ? '已粘贴方案文本' : '支持 DOCX、TXT、MD';
@@ -1560,37 +1491,143 @@ function renderPaper() {
   $('schematic-file-summary').textContent = materials.schematicFilename
     ? `已读取：${materials.schematicFilename}${materials.schematicText ? `（${materials.schematicText.length}字）` : ''}`
     : '尚未选择';
-  $('outline-file-summary').textContent = materials.outlineReferenceFilename ? `已读取：${materials.outlineReferenceFilename}` : materials.outlineReferenceText ? '已粘贴参考目录' : '支持 DOCX、TXT、MD';
+  renderOutlineImportStatus();
   renderPins();
   renderGeneration();
   setPaperStep(paperStep);
 }
 
 async function readOutlineReferenceFile(event) {
-  const file = event.target.files?.[0];
+  const files = [...(event.target.files || [])];
   event.target.value = '';
-  if (!file || !project) return;
-  const extension = file.name.split('.').pop()?.toLowerCase();
+  if (!files.length || !project) return;
+  if (requestController) return toast('当前还有任务正在运行', 'info');
+  capturePaperMaterials({invalidate:true});
+  const projectId=project.id;
+  requestController=new AbortController();
+  requestTask='outline-import';
+  const signal=requestController.signal;
+  $('btn-analyze-outline-reference').disabled=true;
+  $('btn-cancel-outline-reference').hidden=false;
+  const status=$('outline-import-status');
   try {
-    let text = '';
-    if (extension === 'docx') {
-      if (!globalThis.mammoth?.extractRawText) throw new Error('DOCX读取组件尚未加载，请刷新页面后重试');
-      const result = await globalThis.mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
-      text = result.value || '';
-    } else if (extension === 'txt' || extension === 'md') text = await file.text();
-    else throw new Error('请使用DOCX、TXT或MD文件；旧版DOC请先在WPS中另存为DOCX');
-    text = String(text || '').trim();
-    if (!text) throw new Error('文件中没有读取到目录文字');
-    project.paper.materials.outlineReferenceText = text.slice(0, 50000);
-    project.paper.materials.outlineReferenceFilename = file.name;
+    const result=await readReferenceFiles(files,{signal,onProgress:message=>{status.textContent=message;status.className='inline-task-status is-busy';}});
+    if(project.id!==projectId) throw new Error('当前项目已切换，请在目标项目重新导入');
+    project.paper.materials.outlineReferenceText = result.text;
+    project.paper.materials.outlineReferenceFilename = result.filenames.join('、');
+    project.paper.materials.outlineReferenceAnalysis=null;
+    project.paper.materials.outlineReferenceImport={inputText:result.text,ocrReports:result.ocrReports};
     $('paper-outline-reference').value = project.paper.materials.outlineReferenceText;
-    $('outline-file-summary').textContent = `已读取：${file.name}`;
     invalidateOutlinePlan('参考目录已更新');
     await persistProject({ immediate: true });
-    toast('参考目录已读取，确认引脚后AI会结合项目重新规划', 'success');
+    await ensureOutlineReferenceParsed(signal);
+    toast('目录资料已解读，可直接使用，也可按需修改', 'success');
   } catch (error) {
-    toast(error.message || '参考目录读取失败', 'error');
+    if(error.referenceReview) {renderOutlineImportStatus();toast('目录已填入参考目录框，可直接使用，也可先修改','info');return;}
+    status.textContent=signal.aborted?'目录读取已取消，已有文字已保留':error.message || '参考目录读取失败';
+    status.className='inline-task-status is-error';
+    toast(status.textContent,signal.aborted?'info':'error');
+  } finally {
+    requestController=null;requestTask='';
+    $('btn-analyze-outline-reference').disabled=false;
+    $('btn-cancel-outline-reference').hidden=true;
+    $('outline-file-summary').textContent=project?.paper.materials.outlineReferenceFilename ? `已读取：${project.paper.materials.outlineReferenceFilename}` : '支持图片、DOCX、PDF、TXT、MD，可多选';
   }
+}
+
+function renderOutlineImportStatus({updateEditor=true} = {}) {
+  const materials=project?.paper?.materials;
+  if(!materials || !$('outline-file-summary')) return;
+  $('outline-file-summary').textContent=materials.outlineReferenceFilename ? `已读取：${materials.outlineReferenceFilename}` : '支持图片、DOCX、PDF、TXT、MD，可多选';
+  const analysis=materials.outlineReferenceAnalysis;
+  const status=$('outline-import-status');
+  if(!status) return;
+  const current=analysis?.version===REFERENCE_IMPORT_VERSION && analysis.inputText===String(materials.outlineReferenceText || '').trim();
+  const ready=current && analysis.status==='ready';
+  const review=current && analysis.status==='needs-review';
+  status.textContent=ready ? analysis.confirmedByUser?'已使用此参考目录':'已解读，将用于论文，可按需修改' : review?analysis.draftText!==undefined?'目录已修改，保存后用于论文':'目录已解读，可直接使用，也可先修改' : analysis?.status==='failed' ? `解读未完成：${analysis.error}，原文字已保留` : materials.outlineReferenceText ? '生成前将自动解读，也可先点击AI解读核对' : '';
+  if(current && analysis.lastError) status.textContent=`重新解读未完成，已保留当前目录：${analysis.lastError}`;
+  status.className=`inline-task-status${review || analysis?.status==='failed'?' is-error':''}`;
+  if(updateEditor) $('paper-outline-reference').value=referenceEditorText(materials);
+  const issues=$('outline-import-issues');
+  issues.replaceChildren();
+  for(const issue of (current?(review?analysis.reviewIssues:analysis.warnings) || []:[]).slice(0,16)) {const item=document.createElement('li');item.textContent=issue;issues.append(item);}
+  issues.hidden=!issues.children.length;
+  const useButton=$('btn-confirm-outline-reference');
+  useButton.hidden=!(ready || review);
+  useButton.disabled=Boolean(ready && analysis.confirmedByUser);
+  useButton.textContent=ready && analysis.confirmedByUser?'已使用此目录':analysis?.draftText!==undefined?'保存并使用此目录':'直接使用此目录';
+}
+
+async function ensureOutlineReferenceParsed(signal, {force=false} = {}) {
+  const materials=project.paper.materials;
+  const inputText=String(materials.outlineReferenceText || '').trim();
+  if(!inputText) return;
+  const interpretationText=referenceEditorText(materials).trim();
+  const existing=materials.outlineReferenceAnalysis;
+  if(!force && existing?.status==='ready' && existing.inputText===inputText && existing.version===REFERENCE_IMPORT_VERSION) return;
+  if(!force && existing?.status==='needs-review' && existing.inputText===inputText && existing.version===REFERENCE_IMPORT_VERSION) {
+    renderOutlineImportStatus();throw Object.assign(new Error('参考目录尚未采用：请点击“直接使用此目录”，也可先修改'),{referenceReview:true});
+  }
+  const projectId=project.id;
+  $('outline-import-status').textContent='正在调用AI解读原参考目录，保留章节方向和位置';
+  $('outline-import-status').className='inline-task-status is-busy';
+  try {
+    const ocrReports=interpretationText===inputText && materials.outlineReferenceImport?.inputText===inputText?materials.outlineReferenceImport.ocrReports || []:[];
+    let result,validationError='';
+    for(let attempt=0;attempt<2;attempt++) {
+      const messages=buildReferenceInterpretationMessages(interpretationText,attempt?{previousResult:result,validationIssues:[validationError]}:{});
+      const raw=await callAi(messages,{signal,jsonMode:true,task:'reference-outline',schema:AI_SCHEMAS['reference-outline'],maxTokens:9000,requestLabel:attempt?'复核参考目录':'解读参考目录'});
+      result=parseJsonResponse(raw);
+      if(!result?.outlineText?.trim()) throw new Error('AI未返回参考目录，已保留原资料，请重试');
+      try {result=validateReferenceInterpretation(result,interpretationText);validationError='';break;}
+      catch(error) {validationError=error.message;}
+      // Damaged OCR needs original-image review, not repeated model guessing.
+      if(referenceReviewState({outlineText:'',warnings:[]},interpretationText,{ocrReports}).status==='needs-review') break;
+    }
+    if(project.id!==projectId || materials.outlineReferenceText.trim()!==inputText || referenceEditorText(materials).trim()!==interpretationText) throw new Error('参考资料在解读期间已改变，请重新解读');
+    materials.outlineReferenceAnalysis={...result,...referenceReviewState(result,interpretationText,{ocrReports,validationError}),inputText,version:REFERENCE_IMPORT_VERSION,analyzedAt:nowIso()};
+    await persistProject({immediate:true});
+    renderOutlineImportStatus();
+    if(materials.outlineReferenceAnalysis.status==='needs-review') throw Object.assign(new Error('参考目录已解读，可点击“直接使用此目录”，无需先修改'),{referenceReview:true});
+  } catch(error) {
+    if(error.referenceReview) throw error;
+    if(project.id===projectId && materials.outlineReferenceText.trim()===inputText && referenceEditorText(materials).trim()===interpretationText) {
+      materials.outlineReferenceAnalysis=existing?.version===REFERENCE_IMPORT_VERSION && existing.inputText===inputText && ['ready','needs-review'].includes(existing.status)
+        ? {...existing,lastError:error.message || '解读失败'}
+        : {status:'failed',inputText,error:error.message || '解读失败'};
+      await persistProject({immediate:true});
+      renderOutlineImportStatus();
+    }
+    throw error;
+  }
+}
+
+async function analyzeOutlineReference() {
+  if(requestController) return toast('当前还有任务正在运行','info');
+  capturePaperMaterials({invalidate:true});
+  if(!project.paper.materials.outlineReferenceText.trim()) return toast('请先粘贴或导入参考目录','info');
+  requestController=new AbortController();requestTask='outline-import';
+  $('btn-analyze-outline-reference').disabled=true;
+  $('btn-cancel-outline-reference').hidden=false;
+  try {await ensureOutlineReferenceParsed(requestController.signal,{force:true});invalidateOutlinePlan('参考目录已重新解读');await persistProject({immediate:true});}
+  catch(error) {toast(requestController.signal.aborted?'解读已取消':error.message,error.referenceReview?'info':'error');}
+  finally {requestController=null;requestTask='';$('btn-analyze-outline-reference').disabled=false;$('btn-cancel-outline-reference').hidden=true;}
+}
+
+async function confirmOutlineReference() {
+  if(requestController) return toast('请等待当前任务结束后再确认','info');
+  const text=$('paper-outline-reference').value;
+  capturePaperMaterials({invalidate:true});
+  try {
+    const materials=project.paper.materials;
+    const previous=materials.outlineReferenceAnalysis;
+    const warnings=previous && text.trim()===String(previous.outlineText || '').trim() ? [...previous.reviewIssues || [],...previous.warnings || []] : [];
+    const result=confirmReferenceInterpretation(text,{warnings});
+    materials.outlineReferenceAnalysis={...result,inputText:materials.outlineReferenceText.trim(),version:REFERENCE_IMPORT_VERSION,analyzedAt:nowIso()};
+    invalidateOutlinePlan('已确认参考目录');await persistProject({immediate:true});renderOutlineImportStatus();
+    toast('已确认，论文将按此参考目录规划','success');
+  } catch(error) {toast(error.message,'error');}
 }
 
 function programFileExtension(filename = '') {
@@ -1900,12 +1937,13 @@ function controllerPinNotes(controller = '') {
 }
 
 function hardwareDefaults(controller, powerNotes = [], fixedFacts = []) {
+  const pcbPolicy=pcbDesignPolicy({fixedFacts},project?.paper?.materials);
   const defaults = is51Controller(controller)
     ? ['51单片机采用独立最小系统电路，系统各模块必须共地。']
     : [`${controller}按最小系统开发板使用，开发板接收5V DC输入并通过板载稳压获得3.3V，5V与3.3V外设共地。`];
   return {
     powerNotes: unique([...powerNotes.map(sanitizeTechnicalText), ...defaults]),
-    fixedFacts: unique([...fixedFacts.map(sanitizeTechnicalText), ...controllerPinNotes(controller), '凡电路需要上拉电阻时统一使用10 kΩ。', 'TFT彩屏统一使用1.8寸规格，不使用2.8寸TFT。']),
+    fixedFacts: unique([...fixedFacts.map(sanitizeTechnicalText), ...controllerPinNotes(controller), '凡电路需要上拉电阻时统一使用10 kΩ。', 'TFT彩屏统一使用1.8寸规格，不使用2.8寸TFT。', ...(pcbPolicy.enabled ? [`默认使用PCB承载或接口连接板，主控最小系统开发板保留，制图软件为${pcbPolicy.tool}。`] : [])]),
   };
 }
 
@@ -2025,8 +2063,8 @@ async function analyzeHardware(event) {
     project.paper.outlinePlanning = { status: 'idle', generatedAt: '', summary: '生成论文时将自动规划目录', lastError: '', source: '', inputRevision: '' };
     project.paper.outlineConfirmedAt = '';
     project.paper.artifacts = [];
-    Object.values(project.paper.chapters || {}).forEach(chapter => { if (chapter?.content) chapter.status = 'stale'; });
-    if (Object.values(project.paper.chapters || {}).some(chapter => chapter?.content)) project.paper.generation.status = 'stale';
+    activeChapterRecords(project.paper).forEach(chapter => { if (chapter?.content) chapter.status = 'stale'; });
+    if (activeChapterRecords(project.paper).some(chapter => chapter?.content)) project.paper.generation.status = 'stale';
     await persistProject({ immediate: true });
     paperStep = 'pins';
     renderPaper();
@@ -2129,7 +2167,6 @@ function addMapping(event) {
   renderPins();
 }
 
-const OUTLINE_KINDS_BY_ID = Object.freeze({ 1: 'introduction', 2: 'overall', 3: 'hardware', 4: 'software', 5: 'test', 6: 'conclusion' });
 
 function flattenPlannedSections(items, chapterId, output = []) {
   (Array.isArray(items) ? items : []).forEach(item => {
@@ -2154,15 +2191,13 @@ function artifactPlanKey(item) {
 
 function mergeRequiredArtifacts(outline, planned = []) {
   const facts = project.paper.factSheet;
-  const devices = [...(facts.devices || [])];
-  if (facts.controller && !devices.some(device => String(device.model || '').toLowerCase() === String(facts.controller).toLowerCase())) {
-    devices.unshift({ id: `device-controller-${facts.controller}`, model: facts.controller, role: is51Controller(facts.controller) ? '主控单片机' : '主控最小系统开发板', interfaceType: 'GPIO' });
-  }
-  const baseline = Prompts.buildArtifactPlan({ outline, devices, functions: facts.functions, mappings: facts.mappings || [] });
+  const devices = devicePlanGroups(facts.devices || [], facts.controller);
+  const baseline = Prompts.buildArtifactPlan({ outline, devices, functions: facts.functions, mappings: facts.mappings || [], fixedFacts:facts.fixedFacts || [], materials:project.paper.materials, targetBodyChars: desiredBodyChars(), referenceText: effectiveReferenceText(project.paper.materials) });
   const merged = [];
   [...planned, ...baseline].forEach(item => {
     if (item.type === 'hardware-block') return;
-    if (item.type === 'pin-table' && (item.sourceFactIds || []).length > 1) return;
+    if (item.type === 'pin-table' && (item.sourceFactIds || []).length > 1
+      && !devices.some(device => (item.sourceFactIds || []).every(id => device.sourceFactIds.includes(id)))) return;
     const sourceIds = unique(item.sourceFactIds || []);
     const existing = merged.find(existing => {
       if (artifactPlanKey(existing) === artifactPlanKey(item)) return true;
@@ -2201,89 +2236,61 @@ function mergeRequiredArtifacts(outline, planned = []) {
 
 function normalizeOutlinePlanResult(result, targetBodyChars = MIN_BODY_CHARS) {
   const rawChapters = Array.isArray(result?.chapters) ? result.chapters : Array.isArray(result?.outline) ? result.outline : [];
-  const chapters = rawChapters.map((item, index) => {
-    const id = String(item?.id || item?.number || index + 1).match(/[1-6]/)?.[0] || String(index + 1);
-    const title = String(item?.title || item?.name || '').replace(/^第\s*[一二三四五六\d]+\s*章\s*/, '').trim();
-    return { id, title, kind: OUTLINE_KINDS_BY_ID[id] || inferChapterKind(title), sections: unique(flattenPlannedSections(item?.sections || item?.children, id)) };
-  }).filter(chapter => chapter.id && chapter.title).sort((a, b) => Number(a.id) - Number(b.id));
+  const chapters = ensurePcbOutline(completePartialIntroduction(rawChapters.map((item, index) => {
+    const id = String(item?.id || item?.number || index + 1).match(/^\d+/)?.[0] || String(index + 1);
+    const title = String(item?.title || item?.name || '').replace(/^第\s*[一二两三四五六七八九十\d]+\s*章\s*/, '').trim();
+    const kind = ['introduction','overall','hardware','software','implementation','requirement','test','conclusion','other'].includes(item?.kind) ? item.kind : inferChapterKind(title);
+    return { id, title, kind, roles: chapterRoles({kind,roles:item?.roles}), sections: unique(flattenPlannedSections(item?.sections || item?.children, id)) };
+  }).filter(chapter => chapter.id && chapter.title).sort((a, b) => Number(a.id) - Number(b.id)), effectiveReferenceText(project?.paper?.materials)),project?.paper?.factSheet,project?.paper?.materials);
   return {
     summary: String(result?.summary || '').trim(),
+    referenceUsage: normalizeReferenceUsage(Array.isArray(result?.referenceUsage) ? result.referenceUsage.map(item => ({
+      referenceId: String(item?.referenceId || ''), action: String(item?.action || ''),
+      sections: Array.isArray(item?.sections) ? item.sections.map(String) : [], reason: String(item?.reason || '').trim(),
+    })) : [], chapters, effectiveReferenceText(project?.paper?.materials), project?.paper?.factSheet || {}),
     chapters: Prompts.assignChapterTargets(chapters, targetBodyChars, { devices: project?.paper?.factSheet?.devices || [], functions: project?.paper?.factSheet?.functions || [] }),
   };
 }
 
-function outlinePlanIssues(plan) {
-  const errors = [];
-  const outline = plan.chapters || [];
-  const ids = outline.map(chapter => chapter.id);
-  if (outline.length !== 6 || ids.join(',') !== '1,2,3,4,5,6') errors.push('目录必须完整包含连续的第1至第6章');
-  outline.forEach(chapter => {
-    const h2 = (chapter.sections || []).filter(section => new RegExp(`^${chapter.id}\\.\\d+\\s+`).test(section));
-    const h3 = (chapter.sections || []).filter(section => new RegExp(`^${chapter.id}\\.\\d+\\.\\d+\\s+`).test(section));
-    if (h2.length < 2) errors.push(`第${chapter.id}章至少需要两个二级标题`);
-    if (h3.length > 10) errors.push(`第${chapter.id}章三级标题过多，应归纳同类内容`);
-    h3.forEach(section => {
-      const parent = section.match(/^(\d+\.\d+)\./)?.[1];
-      if (parent && !h2.some(item => item.startsWith(`${parent} `))) errors.push(`${section}缺少父级二级标题${parent}`);
-    });
-    const keys = (chapter.sections || []).map(section => section.replace(/^\d+(?:\.\d+){1,2}\s+/, '').replace(/\s+/g, ''));
-    if (new Set(keys).size !== keys.length) errors.push(`第${chapter.id}章存在语义重复的目录标题`);
-  });
-  const intro = outline.find(chapter => chapter.id === '1');
-  const introText = (intro?.sections || []).join(' ');
-  const introH2 = (intro?.sections || []).filter(section => /^1\.\d+\s+/.test(section));
-  const expectedIntroNumbers = ['1.1', '1.2', '1.3', '1.4'];
-  if (introH2.length !== 4 || introH2.map(section => section.match(/^(1\.\d+)/)?.[1]).join(',') !== expectedIntroNumbers.join(',')) errors.push('第一章必须且只能设置1.1至1.4四个二级标题');
-  if (!/1\.2\.\d+\s+国内研究现状/.test(introText) || !/1\.2\.\d+\s+国外研究现状/.test(introText) || !/国内外研究现状(?:评述|分析|比较)/.test(introText)) errors.push('第一章国内外研究现状必须拆分为国内、国外和综合评述三级标题');
-  if (!/1\.3\s+主要研究内容/.test(introText) || !/1\.4\s+论文结构安排/.test(introText)) errors.push('第一章必须把主要研究内容和论文结构安排分成1.3、1.4两个小节');
-  const overallText = (outline.find(chapter => chapter.id === '2')?.sections || []).join(' ');
-  if (!/器件选型/.test(overallText)) errors.push('第二章必须设置结合实际器件的选型内容');
-  return unique(errors);
+function outlinePlanIssues(plan, referenceText = effectiveReferenceText(project?.paper?.materials)) {
+  const context={facts:project?.paper?.factSheet,materials:project?.paper?.materials};
+  return unique([...validateOutlineStructure(plan, referenceText,context), ...referenceAdoptionIssues(plan, referenceText,context), ...Prompts.deviceSelectionPlacementIssues({outline:plan.chapters,facts:project?.paper?.factSheet,targetBodyChars:desiredBodyChars(),referenceText})]);
 }
 
-function generationArtifactPlanIssues(artifacts = []) {
+function generationArtifactPlanIssues(artifacts = [], outline = project.paper.outline || []) {
   const errors = [];
-  const hasType = (type, chapterId) => artifacts.some(item => item.type === type && (!chapterId || item.chapterId === chapterId));
-  if (!hasType('system-framework', '2') || !hasType('comparison-table', '2')) errors.push('第二章缺少总体框架图或器件选型对比表');
-  if (hasType('hardware-block', '3')) errors.push('第三章不得重复生成系统硬件组成图，总体框架只保留在第二章');
-  if (!hasType('circuit', '3')) errors.push('第三章缺少器件电路图');
-  if (!hasType('software-architecture', '4') || !hasType('flowchart', '4')) errors.push('第四章缺少软件结构图或流程图');
-  if (!hasType('test-table', '5') || !hasType('result-image', '5')) errors.push('第五章缺少量化测试表或功能展示图');
-  const functionalFlowcharts = artifacts.filter(item => item.type === 'flowchart' && item.chapterId === '4' && (item.sourceFactIds || []).length);
-  const resultImages = artifacts.filter(item => item.type === 'result-image' && item.chapterId === '5');
-  const testTables = artifacts.filter(item => item.type === 'test-table' && item.chapterId === '5');
-  if (artifacts.some(item => item.type === 'formula' && item.chapterId !== '4')) errors.push('公式应放在第四章软件设计，不应放在第五章');
-  const actualDevices = (project.paper.factSheet.devices || []).map((device, index) => ({ ...device, id: device.id || 'device-' + (index + 1) }));
-  const controller = project.paper.factSheet.controller;
-  if (controller && !actualDevices.some(device => String(device.model || '').toLowerCase() === String(controller).toLowerCase())) actualDevices.unshift({ id: `device-controller-${controller}`, model: controller, role: '主控' });
-  const plannedDeviceKeys = new Set();
-  const plannedDevices = actualDevices.filter(device => {
-    const key = String(device.model || '').replace(/[\s（）()_-]/g, '').toLowerCase();
-    if (!key || plannedDeviceKeys.has(key)) return false;
-    plannedDeviceKeys.add(key);
-    return true;
-  });
+  const hasType = (type, role) => artifacts.some(item => item.type === type && hasChapterRole(outline.find(chapter => chapter.id === item.chapterId), role));
+  if (!hasType('system-framework', 'overall')) errors.push('总体方案内容缺少框架图');
+  if (artifacts.some(item => item.type === 'hardware-block')) errors.push('不能另建重复的硬件总体框架图');
+  if (!hasType('circuit', 'hardware')) errors.push('硬件设计缺少器件电路图');
+  if (!hasType('software-architecture', 'software') || !hasType('flowchart', 'software')) errors.push('软件设计缺少结构图或流程图');
+  if (!hasType('test-table', 'test') || !hasType('result-image', 'test')) errors.push('测试内容缺少量化表格或功能展示图');
+  const functionalFlowcharts = artifacts.filter(item => item.type === 'flowchart' && (item.sourceFactIds || []).length);
+  const resultImages = artifacts.filter(item => item.type === 'result-image');
+  const testTables = artifacts.filter(item => item.type === 'test-table');
+  if (artifacts.some(item => item.type === 'formula' && !hasChapterRole(outline.find(chapter => chapter.id === item.chapterId), 'software'))) errors.push('公式应放在软件或控制逻辑对应章节');
+  const plannedDevices = devicePlanGroups(project.paper.factSheet.devices || [], project.paper.factSheet.controller);
   plannedDevices.forEach(device => {
-    if (!artifacts.some(item => item.type === 'comparison-table' && item.chapterId === '2' && (item.sourceFactIds || []).includes(device.id))) errors.push(device.model + '缺少独立选型对比表计划');
-    if (!artifacts.some(item => item.type === 'device-image' && (item.sourceFactIds || []).includes(device.id))) errors.push(`${device.model}缺少第二章器件图计划`);
-    if (!artifacts.some(item => item.type === 'circuit' && (item.sourceFactIds || []).includes(device.id))) errors.push(`${device.model}缺少第三章电路图计划`);
+    if (!artifacts.some(item => item.type === 'circuit' && (item.sourceFactIds || []).includes(device.id))) errors.push(`${device.model}缺少电路图计划`);
+  });
+  const selection = Prompts.planDeviceSelection({ ...project.paper.factSheet, targetBodyChars: desiredBodyChars(), referenceText: effectiveReferenceText(project.paper.materials) });
+  selection.devices.forEach(device => {
+    for (const type of ['comparison-table','device-image']) if (!artifacts.some(item => item.type === type && item.chapterId === selectionChapter(outline)?.id && (item.sourceFactIds || []).includes(device.id))) errors.push(`${device.model}缺少关键器件选型图表计划`);
   });
   const mappedDeviceNames = unique((project.paper.factSheet.mappings || []).map(mapping => mapping.device));
   mappedDeviceNames.forEach(deviceName => {
-    const mappingKey = String(deviceName || '').replace(/[\s（）()_-]/g, '').toLowerCase();
-    const device = plannedDevices.find(item => {
-      const deviceKey = String(item.model || '').replace(/[\s（）()_-]/g, '').toLowerCase();
-      return mappingKey && deviceKey && (mappingKey === deviceKey || mappingKey.includes(deviceKey) || deviceKey.includes(mappingKey));
-    });
+    const device = plannedDevices.find(item => matchesDevice(deviceName, item));
     if (device && !artifacts.some(item => item.type === 'pin-table' && (item.sourceFactIds || []).includes(device.id))) errors.push(`${device.model}缺少就近放置的独立引脚表`);
   });
-  (project.paper.factSheet.functions || []).forEach(func => {
-    const flowCoverage = functionalFlowcharts.filter(item => (item.sourceFactIds || []).includes(func.id)).length;
-    const imageCoverage = resultImages.filter(item => (item.sourceFactIds || []).includes(func.id)).length;
-    const testCoverage = testTables.filter(item => (item.sourceFactIds || []).includes(func.id)).length;
-    if (flowCoverage !== 1) errors.push(`功能“${func.name}”应恰好归入一条独立程序逻辑链，当前为${flowCoverage}条`);
-    if (imageCoverage !== 1) errors.push(`功能“${func.name}”应恰好归入一个可观察展示场景，当前为${imageCoverage}个`);
-    if (testCoverage !== 1) errors.push(`功能“${func.name}”应恰好归入一张量化测试表，当前为${testCoverage}张`);
+  (project.paper.factSheet.functions || []).forEach((func, index) => {
+    const id = func?.id || `function-${index + 1}`;
+    const name = typeof func === 'string' ? func : func.name || func.source || func.description;
+    const flowCoverage = functionalFlowcharts.filter(item => (item.sourceFactIds || []).includes(id)).length;
+    const imageCoverage = resultImages.filter(item => (item.sourceFactIds || []).includes(id)).length;
+    const testCoverage = testTables.filter(item => (item.sourceFactIds || []).includes(id)).length;
+    if (flowCoverage !== 1) errors.push(`功能“${name}”应恰好归入一条独立程序逻辑链，当前为${flowCoverage}条`);
+    if (imageCoverage !== 1) errors.push(`功能“${name}”应恰好归入一个可观察展示场景，当前为${imageCoverage}个`);
+    if (testCoverage !== 1) errors.push(`功能“${name}”应恰好归入一张量化测试表，当前为${testCoverage}张`);
   });
   artifacts.filter(item => item.required).forEach(item => {
     if (String(item.instruction || '').length < 12) errors.push(`${item.title}的生成要求缺失`);
@@ -2298,13 +2305,30 @@ function prepareGenerationArtifacts() {
   return errors;
 }
 
+function preflightPaperGeneration() {
+  const result = paperMaterialPreflight(project);
+  result.issues.push(...combinedPinIssues().map(issue => ({ step: 'pins', message: issue.message })));
+  if (!result.issues.length) {
+    // Validate all deterministic dependencies before spending credits on project
+    // understanding or outline planning. Optional attachments are not blockers.
+    const outline = Prompts.buildProjectOutline({ title: project.title, devices: project.paper.factSheet.devices,
+      functions: project.paper.factSheet.functions, targetBodyChars: desiredBodyChars() });
+    const artifacts = mergeRequiredArtifacts(outline, []);
+    result.issues.push(...generationArtifactPlanIssues(artifacts, outline).map(message => ({ step: 'pins', message: `写作准备检查：${message}` })));
+    result.artifactCount = artifacts.length;
+  }
+  project.paper.preflight = { ...result, checkedAt: nowIso(), inputRevision: project.factRevision,
+    status: result.issues.length ? 'needs-confirmation' : 'ready' };
+  return result;
+}
+
 function synchronizeAllArtifactPresentation() {
   const chapters = project.paper.chapters || {};
   (project.paper.outline || []).forEach(chapter => {
     const saved = chapters[chapter.id];
     if (!saved?.content) return;
     const artifacts = (project.paper.artifacts || []).filter(item => String(item.chapterId) === String(chapter.id));
-    saved.content = synchronizeArtifactPresentation(saved.content, artifacts);
+    saved.content = synchronizePaperOrganization(synchronizeArtifactPresentation(saved.content, artifacts),chapter,project.paper.outline);
   });
 }
 
@@ -2312,58 +2336,58 @@ function desiredBodyChars() {
   return Math.max(MIN_BODY_CHARS, Math.min(40000, Number(project?.paper?.materials?.targetBodyChars) || MIN_BODY_CHARS));
 }
 
-async function planOutlineForPaper(signal) {
+async function planOutlineForPaper(signal, { force = false } = {}) {
   const facts = project.paper.factSheet;
   const targetBodyChars = desiredBodyChars();
   const existing = project.paper.outlinePlanning || {};
-  if (existing.status === 'ready' && existing.inputRevision === project.factRevision && project.paper.outline?.length === 6 && !outlinePlanIssues({ chapters: project.paper.outline }).length) return;
+  const context = { title: project.title, facts, materials: project.paper.materials, targetBodyChars };
+  const config = paperApiConfig();
+  const stamp = inputStamp({ version: OUTLINE_POLICY_VERSION, context, model: config.reasoningModel || config.chatModel, provider: config.provider });
+  if (!force && existing.status === 'ready' && existing.inputStamp === stamp && !outlinePlanIssues({ chapters: project.paper.outline, referenceUsage: existing.referenceUsage }).length) return;
 
   const generation = project.paper.generation;
   generation.phase = 'planning';
   generation.percent = 4;
   generation.activeRequestLabel = '规划论文结构';
-  generation.message = `正在根据${targetBodyChars.toLocaleString('zh-CN')}字目标、器件和功能规划六章目录`;
+  generation.message = project.paper.materials.outlineReferenceText ? '正在理解参考目录的组织方式，并结合本项目调整章节结构' : `正在根据${targetBodyChars.toLocaleString('zh-CN')}字目标和项目重点规划目录`;
   project.paper.outlinePlanning = { status: 'planning', generatedAt: '', summary: generation.message, lastError: '', source: 'ai', inputRevision: '' };
   project.paper.outlineConfirmedAt = '';
   await saveGenerationCheckpoint();
 
-  const context = { title: project.title, facts, materials: project.paper.materials, targetBodyChars };
   let plan = null;
   let rawPlan = null;
-  let source = project.paper.materials.outlineReferenceText ? 'ai-reference' : 'ai';
-  let planningNote = '';
+  let source = project.paper.materials.outlineReferenceText?.trim() ? 'ai-reference' : 'local-default';
+  const maxTokens = Math.min(14000, 6000 + parseReferenceOutline(effectiveReferenceText(context.materials)).units.length * 110);
   try {
-    const raw = await callAi(Prompts.buildOutlinePlanMessages(context), { reasoning: true, maxTokens: 8000, jsonMode: true, signal, requestLabel: '规划论文结构' });
-    rawPlan = parseJsonResponse(raw);
+    if (source === 'local-default') rawPlan = {summary:'采用默认目录，各章补充本章小结，并按项目内容安排三级标题',chapters:Prompts.buildProjectOutline({title:project.title,...facts,materials:project.paper.materials,targetBodyChars}),referenceUsage:[]};
+    else {
+      const raw = await callAi(paperWritingMessages(Prompts.buildOutlinePlanMessages(context)), { reasoning: true, maxTokens, jsonMode: true, signal, requestLabel: '规划论文结构' });
+      rawPlan = parseJsonResponse(raw);
+    }
     plan = normalizeOutlinePlanResult(rawPlan, targetBodyChars);
     let errors = outlinePlanIssues(plan);
     if (errors.length) {
-      generation.message = `正在补齐论文结构中的${errors.length}项遗漏`;
+      generation.message = `正在修正目录结构与参考采纳中的${errors.length}项问题`;
       await saveGenerationCheckpoint();
-      const repairedRaw = await callAi(Prompts.buildOutlinePlanMessages({ ...context, previousPlan: rawPlan, validationIssues: errors }), { reasoning: true, maxTokens: 8000, jsonMode: true, signal, requestLabel: '补强论文结构' });
+      const repairedRaw = await callAi(paperWritingMessages(Prompts.buildOutlinePlanMessages({ ...context, previousPlan: rawPlan, validationIssues: errors })), { reasoning: true, maxTokens, jsonMode: true, signal, requestLabel: '补强论文结构' });
       rawPlan = parseJsonResponse(repairedRaw);
       plan = normalizeOutlinePlanResult(rawPlan, targetBodyChars);
       errors = outlinePlanIssues(plan);
     }
-    if (errors.length) throw new Error(`AI目录仍有${errors.length}项结构遗漏`);
+    if (errors.length) throw new Error(`目录尚未满足要求：${errors.slice(0, 3).join('；')}`);
   } catch (error) {
     if (error?.name === 'AbortError') throw error;
-    source = 'local-fallback';
-    planningNote = `AI结构规划返回异常，已按器件、功能和目标字数自动建立项目目录：${error.message || '返回不完整'}`;
-    plan = {
-      summary: planningNote,
-      chapters: Prompts.buildProjectOutline({ title: project.title, devices: facts.devices, functions: facts.functions, targetBodyChars }),
-    };
+    project.paper.outlinePlanning = { ...existing, status: 'failed', lastError: error.message || '目录返回不完整', summary: '目录规划未通过，已保留原稿目录', attemptedInputStamp: stamp };
+    await saveGenerationCheckpoint();
+    throw new Error(`论文目录规划未通过，尚未开始正文写作：${error.message || '请重试'}`);
   }
 
-  const changed = JSON.stringify(project.paper.outline || []) !== JSON.stringify(plan.chapters);
-  project.paper.outline = plan.chapters;
+  applyPlannedOutline(project.paper, plan.chapters, nowIso());
   project.paper.artifacts = [];
   project.paper.outlineCustomized = false;
-  project.paper.outlinePlanning = { status: 'ready', generatedAt: nowIso(), summary: plan.summary || '已按目标字数、器件和功能完成论文结构规划', lastError: '', source, inputRevision: project.factRevision };
+  project.paper.outlinePlanning = { status: 'ready', generatedAt: nowIso(), summary: plan.summary || '已按当前项目完成目录规划', referenceUsage: plan.referenceUsage, lastError: '', source, inputRevision: project.factRevision, inputStamp: stamp, policyVersion: OUTLINE_POLICY_VERSION };
   project.paper.outlineConfirmedAt = nowIso();
-  if (changed) Object.values(project.paper.chapters || {}).forEach(chapter => { if (chapter?.content) chapter.status = 'stale'; });
-  generation.message = planningNote || '论文结构已规划完成，正在建立图表和公式要求';
+  generation.message = '论文目录已规划并核对参考采纳情况，正在匹配对应小节的图表和公式';
   await saveGenerationCheckpoint();
 }
 
@@ -2375,6 +2399,8 @@ async function confirmPins() {
   if (!facts.analyzedAt) return toast('请先分析器件与引脚', 'error');
   if (issues.length) return toast(`还有${issues.length}项引脚问题需要处理`, 'error');
   if (facts.conflicts?.length && !facts.conflictsAcknowledged) return toast('请确认资料冲突的实际情况', 'error');
+  const preflight = preflightPaperGeneration();
+  if (preflight.issues.length) return toast(preflight.issues[0].message, 'error');
   facts.confirmedAt = nowIso();
   project.paper.outlineConfirmedAt = '';
   project.paper.outlinePlanning = { status: 'stale', generatedAt: '', summary: '将在生成论文时按目标字数、器件和功能自动规划结构', lastError: '', source: '', inputRevision: '' };
@@ -2746,7 +2772,7 @@ async function copyStandaloneReferences() {
 function prepareReferenceRecords() {
   if (project.paper.materials.useReferencesInPaper === false) {
     project.paper.referenceRecords = [];
-    Object.values(project.paper.chapters || {}).forEach(chapter => {
+    activeChapterRecords(project.paper).forEach(chapter => {
       if (chapter?.content) chapter.content = String(chapter.content).replace(/\[(\d+)\]/g, '');
     });
     return project.paper.referenceRecords;
@@ -2810,7 +2836,7 @@ function synchronizeReferenceOrder() {
     project.paper.referenceRecords = [];
     return [];
   }
-  const intro = (project.paper.outline || []).find(item => item.kind === 'introduction') || (project.paper.outline || []).find(item => item.id === '1');
+  const intro = findRoleChapter(project.paper.outline || [], 'introduction') || (project.paper.outline || []).find(item => item.id === '1');
   const saved = project.paper.chapters?.[intro?.id || '1'];
   const records = project.paper.referenceRecords || [];
   if (!saved?.content || !records.length) return records;
@@ -2834,7 +2860,7 @@ function synchronizeReferenceOrder() {
 }
 
 function completedDigest() {
-  return Object.values(project.paper.chapters || {}).filter(chapter => chapter?.content && chapter.inputRevision === project.factRevision).map(chapter => {
+  return activeChapterRecords(project.paper).filter(chapter => chapter?.content && chapter.inputRevision === project.factRevision && !['draft', 'stale'].includes(chapter.status)).map(chapter => {
     const headings = [...String(chapter.content).matchAll(/^#{0,3}\s*(\d+[.．]\d+(?:[.．]\d+)?\s*[^\n]+)$/gm)].map(match => match[1]).slice(0, 18);
     const points = String(chapter.content).split(/\n{2,}/).map(item => item.replace(/^#{1,6}\s*/, '').replace(/\s+/g, ' ').trim()).filter(item => item.length >= 70 && !item.startsWith('【') && !item.startsWith('|')).slice(0, 12).map(item => item.slice(0, 120));
     const figures = (project.paper.artifacts || []).filter(item => item.chapterId === String(chapter.id)).map(item => item.title).slice(0, 18);
@@ -2872,7 +2898,7 @@ function paragraphSimilarity(left, right) {
 function crossChapterDuplicateIssues(chapterId, content) {
   const current = comparableParagraphs(content);
   const issues = [];
-  Object.values(project.paper.chapters || {}).forEach(previous => {
+  activeChapterRecords(project.paper).forEach(previous => {
     if (!previous?.content || Number(previous.id) >= Number(chapterId) || previous.status === 'stale') return;
     const earlier = comparableParagraphs(previous.content);
     current.forEach(paragraph => {
@@ -2921,7 +2947,7 @@ function duplicateHeadingIssues(content = '') {
 function duplicateVisualIssues() {
   const seen = new Map();
   const issues = [];
-  Object.values(project.paper.chapters || {}).forEach(chapter => {
+  activeChapterRecords(project.paper).forEach(chapter => {
     const text = String(chapter?.content || '');
     const blocks = [...text.matchAll(/【非正文(?:·[^】]*)?】[\s\S]*?【非正文结束】/g)].map(match => match[0]);
     blocks.forEach(block => {
@@ -2956,7 +2982,7 @@ function normalizeChapterText(value, chapter) {
     .replace(/【非正文·(?:待插入|此处插入)[：:]?\s*([^】]+)】/g, '【非正文·插图位置：$1】')
     .replace(/(【非正文·插图位置：[^】]+】)[\s\S]*?【非正文结束】/g, '$1\n【非正文结束】')
     .replace(/\n{3,}/g, '\n\n');
-  if (chapter.kind !== 'introduction') text = text.replace(/\[(\d+)\]/g, '');
+  if (!hasChapterRole(chapter, 'introduction')) text = text.replace(/\[(\d+)\]/g, '');
   return text.trim();
 }
 
@@ -2966,10 +2992,11 @@ function requiredTertiaryHeadings(chapter) {
 
 function missingRequiredHeadings(chapter, content) {
   const text = String(content || '').replace(/．/g, '.');
-  return requiredTertiaryHeadings(chapter).filter(section => {
+  return (chapter?.sections || []).filter(section => /^\d+\.\d+(?:\.\d+)?\s+/.test(section)).filter(section => {
     const normalized = section.replace(/．/g, '.');
-    const number = normalized.match(/^(\d+\.\d+\.\d+)/)?.[1];
-    return number && !new RegExp(`^${number.replace(/\./g, '\\.')}\\s+`, 'm').test(text);
+    const number = normalized.match(/^(\d+\.\d+(?:\.\d+)?)/)?.[1];
+    const expected=normalized.replace(/\s+/g,'');
+    return number && !text.split('\n').some(line=>line.trim().replace(/^#{1,6}\s*/, '').replace(/\s+/g,'')===expected);
   });
 }
 
@@ -2991,12 +3018,17 @@ function artifactInstructionBlock(content, artifact) {
   const text = String(content || '');
   const index = artifactAnchorIndex(text, artifact);
   if (index < 0) return '';
+  if (FIGURE_ARTIFACT_TYPES.has(artifact.type)) {
+    // Inspect only this figure. Looking back can include the previous Mermaid diagram.
+    const block = text.slice(index).match(/^【非正文·(?:插图位置|Mermaid(?:图|流程图)?)[：:][^】]+】[\s\S]*?【非正文结束】/);
+    return block?.[0] || '';
+  }
   const end = text.indexOf('【非正文结束】', index);
   return text.slice(Math.max(0, index - 400), end >= 0 ? end + '【非正文结束】'.length : Math.min(text.length, index + 2400));
 }
 
 function artifactCitationLedgerIssues() {
-  return validateArtifactLedger({ artifacts: project.paper.artifacts || [], chapters: project.paper.chapters || {} });
+  return validateArtifactLedger({ artifacts: project.paper.artifacts || [], chapters: project.paper.chapters || {}, outline:project.paper.outline || [] });
 }
 
 function mermaidFlowIssues(block, artifactTitle = '流程图') {
@@ -3007,7 +3039,7 @@ function mermaidFlowIssues(block, artifactTitle = '流程图') {
   const nodeIds = new Set([...code.matchAll(/\b([A-Za-z][A-Za-z0-9_]*)\s*(?=[\[({])/g)].map(item => item[1]));
   const issues = [];
   if (!/^flowchart\s+TD\s*$/im.test(code)) issues.push(`${artifactTitle}必须使用flowchart TD`);
-  if ((code.match(/开始/g) || []).length !== 1 || (code.match(/结束/g) || []).length !== 1) issues.push(`${artifactTitle}必须各有且只有一个“开始”和“结束”节点`);
+  if ((code.match(/\(\[\s*开始\s*\]\)/g) || []).length !== 1 || (code.match(/\(\[\s*结束\s*\]\)/g) || []).length !== 1) issues.push(`${artifactTitle}必须各有且只有一个“开始”和“结束”节点`);
   if (!/\(\[\s*开始\s*\]\)/.test(code) || !/\(\[\s*结束\s*\]\)/.test(code)) issues.push(`${artifactTitle}的开始和结束必须使用圆角终止节点`);
   if (nodeIds.size < 5) issues.push(`${artifactTitle}少于5个有效节点`);
   if (nodeIds.size > 9 || lines.length > 18) issues.push(`${artifactTitle}过于复杂，应精简到9个节点以内`);
@@ -3038,7 +3070,7 @@ function mermaidTimingIssues(block, artifactTitle = '时序图') {
   const issues = [];
   if (!/^flowchart\s+LR\s*$/im.test(code)) issues.push(`${artifactTitle}必须使用flowchart LR按时间从左向右横向绘制`);
   if (/^sequenceDiagram\s*$/im.test(code) || /^flowchart\s+TD\s*$/im.test(code)) issues.push(`${artifactTitle}不能使用纵向时序布局`);
-  if ((code.match(/开始/g) || []).length !== 1 || (code.match(/结束/g) || []).length !== 1) issues.push(`${artifactTitle}必须各有且只有一个“开始”和“结束”节点`);
+  if ((code.match(/\(\[\s*开始\s*\]\)/g) || []).length !== 1 || (code.match(/\(\[\s*结束\s*\]\)/g) || []).length !== 1) issues.push(`${artifactTitle}必须各有且只有一个“开始”和“结束”节点`);
   if (nodeIds.size < 5) issues.push(`${artifactTitle}缺少完整的发起、应答、数据传输和结束过程`);
   if (nodeIds.size > 9) issues.push(`${artifactTitle}超过9个节点，应精简横向时间过程`);
   if (/\b(?:subgraph|classDef|style|click)\b|<\/?[A-Za-z][^>]*>/i.test(code)) issues.push(`${artifactTitle}包含不必要的样式、子图或HTML语法`);
@@ -3119,24 +3151,24 @@ async function ensureChapterStructureAndArtifacts(chapter, content, signal) {
   let bestContent = synchronizeArtifactPresentation(content, chapterArtifacts);
   for (let pass = 0; pass < 2; pass += 1) {
     const missingHeadings = missingRequiredHeadings(chapter, bestContent);
-    const ledgerIssues = validateArtifactLedger({ artifacts: chapterArtifacts, chapters: { [chapter.id]: { id: chapter.id, content: bestContent } } }).map(item => item.message);
+    const ledgerIssues = validateArtifactLedger({ artifacts: chapterArtifacts, chapters: { [chapter.id]: { id: chapter.id, content: bestContent } }, outline: project.paper.outline }).map(item => item.message);
     const detailIssues = unique([...artifactDetailIssues(bestContent, chapterArtifacts), ...ledgerIssues]);
     const duplicateIssues = unique([...internalDuplicateIssues(bestContent), ...crossChapterDuplicateIssues(chapter.id, bestContent), ...consecutiveVisualIssues(bestContent)]);
     const paragraphIssues = longProseParagraphIssues(bestContent);
     if (!missingHeadings.length && !detailIssues.length && !duplicateIssues.length && !paragraphIssues.length) return bestContent;
-    const raw = await callAi([
+    const raw = isKimiWorkflow() ? await requestKimiChapterRepair(chapter, bestContent, [...missingHeadings.map(item => `缺少目录标题：${item}`), ...detailIssues, ...duplicateIssues, ...paragraphIssues], signal) : await callAi([
       {
         role: 'system',
         content: `你是本科论文章节质量补强编辑。请在不删减有效正文、不改变确认事实、不增加新器件/引脚/功能的前提下，修复指定章节的标题、图表说明和跨章重复问题。优先补齐problemsToRepair中列出的每一项图表、公式、表格或Mermaid流程图，不得遗漏。requiredSections中的二级、三级标题必须全部出现且顺序不变，三级标题数量以目录为准，不得擅自压缩。对标记为跨章重复的段落必须按照本章唯一职责重新组织：删除在前文已经完整介绍的参数、原理、接线或程序步骤，只保留一句必要衔接，再补入本章专属分析，禁止仅替换同义词。
 
-每个缺失或说明不足的图表都要放在对应正文之后。正文每段只表达一个主要观点，通常120至300字；超过380字必须在观点转换处用空行拆分，不删减技术内容，也不把每句话机械拆段。artifacts中的每张图都按figureNumber在图前正文中恰好引用一次“如图x-x所示”，每张表都按tableNumber在表前正文中恰好引用一次“如表x-x所示”，每个公式都按formulaNumber在公式前正文中恰好引用一次“如式（x-x）所示”，不得漏引、复用编号或单独成段。程序流程图使用flowchart TD，开始和结束各一个且使用圆角终止节点，主干自上而下、最多9个节点和2个判断节点，分支尽快汇合；系统总体功能框架图使用flowchart LR表达硬件组成及信息流，系统软件功能模块图使用flowchart TD表达程序任务及调用层级，不得逐个重复硬件节点或照搬第二章连接关系；通信或严格时序图必须使用flowchart LR按时间从左向右横向展开，禁止sequenceDiagram和flowchart TD。所有Mermaid图保持简洁，禁止subgraph、style、classDef和HTML。第三章不得生成硬件组成图或总体结构图。器件图、电路图、实物图和功能展示图使用独占一行的“【非正文·插图位置：图x-x 图名】”、下一行“【非正文结束】”以及随后独占一行的“图x-x 图名”题注；Mermaid图使用带相同图号图名的非正文标记并在代码块后保留同号题注；不得写拍摄、绘制、构图或取景说明。每张引脚表只对应一个器件并紧跟该器件电路说明，不得包含“信号方向”列。选型对比表、引脚表和测试表必须直接生成可用的Markdown表格并使用准确的“表x-x 表名”表题；公式必须独占一行、行末写“（x-x）”，并解释变量、单位、参数来源和用途。任意两张图或表之间必须补入不少于80字的实质正文段落，禁止连续图图、图表或表表。只输出补强后的完整本章正文，不输出章标题、解释或质量评价。`,
+每个缺失或说明不足的图表都要放在对应正文之后。正文每段只表达一个主要观点，通常120至300字；超过380字必须在观点转换处用空行拆分，不删减技术内容，也不把每句话机械拆段。artifacts中的每张图都按figureNumber在图前正文中恰好引用一次“如图x-x所示”，每张表都按tableNumber在表前正文中恰好引用一次“如表x-x所示”，每个公式都按formulaNumber在公式前正文中恰好引用一次“如式（x-x）所示”，不得漏引、复用编号或单独成段。程序流程图使用flowchart TD，开始和结束各一个且使用圆角终止节点，主干自上而下、最多9个节点和2个判断节点，分支尽快汇合；系统总体功能框架图使用flowchart LR表达硬件组成及信息流，系统软件功能模块图使用flowchart TD表达程序任务及调用层级，不得逐个重复硬件节点或照搬总体方案章节连接关系；通信或严格时序图必须使用flowchart LR按时间从左向右横向展开，禁止sequenceDiagram和flowchart TD。所有Mermaid图保持简洁，禁止subgraph、style、classDef和HTML。硬件电路小节不得再生成总体组成图，图表仅按chapterArtifacts及本章职责分配，软硬件合章时遵守各自小节分工。器件图、电路图、实物图和功能展示图使用独占一行的“【非正文·插图位置：图x-x 图名】”、下一行“【非正文结束】”以及随后独占一行的“图x-x 图名”题注；Mermaid图使用带相同图号图名的非正文标记并在代码块后保留同号题注；不得写拍摄、绘制、构图或取景说明。每张引脚表只对应一个器件并紧跟该器件电路说明，不得包含“信号方向”列。选型对比表、引脚表和测试表必须直接生成可用的Markdown表格并使用准确的“表x-x 表名”表题；公式必须独占一行、行末写“（x-x）”，并解释变量、单位、参数来源和用途。任意两张图或表之间必须补入不少于80字的实质正文段落，禁止连续图图、图表或表表。只输出补强后的完整本章正文，不输出章标题、解释或质量评价。`,
       },
-      { role: 'user', content: JSON.stringify({ pass: pass + 1, chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections }, chapterResponsibility: Prompts.chapterResponsibilities?.(chapter.kind) || '', confirmedFacts: project.paper.factSheet, completedChapterLedger: completedDigest(), chapterArtifacts, problemsToRepair: [...missingHeadings.map(item => `缺少目录标题：${item}`), ...detailIssues, ...duplicateIssues, ...paragraphIssues], existingChapter: bestContent }, null, 2) },
-    ], { reasoning: false, maxTokens: 16000, signal, requestLabel: `第${chapter.id}章内容质量补强${pass ? '复核' : ''}` });
+      { role: 'user', content: JSON.stringify({ pass: pass + 1, chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections }, chapterResponsibility: Prompts.chapterResponsibilities?.(chapter) || '', referencePolicy:Prompts.referenceWritingPolicy?.(project,chapter), confirmedFacts: project.paper.factSheet, completedChapterLedger: completedDigest(), chapterArtifacts, problemsToRepair: [...missingHeadings.map(item => `缺少目录标题：${item}`), ...detailIssues, ...duplicateIssues, ...paragraphIssues], existingChapter: bestContent }, null, 2) },
+    ], { reasoning: false, task: 'repair', maxTokens: 16000, signal, requestLabel: chapterProgressLabel(chapter, `内容补强${pass ? '复核' : ''}`) });
     const revised = synchronizeArtifactPresentation(normalizeChapterText(raw, chapter), chapterArtifacts);
-    const revisedLedger = validateArtifactLedger({ artifacts: chapterArtifacts, chapters: { [chapter.id]: { id: chapter.id, content: revised } } });
-    const revisedProblems = missingRequiredHeadings(chapter, revised).length + artifactDetailIssues(revised, chapterArtifacts).length + revisedLedger.length + internalDuplicateIssues(revised).length + crossChapterDuplicateIssues(chapter.id, revised).length + consecutiveVisualIssues(revised).length;
-    const originalProblems = missingHeadings.length + detailIssues.length + duplicateIssues.length;
+    const revisedLedger = validateArtifactLedger({ artifacts: chapterArtifacts, chapters: { [chapter.id]: { id: chapter.id, content: revised } }, outline: project.paper.outline });
+    const revisedProblems = missingRequiredHeadings(chapter, revised).length + unique([...artifactDetailIssues(revised, chapterArtifacts), ...revisedLedger.map(item => item.message)]).length + unique([...internalDuplicateIssues(revised), ...crossChapterDuplicateIssues(chapter.id, revised), ...consecutiveVisualIssues(revised)]).length + longProseParagraphIssues(revised).length;
+    const originalProblems = missingHeadings.length + detailIssues.length + duplicateIssues.length + paragraphIssues.length;
     if (countBodyChars(revised) < Math.max(700, Math.floor(countBodyChars(bestContent) * 0.72)) || revisedProblems >= originalProblems) break;
     bestContent = revised;
   }
@@ -3144,8 +3176,9 @@ async function ensureChapterStructureAndArtifacts(chapter, content, signal) {
 }
 
 function generationPhasePercent(generation) {
+  if (generation.status === 'completed') return 100;
   const total = project.paper.outline.length || 1;
-  const completed = project.paper.outline.filter(chapter => project.paper.chapters[chapter.id]?.content && project.paper.chapters[chapter.id]?.inputRevision === project.factRevision).length;
+  const completed = project.paper.outline.filter(chapter => project.paper.chapters[chapter.id]?.content && project.paper.chapters[chapter.id]?.inputRevision === project.factRevision && !['draft', 'stale'].includes(project.paper.chapters[chapter.id]?.status)).length;
   if (generation.phase === 'planning') return 4;
   if (generation.phase === 'chapters') return Math.min(74, 8 + Math.round(completed / total * 66));
   if (generation.phase === 'expand') return 78;
@@ -3154,6 +3187,24 @@ function generationPhasePercent(generation) {
   if (generation.phase === 'quality') return 97;
   if (generation.status === 'completed') return 100;
   return Number(generation.percent) || 0;
+}
+
+function renderOutlinePreview() {
+  const panel = $('outline-preview');
+  const outline = project?.paper?.outline || [];
+  panel.hidden = !outline.length;
+  if (panel.hidden) return;
+  const planning = project.paper.outlinePlanning || {};
+  const usage = planning.referenceUsage || [];
+  $('outline-preview-status').textContent = planning.policyVersion === OUTLINE_POLICY_VERSION ? (usage.length ? '含参考目录采纳说明' : planning.source === 'local-default' ? '默认目录' : '按本项目规划') : '已有稿件目录';
+  $('outline-preview-content').innerHTML = outline.map(chapter => `<h4>第${escapeHtml(chapter.id)}章 ${escapeHtml(chapter.title)}</h4>${(chapter.sections || []).map(section => `<p class="${/^\d+\.\d+\.\d+\s/.test(section) ? 'outline-h3' : ''}">${escapeHtml(section)}</p>`).join('')}`).join('');
+  const references = parseReferenceOutline(effectiveReferenceText(project.paper.materials)).units;
+  $('outline-reference-usage').hidden = !usage.length;
+  $('outline-reference-usage').innerHTML = usage.length ? `<h4>参考目录采纳说明</h4>${usage.map(item => {
+    const reference = references.find(unit => unit.id === item.referenceId);
+    const label = item.action === 'not-applicable' ? '不适用' : item.action === 'adapted' ? '结合项目调整' : '已采纳';
+    return `<p><strong>${escapeHtml(reference?.title || reference?.text || item.referenceId)}</strong>：${label}${item.sections?.length ? `（${escapeHtml(item.sections.join('、'))}）` : ''}。${escapeHtml(item.reason)}</p>`;
+  }).join('')}` : '';
 }
 
 function renderGeneration() {
@@ -3166,13 +3217,14 @@ function renderGeneration() {
   status.textContent = statusMap[generation.status] || '尚未开始';
   status.className = `status-badge ${generation.status === 'failed' || generation.status === 'stale' ? 'is-warning' : generation.status === 'completed' ? 'is-success' : ''}`;
   $('generation-title').textContent = generation.status === 'running' ? (generation.activeRequestLabel || '正在准备下一步') : generation.status === 'completed' ? '论文内容已经保存' : generation.status === 'paused' ? '可以从已保存位置继续' : generation.status === 'failed' ? '生成遇到问题' : generation.status === 'stale' ? '需要根据新资料更新正文' : '准备生成论文';
-  const checkedIssues = project.paper.quality?.checkedAt ? (project.paper.quality.issues || []) : null;
+  const quality = currentQualityReport();
+  const checkedIssues = quality?.checkedAt ? quality.issues : null;
   const blockingIssueCount = checkedIssues?.filter(item => item.severity === 'blocking').length || 0;
   const warningIssueCount = checkedIssues?.filter(item => item.severity !== 'blocking').length || 0;
   const completedMessage = checkedIssues === null
     ? generation.message
     : checkedIssues.length
-      ? `论文已生成，检查出${blockingIssueCount}项重点问题${warningIssueCount ? `和${warningIssueCount}项提醒` : ''}；当前稿仍可下载`
+      ? `论文已生成，最终仍有${blockingIssueCount ? `${blockingIssueCount}项重点问题` : ''}${blockingIssueCount && warningIssueCount ? '和' : ''}${warningIssueCount ? `${warningIssueCount}项提醒` : ''}；当前稿仍可下载`
       : '论文最终检查通过';
   $('generation-message').textContent = generation.lastError || (generation.status === 'completed' ? completedMessage : generation.message) || '点击开始后先自动规划论文结构，再逐章生成并保存。';
   $('generation-progress').style.width = `${generation.percent}%`;
@@ -3187,29 +3239,31 @@ function renderGeneration() {
   document.body.classList.toggle('has-generation-notice', showScreenNotice);
   document.title = showScreenNotice ? `${generation.percent}% · ${generation.activeRequestLabel || '正在生成论文'}` : APP_TITLE;
   const phases = [
-    ['references', '文献'], ['planning', '结构规划'], ['chapters', '正文'], ['extras', '摘要'], ['audit', '技术复核'], ['quality', '本地检查'], ['export', '导出'],
+    ['references', '文献'], ['planning', '结构规划'], ['chapters', generation.phase === 'chapters' && generation.currentChapterId ? chapterProgressLabel(project.paper.outline.find(chapter=>chapter.id===generation.currentChapterId)) : '正文'], ['expand','篇幅补充'], ['extras', '摘要'], ['audit', '技术复核'], ['quality', '本地检查'], ['export', '导出'],
   ];
   const order = phases.map(item => item[0]);
   const activeIndex = generation.status === 'completed' ? order.length : Math.max(0, order.indexOf(generation.phase));
   $('generation-phases').innerHTML = phases.map(([id, label], index) => `<span class="phase-item ${index < activeIndex || generation.status === 'completed' ? 'is-complete' : index === activeIndex && generation.status === 'running' ? 'is-active' : ''}">${label}</span>`).join('');
-  const elapsed = generation.startedAt ? Math.floor((Date.now() - new Date(generation.startedAt).getTime()) / 1000) : 0;
+  const elapsedEnd = generation.status === 'running' ? Date.now() : new Date(generation.completedAt || generation.updatedAt || generation.startedAt).getTime();
+  const elapsed = generation.startedAt ? Math.max(0,Math.floor((elapsedEnd - new Date(generation.startedAt).getTime()) / 1000)) : 0;
   $('generation-elapsed').textContent = formatTime(elapsed);
   const outlineRows = (project.paper.outline || []).map(chapter => {
     const saved = project.paper.chapters[chapter.id];
-    const valid = saved?.content && saved.inputRevision === project.factRevision && saved.status !== 'stale';
+    const valid = saved?.content && saved.inputRevision === project.factRevision && !['draft', 'stale'].includes(saved.status);
     const active = generation.status === 'running' && generation.currentChapterId === chapter.id;
     const detail = valid ? `${countBodyChars(saved.content).toLocaleString('zh-CN')}字 · 已保存` : saved?.content ? '资料已更新，等待重写' : active ? '正在生成本章' : `目标约${Number(chapter.targetCharacters || 0).toLocaleString('zh-CN')}字 · 等待生成`;
     return `<div class="chapter-row ${valid ? 'is-complete' : ''} ${active ? 'is-active' : ''}"><span class="chapter-number">${escapeHtml(chapter.id)}</span><div class="chapter-main"><strong>第${escapeHtml(chapter.id)}章 ${escapeHtml(chapter.title)}</strong><small>${escapeHtml(detail)}</small></div><span class="chapter-state">${active ? '处理中' : valid ? '已完成' : '未完成'}</span></div>`;
   }).join('');
-  $('chapter-list').innerHTML = outlineRows || '<div class="chapter-empty"><strong>论文结构将在生成时自动建立</strong><span>系统会结合目标字数、器件、功能和参考目录安排六章内容。</span></div>';
-  const hasContent = Object.values(project.paper.chapters || {}).some(chapter => String(chapter?.content || '').trim());
+  $('chapter-list').innerHTML = outlineRows || '<div class="chapter-empty"><strong>论文结构将在生成时建立</strong><span>有参考目录时按参考框架规划，未提供时采用默认目录。</span></div>';
+  renderOutlinePreview();
+  const hasContent = activeChapterRecords(project.paper).some(chapter => String(chapter?.content || '').trim());
   $('btn-download-draft').disabled = !hasContent;
   $('btn-download-draft-top').disabled = !hasContent;
   const startButton = $('btn-start-generation');
   startButton.disabled = generation.status === 'running';
   startButton.textContent = generation.status === 'running' ? '正在生成' : ['paused', 'failed'].includes(generation.status) ? '继续生成' : generation.status === 'stale' ? '按新资料更新论文' : generation.status === 'completed' ? '重新生成论文' : '开始生成论文';
   $('btn-pause-generation').hidden = generation.status !== 'running';
-  renderQuality();
+  renderQuality(quality);
 }
 
 function startGenerationClock() {
@@ -3229,20 +3283,99 @@ async function saveGenerationCheckpoint() {
 
 function chapterNeedsGeneration(chapter) {
   const saved = project.paper.chapters[chapter.id];
-  return !saved?.content || saved.inputRevision !== project.factRevision || saved.status === 'stale';
+  return !saved?.content || saved.inputRevision !== project.factRevision || ['stale', 'draft'].includes(saved.status);
+}
+
+function paperWritingMessages(messages, chapter = null) {
+  return isKimiWorkflow() ? withKimiContext(messages, project, chapter) : messages;
+}
+
+async function prepareKimiWritingBrief(signal) {
+  if (!isKimiWorkflow()) return;
+  const stamp = inputStamp({ source: briefInput(project), model: paperApiConfig().chatModel, version: 2 });
+  if (project.paper.writingBrief?.status === 'ready' && project.paper.writingBrief.inputStamp === stamp) return;
+  const generation = project.paper.generation;
+  generation.phase = 'planning';
+  generation.message = 'Kimi K3正在统一理解方案、引脚和程序，各章将共用这份依据';
+  generation.activeRequestLabel = '统一资料理解';
+  project.paper.writingBrief = { status: 'analyzing', inputStamp: stamp };
+  await saveGenerationCheckpoint();
+  let messages = buildKimiBriefMessages(project);
+  let fallbackReason = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const raw = await callAi(messages, { reasoning: true, maxTokens: 7000, jsonMode: true, schema: AI_SCHEMAS.brief, task: 'brief', signal, requestLabel: '统一资料理解' });
+      const content = JSON.parse(raw);
+      const problems = validateKimiBrief(content, project.paper.factSheet);
+      if (!problems.length) {
+        project.paper.writingBrief = { status: 'ready', source: 'ai', inputStamp: stamp, content, updatedAt: nowIso() };
+        await saveGenerationCheckpoint();
+        return;
+      }
+      fallbackReason = problems.join('；');
+      messages = [...buildKimiBriefMessages(project), { role: 'user', content: `请重新整理完整资料理解，修正以下功能覆盖错误：${fallbackReason}` }];
+    } catch (error) {
+      if (signal.aborted || [401, 402, 403].includes(error.status)) throw error;
+      fallbackReason = error.message || '资料理解响应未完成';
+      break;
+    }
+  }
+  // The auxiliary summary may fail, but the user's confirmed facts remain valid.
+  // Preserve every fact rather than losing minutes of planning or guessing data.
+  project.paper.writingBrief = { status: 'ready', source: 'confirmed-facts', inputStamp: stamp,
+    content: buildConfirmedWritingBrief(project), fallbackReason, updatedAt: nowIso() };
+  generation.message = '已按确认方案建立完整写作依据，继续规划论文';
+  await saveGenerationCheckpoint();
+}
+
+async function requestKimiChapterRepair(chapter, content, problems, signal) {
+  let messages = buildKimiPatchMessages({ chapter, content, problems, facts: project.paper.factSheet,
+    artifacts: (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id),
+    references: hasChapterRole(chapter, 'introduction') ? project.paper.referenceRecords : [], digest: completedDigest() });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await callAi(messages, { task: 'patch', schema: AI_SCHEMAS.patch, jsonMode: true, maxTokens: 9000, signal, requestLabel: chapterProgressLabel(chapter, '局部修复') });
+    try { return applyKimiPatch(content, JSON.parse(raw)); }
+    catch (error) {
+      if (attempt) throw error;
+      messages = [...messages, { role: 'user', content: `上一版补丁不能安全应用：${error.message}。重新输出完整补丁，find必须逐字来自原章、唯一、不重叠。` }];
+    }
+  }
 }
 
 async function generateOneChapter(chapter, signal) {
   const generation = project.paper.generation;
   generation.phase = 'chapters';
   generation.currentChapterId = chapter.id;
-  generation.message = `正在生成第${chapter.id}章，完成后会立即保存`;
-  generation.activeRequestLabel = `第${chapter.id}章 ${chapter.title}`;
+  generation.message = `正在生成${chapterProgressLabel(chapter)}，完成后会立即保存`;
+  generation.activeRequestLabel = chapterProgressLabel(chapter, '写作');
   await saveGenerationCheckpoint();
-  const reasoning = ['hardware', 'software', 'implementation'].includes(chapter.kind);
+  const reasoning = ['hardware', 'software'].some(role => hasChapterRole(chapter, role));
   const maxTokens = reasoning ? 16000 : 12000;
-  const raw = await callAi(Prompts.buildChapterMessages({ project, chapter, outline: project.paper.outline, artifacts: project.paper.artifacts, completedDigest: completedDigest() }), { reasoning, maxTokens, signal, requestLabel: `第${chapter.id}章写作` });
-  let content = normalizeChapterText(raw, chapter);
+  const savedDraft = project.paper.chapters[chapter.id];
+  const reusableDraft = savedDraft?.status === 'draft' && savedDraft.draftComplete && savedDraft.inputRevision === project.factRevision;
+  const saveDraft = async (text, draftComplete = false) => {
+    const previous = project.paper.chapters[chapter.id];
+    if (!draftComplete && previous?.content && previous.status === 'stale') {
+      // Keep the previous complete version available until the replacement has fully returned.
+      previous.draftContent = normalizeChapterText(text, chapter);
+      previous.updatedAt = nowIso();
+      await saveGenerationCheckpoint();
+      return;
+    }
+    project.paper.chapters[chapter.id] = {
+      id: chapter.id, title: chapter.title, kind: chapter.kind, content: normalizeChapterText(text, chapter),
+      status: 'draft', draftComplete, inputRevision: project.factRevision, updatedAt: nowIso(),
+    };
+    await saveGenerationCheckpoint();
+  };
+  const raw = reusableDraft ? savedDraft.content : await callAi(paperWritingMessages(Prompts.buildChapterMessages({ project, chapter, outline: project.paper.outline, artifacts: project.paper.artifacts, completedDigest: completedDigest() }), chapter), {
+    reasoning, maxTokens, signal, requestLabel: chapterProgressLabel(chapter, '写作'), task: 'chapter',
+    onPartial: isKimiWorkflow() ? text => saveDraft(text) : null,
+  });
+  let content = synchronizePaperOrganization(normalizeChapterText(raw, chapter),chapter,project.paper.outline);
+  if (countBodyChars(content) < 700) throw new Error(`第${chapter.id}章返回内容过短，未覆盖已保存内容`);
+  // Save before repair: pausing or losing the network during repair must not discard returned prose.
+  await saveDraft(content, true);
   try {
     content = await ensureChapterStructureAndArtifacts(chapter, content, signal);
   } catch (error) {
@@ -3254,7 +3387,7 @@ async function generateOneChapter(chapter, signal) {
     generation.message = '第' + chapter.id + '章正文已保存，图表补强稍后自动处理';
     await saveGenerationCheckpoint();
   }
-  content = synchronizeArtifactPresentation(content, (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id));
+  content = synchronizePaperOrganization(synchronizeArtifactPresentation(content, (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id)),chapter,project.paper.outline);
   if (countBodyChars(content) < 700) throw new Error(`第${chapter.id}章返回内容过短，未覆盖已保存内容`);
   project.paper.chapters[chapter.id] = {
     id: chapter.id,
@@ -3265,10 +3398,10 @@ async function generateOneChapter(chapter, signal) {
     inputRevision: project.factRevision,
     updatedAt: nowIso(),
   };
-  if (chapter.kind === 'introduction') synchronizeReferenceOrder();
+  if (hasChapterRole(chapter, 'introduction')) synchronizeReferenceOrder();
   generation.completedChapterIds = unique([...(generation.completedChapterIds || []), chapter.id]);
   generation.currentChapterId = '';
-  generation.message = `第${chapter.id}章已保存`;
+  generation.message = `${chapterProgressLabel(chapter)}已保存`;
   await saveGenerationCheckpoint();
 }
 
@@ -3277,7 +3410,7 @@ async function expandBodyIfNeeded(signal) {
   const requiredBodyChars = desiredBodyChars();
   while (totalBodyChars() < requiredBodyChars && passes < 3) {
     passes += 1;
-    const candidates = project.paper.outline.filter(chapter => ['hardware', 'software', 'implementation', 'test'].includes(chapter.kind));
+    const candidates = project.paper.outline.filter(chapter => ['hardware', 'software', 'test'].some(role => hasChapterRole(chapter, role)) && project.paper.chapters[chapter.id]?.content);
     const target = candidates.sort((a, b) => countBodyChars(project.paper.chapters[a.id]?.content) - countBodyChars(project.paper.chapters[b.id]?.content))[0];
     if (!target) break;
     const saved = project.paper.chapters[target.id];
@@ -3285,16 +3418,16 @@ async function expandBodyIfNeeded(signal) {
     const generation = project.paper.generation;
     generation.phase = 'expand';
     generation.currentChapterId = target.id;
-    generation.activeRequestLabel = `补充第${target.id}章有效分析`;
+    generation.activeRequestLabel = chapterProgressLabel(target, '补充分析');
     generation.message = `正文距离${requiredBodyChars.toLocaleString('zh-CN')}字目标还差约${missing.toLocaleString('zh-CN')}字，正在补充必要设计分析`;
     await saveGenerationCheckpoint();
     const raw = await callAi([
-      { role: 'system', content: '你是单片机本科论文补写编辑。只输出可直接追加到指定章节现有最后一个二级标题下的正文段落，不输出新标题、总结、图表或写作说明。必须补充新的设计依据、参数分析或实现细节，不得重复原文，不得改变确认的器件、引脚和功能。' },
-      { role: 'user', content: JSON.stringify({ title: project.title, chapter: { id: target.id, title: target.title, kind: target.kind }, confirmedFacts: project.paper.factSheet, desiredAdditionalCharacters: Math.min(2600, Math.max(1200, missing)), existingChapter: saved.content }, null, 2) },
-    ], { reasoning: false, maxTokens: 8000, signal, requestLabel: `第${target.id}章补写` });
+      { role: 'system', content: '你是单片机本科论文补写编辑。只输出可插入指定章节最后一个实质分析小节末尾、本章小结之前的正文段落，不输出新标题、总结、图表或写作说明。必须补充新的设计依据、参数分析或实现细节，不得重复原文，不得改变确认的器件、引脚和功能。' },
+      { role: 'user', content: JSON.stringify({ title: project.title, chapter: { id: target.id, title: target.title, kind: target.kind }, referencePolicy:Prompts.referenceWritingPolicy?.(project,target), confirmedFacts: project.paper.factSheet, desiredAdditionalCharacters: Math.min(2600, Math.max(1200, missing)), existingChapter: saved.content }, null, 2) },
+    ], { reasoning: false, task: 'chapter', maxTokens: 8000, signal, requestLabel: chapterProgressLabel(target, '补写') });
     const addition = normalizeChapterText(raw, target);
     if (countBodyChars(addition) < 500) break;
-    saved.content = synchronizeArtifactPresentation(`${saved.content.trim()}\n\n${addition.trim()}`, (project.paper.artifacts || []).filter(item => item.chapterId === target.id));
+    saved.content = synchronizeArtifactPresentation(insertChapterSupplement(saved.content, addition, target), (project.paper.artifacts || []).filter(item => item.chapterId === target.id));
     saved.updatedAt = nowIso();
     await saveGenerationCheckpoint();
   }
@@ -3333,7 +3466,7 @@ async function generateExtras(signal) {
   generation.activeRequestLabel = '生成英文题目与中英文摘要';
   generation.message = '正在依据完整正文生成英文题目、中英文摘要、关键词和致谢';
   await saveGenerationCheckpoint();
-  const raw = await callAi(Prompts.buildExtrasMessages(project), { reasoning: false, maxTokens: 5500, jsonMode: true, signal, requestLabel: '英文题目与中英文摘要' });
+  const raw = await callAi(paperWritingMessages(Prompts.buildExtrasMessages(project)), { reasoning: false, maxTokens: 5500, jsonMode: true, signal, requestLabel: '英文题目与中英文摘要' });
   let result = await parseAiJson(raw, { signal, requestLabel: '摘要整理', maxTokens: 5500 });
   let policyIssues = frontMatterPolicyIssues(result);
   if (policyIssues.length) {
@@ -3365,7 +3498,14 @@ function applyAuditRepairs(audit) {
     if (!chapter?.content) continue;
     const occurrences = chapter.content.split(issue.find).length - 1;
     if (occurrences !== 1) continue;
-    chapter.content = chapter.content.replace(issue.find, issue.replace);
+    const candidate = chapter.content.replace(issue.find, issue.replace);
+    const chapterArtifacts = (project.paper.artifacts || []).filter(item => item.chapterId === String(issue.chapterId));
+    const normalized = synchronizeArtifactPresentation(candidate, chapterArtifacts);
+    // A proposed caption/number change can be reverted by the fixed artifact ledger.
+    // Such a patch did not fix the manuscript and must remain in the final issue list.
+    if (normalized === chapter.content || (normalized.includes(issue.find) && !normalized.includes(issue.replace))) continue;
+    if (countBodyChars(normalized) < Math.floor(countBodyChars(chapter.content) * 0.78)) continue;
+    chapter.content = normalized;
     chapter.updatedAt = nowIso();
     issue.autoRepaired = true;
     repaired += 1;
@@ -3375,12 +3515,19 @@ function applyAuditRepairs(audit) {
 
 async function runFinalAudit(signal, { allowRepairs = false, publishAsFinal = false } = {}) {
   const generation = project.paper.generation;
+  const auditStamp = inputStamp({ messages: Prompts.buildAuditMessages(project), model: paperApiConfig().reasoningModel || paperApiConfig().chatModel });
+  if (isKimiWorkflow() && publishAsFinal && project.paper.quality.auditInputStamp === auditStamp && generation.auditCompleted) {
+    // The exact same final manuscript was already reviewed. Reuse only an identical snapshot.
+    project.paper.quality.auditStage = 'final';
+    await saveGenerationCheckpoint();
+    return { issues: project.paper.quality.aiIssues || [], repaired: 0, completed: true, cached: true };
+  }
   generation.phase = 'audit';
   generation.activeRequestLabel = '技术一致性复核';
   generation.message = '只检查硬件矛盾、跨章重复、图表和测试问题，不再整章重写';
   await saveGenerationCheckpoint();
   try {
-    const raw = await callAi(Prompts.buildAuditMessages(project), { reasoning: true, maxTokens: 9000, jsonMode: true, signal, requestLabel: '技术一致性复核' });
+    const raw = await callAi(isKimiWorkflow() ? buildKimiAuditMessages(project) : Prompts.buildAuditMessages(project), { reasoning: true, maxTokens: isKimiWorkflow() ? 5000 : 9000, jsonMode: true, signal, requestLabel: '技术一致性复核' });
     const audit = await parseAiJson(raw, { signal, requestLabel: '技术一致性复核', maxTokens: 9000 });
     const issues = mergeFinalQualityIssues([], Array.isArray(audit.issues) ? audit.issues.slice(0, 16).map((item, index) => ({ id: `ai-audit-${index + 1}`, severity: item.severity === 'blocking' ? 'blocking' : 'warning', type: item.type || 'technical', chapterId: String(item.chapterId || ''), message: String(item.message || '').trim(), repairable: Boolean(item.repairable), find: String(item.find || ''), replace: String(item.replace || ''), source: 'ai' })).filter(item => item.message) : []);
     const repaired = allowRepairs ? applyAuditRepairs({ issues }) : 0;
@@ -3390,14 +3537,16 @@ async function runFinalAudit(signal, { allowRepairs = false, publishAsFinal = fa
     project.paper.quality.autoRepaired = repaired;
     project.paper.quality.auditStage = publishAsFinal ? 'final' : 'pre-repair';
     project.paper.quality.aiCheckedAt = nowIso();
+    project.paper.quality.auditInputStamp = auditStamp;
     generation.auditCompleted = true;
     await saveGenerationCheckpoint();
     return { issues, repaired, completed: true };
   } catch (error) {
     if (signal.aborted) throw error;
-    project.paper.quality.aiIssues = publishAsFinal
-      ? [{ id: makeId('issue'), severity: 'warning', type: 'audit', chapterId: '', message: `最终技术复检暂未完成：${error.message}`, source: 'system' }]
-      : [];
+    project.paper.quality.aiIssues = mergeFinalQualityIssues([], [
+      ...(project.paper.quality.aiIssues || []).filter(issue => issue.type !== 'audit'),
+      ...(publishAsFinal ? [{ id: makeId('issue'), severity: 'warning', type: 'audit', chapterId: '', message: `最终技术复检暂未完成：${error.message}`, source: 'system' }] : []),
+    ]);
     project.paper.quality.auditStage = publishAsFinal ? 'final-incomplete' : 'pre-repair-incomplete';
     generation.auditCompleted = false;
     await saveGenerationCheckpoint();
@@ -3444,7 +3593,7 @@ function localQualityIssues() {
   });
 
   const seenParagraphs = new Map();
-  Object.values(chapters).forEach(chapter => {
+  activeChapterRecords(project.paper).forEach(chapter => {
     const text = String(chapter.content || '');
     text.split(/\n{2,}/).map(paragraph => paragraph.replace(/\s+/g, '').replace(/^#{1,6}/, '')).filter(paragraph => paragraph.length >= 100 && !paragraph.startsWith('【')).forEach(paragraph => {
       const key = paragraph.slice(0, 180);
@@ -3460,6 +3609,7 @@ function localQualityIssues() {
     longProseParagraphIssues(text).forEach((message, index) => issues.push({ id: `paragraph-length-${chapter.id}-${index}`, severity: 'blocking', chapterId: chapter.id, message }));
     const missingHeadings = missingRequiredHeadings(chapter, text);
     if (missingHeadings.length) issues.push({ id: `headings-missing-${chapter.id}`, severity: 'blocking', chapterId: chapter.id, message: `第${chapter.id}章缺少目录标题：${missingHeadings.join('、')}` });
+    if(hasChapterRole(chapter,'introduction')) organizationCoverageIssues(text,outline).forEach((message,index)=>issues.push({id:`organization-missing-${index}`,severity:'blocking',chapterId:chapter.id,message}));
     if (/\S[ \t]*【非正文/.test(text) || /【非正文(?:·[^】]*)?】[ \t]*\S/.test(text)) issues.push({ id: `artifact-line-${chapter.id}`, severity: 'warning', chapterId: chapter.id, message: `第${chapter.id}章存在未单独成行的图表提示` });
     tableRowGroups(text).forEach((table, index) => {
       const columns = table[0]?.split('|').filter(Boolean).length || 0;
@@ -3493,28 +3643,27 @@ function localQualityIssues() {
     const text = String(chapters[item.chapterId]?.content || '');
     if (!/系统总体.*(?:框架|结构)图|总体功能框架图/.test(text)) issues.push({ id: `framework-${item.id}`, severity: 'warning', chapterId: item.chapterId, message: '系统总体功能框架图尚未明确预留' });
   });
-  const testChapter = outline.find(item => item.kind === 'test');
+  const testChapter = findRoleChapter(outline,'test');
   if (testChapter) {
     const text = String(chapters[testChapter.id]?.content || '');
     if (!/^\s*\|.*\|\s*$/m.test(text)) issues.push({ id: 'test-table', severity: 'blocking', chapterId: testChapter.id, message: '测试章节缺少量化数据表格' });
     if (!/\d+(?:\.\d+)?\s*(?:s|ms|%|℃|V|mA|次|h|小时|秒|毫秒)/i.test(text)) issues.push({ id: 'test-data', severity: 'blocking', chapterId: testChapter.id, message: '测试章节缺少响应时间、误差、成功率或稳定性等量化数据' });
   }
 
-  const hardwareChapter = outline.find(item => item.kind === 'hardware');
-  if (hardwareChapter) {
+  for (const hardwareChapter of outline.filter(chapter => hasChapterRole(chapter, 'hardware'))) {
     const text = String(chapters[hardwareChapter.id]?.content || '');
-    if (/【非正文·Mermaid图：[^】]*(?:系统硬件组成|硬件总体结构|硬件框架)[^】]*】/.test(text)) issues.push({ id: 'hardware-duplicate-framework', severity: 'blocking', chapterId: hardwareChapter.id, message: '第三章不应重复生成硬件组成图或总体框架图，只保留第二章系统总体功能框架图' });
+    if (!hasChapterRole(hardwareChapter, 'overall') && /【非正文·Mermaid图：[^】]*(?:系统硬件组成|硬件总体结构|硬件框架)[^】]*】/.test(text)) issues.push({ id: `hardware-duplicate-framework-${hardwareChapter.id}`, severity: 'blocking', chapterId: hardwareChapter.id, message: '硬件电路小节不应重复总体框架图，只保留总体方案中的一张系统总体功能框架图' });
     if (/2\.8\s*寸\s*TFT/i.test(text)) issues.push({ id: 'hardware-tft-size', severity: 'blocking', chapterId: hardwareChapter.id, message: '硬件章节仍出现2.8寸TFT，应统一为1.8寸TFT' });
     const pullupValues = [
       ...[...text.matchAll(/上拉电阻[^。\n]{0,18}?(\d+(?:\.\d+)?)\s*k(?:Ω|欧姆)/gi)].map(match => Number(match[1])),
       ...[...text.matchAll(/(\d+(?:\.\d+)?)\s*k(?:Ω|欧姆)[^。\n]{0,18}?上拉电阻/gi)].map(match => Number(match[1])),
     ];
     if (pullupValues.some(value => value !== 10)) issues.push({ id: 'hardware-pullup', severity: 'blocking', chapterId: hardwareChapter.id, message: '上拉电阻阻值没有统一为10 kΩ' });
-    if (!is51Controller(project.paper.factSheet.controller) && !/(?:5\s*V|5V).*(?:板载稳压|稳压).*(?:3\.3\s*V|3.3V)/s.test(text)) issues.push({ id: 'hardware-power-default', severity: 'blocking', chapterId: hardwareChapter.id, message: '硬件章节缺少开发板5V输入经板载稳压获得3.3V的供电说明' });
+    if (hardwareChapter.id === findRoleChapter(outline,'hardware')?.id && !is51Controller(project.paper.factSheet.controller) && !/(?:5\s*V|5V).*(?:板载稳压|稳压).*(?:3\.3\s*V|3.3V)/s.test(text)) issues.push({ id: 'hardware-power-default', severity: 'blocking', chapterId: hardwareChapter.id, message: '硬件章节缺少开发板5V输入经板载稳压获得3.3V的供电说明' });
     if (/\|[^\n|]*信号方向[^\n|]*\|/.test(text)) issues.push({ id: 'pin-table-direction', severity: 'blocking', chapterId: hardwareChapter.id, message: '引脚关系表不应包含“信号方向”列' });
   }
 
-  const intro = outline.find(item => item.kind === 'introduction');
+  const intro = findRoleChapter(outline, 'introduction');
   const introText = String(chapters[intro?.id]?.content || '');
   const expectedRefs = project.paper.referenceRecords?.length || 0;
   const citations = [...introText.matchAll(/\[(\d+)\]/g)].map(match => Number(match[1]));
@@ -3569,8 +3718,29 @@ function runLocalQuality({ publish = true } = {}) {
     project.paper.quality.bodyChars = result.bodyChars;
     project.paper.quality.checkedAt = nowIso();
     project.paper.quality.resultStage = 'final';
+    project.paper.quality.reportInputStamp = qualityReportInputStamp();
   }
   return result;
+}
+
+function qualityReportInputStamp() {
+  const paper = project.paper;
+  return inputStamp({
+    version: QUALITY_ENGINE_VERSION, projectId: project.id, factRevision: project.factRevision, target: desiredBodyChars(),
+    outline: paper.outline, chapters: paper.chapters, artifacts: paper.artifacts, facts: paper.factSheet,
+    frontMatter: frontMatterSnapshot(), references: paper.referenceRecords, aiIssues: paper.quality.aiIssues,
+  });
+}
+
+function currentQualityReport() {
+  const quality = project?.paper?.quality;
+  if (!quality) return null;
+  // Rebuild saved local findings against the actual final manuscript, including on reload.
+  // Keep AI findings from the latest audit; never append the pre-repair local history.
+  if (quality.checkedAt && project.paper.generation.status !== 'running' && quality.reportInputStamp !== qualityReportInputStamp()) {
+    runLocalQuality();
+  }
+  return { ...quality, issues: mergeFinalQualityIssues(quality.issues || []) };
 }
 
 function frontMatterSnapshot() {
@@ -3606,23 +3776,29 @@ async function repairChapterBlockingIssues(chapter, problems, signal) {
   if (!saved?.content) return false;
   const before = saved.content;
   const beforeCount = localQualityIssues().filter(issue => issue.severity === 'blocking' && issue.chapterId === chapter.id).length;
-  const raw = await callAi([
+  const referenceSnapshot = hasChapterRole(chapter, 'introduction') ? { records: clone(project.paper.referenceRecords || []), text: project.paper.materials.referencesText } : null;
+  const raw = isKimiWorkflow() ? await requestKimiChapterRepair(chapter, before, problems, signal) : await callAi([
     {
       role: 'system',
       content: `你是单片机本科论文重点问题修复编辑。只修复problems列出的重点问题，保持本章全部有效正文、目录标题顺序、确认器件、引脚和功能不变，输出修复后的完整本章正文，不输出章标题、解释或评价。
 
-必须执行：删除重复和系统未完成式表述；修复与确认事实矛盾的硬件描述；正文每段只讲一个主要观点，通常120至300字，超过380字必须在观点转换处用空行拆段，禁止删减内容或逐句拆段；任意图/表之间补入不少于80字的实质分析段落；artifacts中的每张图按figureNumber在图前正文中恰好引用一次“如图x-x所示”，每张表按tableNumber在表前正文中恰好引用一次“如表x-x所示”，每个公式按formulaNumber在公式前正文中恰好引用一次“如式（x-x）所示”；器件图、电路图、实物图和功能图使用“【非正文·插图位置：图x-x 图名】”、下一行“【非正文结束】”和随后独占一行的同号题注；Mermaid图使用带图号图名的非正文标记，代码块结束后保留同号题注；框架图、结构图和流程图直接使用简洁Mermaid，流程图的开始和结束各一个且为圆角终止节点，主干自上而下、最多9个节点和2个判断节点；第三章不得生成硬件组成图或总体结构图；每张引脚表只对应一个器件并紧跟其电路说明，不得有“信号方向”列；表题严格使用“表x-x 表名”，测试必须有量化表格；公式必须独占一行并在行末写“（x-x）”，随后说明变量、单位和用途；超过5列或10行数据的表格必须按功能或模块拆分成多张表，并保持每张表前后有正文分析。除51单片机外主控按最小系统开发板描述，5V输入经板载稳压得到3.3V，所有模块共地，凡上拉电阻统一10 kΩ，TFT统一1.8寸。禁止新增标题、器件、引脚、功能或文献。`,
+必须执行：删除重复和系统未完成式表述；修复与确认事实矛盾的硬件描述；正文每段只讲一个主要观点，通常120至300字，超过380字必须在观点转换处用空行拆段，禁止删减内容或逐句拆段；任意图/表之间补入不少于80字的实质分析段落；artifacts中的每张图按figureNumber在图前正文中恰好引用一次“如图x-x所示”，每张表按tableNumber在表前正文中恰好引用一次“如表x-x所示”，每个公式按formulaNumber在公式前正文中恰好引用一次“如式（x-x）所示”；器件图、电路图、实物图和功能图使用“【非正文·插图位置：图x-x 图名】”、下一行“【非正文结束】”和随后独占一行的同号题注；Mermaid图使用带图号图名的非正文标记，代码块结束后保留同号题注；框架图、结构图和流程图直接使用简洁Mermaid，流程图的开始和结束各一个且为圆角终止节点，主干自上而下、最多9个节点和2个判断节点；硬件设计章节不得生成硬件组成图或总体结构图；每张引脚表只对应一个器件并紧跟其电路说明，不得有“信号方向”列；表题严格使用“表x-x 表名”，测试必须有量化表格；公式必须独占一行并在行末写“（x-x）”，随后说明变量、单位和用途；超过5列或10行数据的表格必须按功能或模块拆分成多张表，并保持每张表前后有正文分析。除51单片机外主控按最小系统开发板描述，5V输入经板载稳压得到3.3V，所有模块共地，凡上拉电阻统一10 kΩ，TFT统一1.8寸。禁止新增标题、器件、引脚、功能或文献。`,
     },
-    { role: 'user', content: JSON.stringify({ title: project.title, chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections }, responsibility: Prompts.chapterResponsibilities?.(chapter.kind) || '', problems, confirmedFacts: project.paper.factSheet, artifacts: (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id), references: chapter.kind === 'introduction' ? project.paper.referenceRecords : [], existingChapter: before }, null, 2) },
-  ], { reasoning: false, maxTokens: 16000, signal, requestLabel: `自动修复第${chapter.id}章重点问题`, timeoutMs: 150000 });
+    { role: 'user', content: JSON.stringify({ title: project.title, chapter: { id: chapter.id, title: chapter.title, kind: chapter.kind, requiredSections: chapter.sections }, responsibility: Prompts.chapterResponsibilities?.(chapter) || '', referencePolicy:Prompts.referenceWritingPolicy?.(project,chapter), problems, confirmedFacts: project.paper.factSheet, artifacts: (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id), references: hasChapterRole(chapter, 'introduction') ? project.paper.referenceRecords : [], existingChapter: before }, null, 2) },
+  ], { reasoning: false, task: 'repair', maxTokens: 16000, signal, requestLabel: chapterProgressLabel(chapter, '修复重点问题'), timeoutMs: 150000 });
   const candidate = normalizeChapterText(raw, chapter);
-  const normalizedCandidate = synchronizeArtifactPresentation(candidate, (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id));
+  const normalizedCandidate = synchronizePaperOrganization(synchronizeArtifactPresentation(candidate, (project.paper.artifacts || []).filter(item => item.chapterId === chapter.id)),chapter,project.paper.outline);
   if (countBodyChars(normalizedCandidate) < Math.max(700, Math.floor(countBodyChars(before) * 0.78))) return false;
   saved.content = normalizedCandidate;
-  if (chapter.kind === 'introduction') synchronizeReferenceOrder();
+  if (hasChapterRole(chapter, 'introduction')) synchronizeReferenceOrder();
   const afterCount = localQualityIssues().filter(issue => issue.severity === 'blocking' && issue.chapterId === chapter.id).length;
   if (afterCount > beforeCount) {
     saved.content = before;
+    if (referenceSnapshot) {
+      project.paper.referenceRecords = referenceSnapshot.records;
+      project.paper.materials.referencesText = referenceSnapshot.text;
+      if ($('paper-references')) $('paper-references').value = referenceSnapshot.text;
+    }
     return false;
   }
   saved.updatedAt = nowIso();
@@ -3667,7 +3843,8 @@ async function autoRepairImportantQuality(signal, { maxPasses = 2 } = {}) {
       const chapter = project.paper.outline.find(item => item.id === chapterId);
       if (!chapter) continue;
       const problems = blockers.filter(issue => issue.chapterId === chapterId).map(item => item.message);
-      changedThisPass ||= await repairChapterBlockingIssues(chapter, problems, signal);
+      const chapterChanged = await repairChapterBlockingIssues(chapter, problems, signal);
+      changedThisPass ||= chapterChanged;
       await saveGenerationCheckpoint();
     }
     changedAny ||= changedThisPass;
@@ -3677,10 +3854,9 @@ async function autoRepairImportantQuality(signal, { maxPasses = 2 } = {}) {
   return changedAny;
 }
 
-function renderQuality() {
+function renderQuality(quality = currentQualityReport()) {
   const panel = $('quality-panel');
-  const quality = project?.paper?.quality;
-  const issues = quality?.issues || [];
+  const issues = mergeFinalQualityIssues(quality?.issues || []);
   panel.hidden = !quality?.checkedAt && !issues.length;
   if (panel.hidden) return;
   const blockers = issues.filter(item => item.severity === 'blocking').length;
@@ -3695,6 +3871,12 @@ function renderQuality() {
 
 async function generatePaper() {
   if (requestController) return toast('当前还有任务正在运行', 'info');
+  const preflight = preflightPaperGeneration();
+  if (preflight.issues.length) {
+    setPaperStep(preflight.issues[0].step, { scroll: true });
+    await persistProject({ immediate: true });
+    return toast(preflight.issues.map(issue => issue.message).slice(0, 3).join('；'), 'error');
+  }
   if (!project.paper.factSheet.confirmedAt) {
     setPaperStep('pins', { scroll: true });
     return toast('请先确认器件和引脚', 'error');
@@ -3713,6 +3895,8 @@ async function generatePaper() {
   }
   requestController = new AbortController();
   requestTask = 'paper-generation';
+  generationApiConfig = clone(loadApiSettings());
+  generation.writingProfile = resolveAiProfile(generationApiConfig).id;
   generation.status = 'running';
   generation.phase = 'planning';
   if (['idle', 'completed', 'stale'].includes(previousStatus) || !generation.startedAt) {
@@ -3727,8 +3911,10 @@ async function generatePaper() {
   generation.message = '正在根据目标字数、器件和功能规划论文结构';
   project.paper.quality = freshQuality();
   startGenerationClock();
-  await saveGenerationCheckpoint();
   try {
+    await saveGenerationCheckpoint();
+    generation.activeRequestLabel='解读参考目录';
+    await ensureOutlineReferenceParsed(requestController.signal);
     if (project.paper.materials.useReferencesInPaper !== false && !project.paper.materials.referencesText.trim()) {
       generation.phase = 'references';
       generation.activeRequestLabel = '自动匹配参考文献';
@@ -3737,7 +3923,8 @@ async function generatePaper() {
       await recommendReferences({ automatic: true, signal: requestController.signal });
     }
     prepareReferenceRecords();
-    await planOutlineForPaper(requestController.signal);
+    await prepareKimiWritingBrief(requestController.signal);
+    await planOutlineForPaper(requestController.signal, { force: previousStatus === 'completed' });
     const artifactErrors = prepareGenerationArtifacts();
     if (artifactErrors.length) throw new Error(`论文图表要求建立失败：${artifactErrors[0]}`);
     generation.phase = 'chapters';
@@ -3823,17 +4010,20 @@ async function generatePaper() {
     toast('论文已生成，正在准备DOCX', 'success');
     await exportPaper({ automatic: true });
   } catch (error) {
-    const paused = error?.name === 'AbortError';
+    const reviewRequired=Boolean(error.referenceReview);
+    const paused = error?.name === 'AbortError' || reviewRequired;
     generation.status = paused ? 'paused' : 'failed';
     const phaseLabel = generation.activeRequestLabel || ({ references: '参考文献匹配', planning: '结构规划', chapters: `第${generation.currentChapterId || ''}章写作`, expand: '正文补写', extras: '摘要与前置内容', audit: '技术复核', quality: '质量修复' }[generation.phase] || '论文生成');
-    generation.message = paused ? '已暂停，完成的章节均已保存' : `${phaseLabel}中断，已保存已完成章节，可以继续生成或下载当前稿`;
+    generation.message = reviewRequired ? '参考目录待核对，请在资料处确认解读结果后继续生成' : paused ? '已暂停，完成的章节均已保存' : `${phaseLabel}中断，已保存已完成章节，可以继续生成或下载当前稿`;
     generation.lastError = paused ? '' : `${phaseLabel}：${error.message || '论文生成失败'}`;
     generation.activeRequestLabel = '';
     generation.updatedAt = nowIso();
     await persistProject({ immediate: true });
-    toast(paused ? '论文生成已暂停' : generation.lastError, paused ? 'info' : 'error');
+    if(reviewRequired) {setPaperStep('materials',{scroll:true});renderOutlineImportStatus();}
+    toast(reviewRequired ? generation.message : paused ? '论文生成已暂停' : generation.lastError, paused ? 'info' : 'error');
   } finally {
     clearInterval(generationClock);
+    generationApiConfig = null;
     requestController = null;
     requestTask = '';
     renderGeneration();
@@ -3941,6 +4131,9 @@ function bindEvents() {
   $('paper-scheme-text').addEventListener('input', captureSchemeSourceText);
   $('paper-scheme-file').addEventListener('change', readSchemeSourceFile);
   $('paper-outline-file').addEventListener('change', readOutlineReferenceFile);
+  $('btn-analyze-outline-reference').addEventListener('click',analyzeOutlineReference);
+  $('btn-confirm-outline-reference').addEventListener('click',confirmOutlineReference);
+  $('btn-cancel-outline-reference').addEventListener('click',()=>{if(requestTask==='outline-import') requestController?.abort(new DOMException('已取消','AbortError'));});
   $('btn-analyze-scheme-source').addEventListener('click', analyzeImportedScheme);
   $('paper-materials-form').addEventListener('input', event => {
     if (['paper-code-folder', 'paper-source-file', 'paper-scheme-source', 'paper-scheme-file', 'paper-outline-file', 'paper-scheme-text'].includes(event.target.id)) return;
