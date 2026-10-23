@@ -8,6 +8,7 @@ const docx = await readFile(new URL('../docx-export.js', import.meta.url), 'utf8
 const styles = await readFile(new URL('../styles.css', import.meta.url), 'utf8');
 const storage = await readFile(new URL('../storage.js', import.meta.url), 'utf8');
 const referenceLibrary = await readFile(new URL('../reference-library.js', import.meta.url), 'utf8');
+const referenceCatalog = await readFile(new URL('../reference-catalog.js', import.meta.url), 'utf8');
 const pdfWorker = await readFile(new URL('../vendor/pdf.worker.min.js', import.meta.url), 'utf8');
 const mockServer = await readFile(new URL('./mock-server.mjs', import.meta.url), 'utf8');
 const pinData = await readFile(new URL('../pin-data.js', import.meta.url), 'utf8');
@@ -98,7 +99,7 @@ const assertions = [
   ['时序图固定横向绘制', prompts.includes('时序图必须使用flowchart LR') && prompts.includes('禁止使用sequenceDiagram') && app.includes('必须使用flowchart LR按时间从左向右横向绘制') && app.includes('severity: \'blocking\'')],
   ['无摘要文献禁止虚构结论', prompts.includes('abstract为空') && prompts.includes('实验数据、性能提升和研究结论')],
   ['不再使用固定默认文献', !app.includes('DEFAULT_REFERENCES')],
-  ['推荐候选排除出版信息不完整条目', app.includes('function referencePublicationReady') && app.includes('REFERENCE_LIBRARY.filter(referencePublicationReady)')],
+  ['推荐候选排除出版信息不完整条目', referenceCatalog.includes('function referencePublicationReady') && app.includes('REFERENCE_LIBRARY.filter(referencePublicationReady)')],
   ['库内文献使用结构化出版信息', app.includes('const libraryByCitation = new Map') && app.includes("region: library.language === '中文' ? 'domestic'")],
   ['模拟服务覆盖AI文献筛选', mockServer.includes("system.includes('参考文献筛选员')") && mockServer.includes('parsed.candidateReferences')],
 ];

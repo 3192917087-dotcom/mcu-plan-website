@@ -8,7 +8,7 @@ import { requestAi, resolveAiProfile, taskFromLabel } from './ai-runtime.js?v=20
 import { schemaForTask, AI_SCHEMAS } from './ai-schemas.js?v=20261018-2';
 import { inputStamp, briefInput, buildKimiBriefMessages, buildConfirmedWritingBrief, validateKimiBrief, withKimiContext, buildKimiPatchMessages, buildKimiAuditMessages, applyKimiPatch } from './kimi-workflow.js?v=20261018-3';
 import { allPins, compatiblePins, validateMappings } from './pin-data.js?v=20260830-1';
-import { REFERENCE_LIBRARY, REFERENCE_LIBRARY_META } from './reference-library.js?v=20260826-2';
+import { REFERENCE_LIBRARY, REFERENCE_LIBRARY_META, referencePublicationReady } from './reference-catalog.js';
 import * as Rules from '../studio-next/rules.js?v=20260927-2';
 import {
   FIGURE_ARTIFACT_TYPES,
@@ -2462,15 +2462,6 @@ function referenceScore(record, query) {
   return score;
 }
 
-function referencePublicationReady(record) {
-  const citation = String(record.formatted || '');
-  if (!record.authors || !record.title || !record.source || !record.year || !citation) return false;
-  if (/期刊论文|\[J\]/i.test(record.type)) {
-    return new RegExp(`[,，]\\s*${record.year}\\s*[,，]\\s*\\d+\\s*\\([^)]+\\)\\s*[:：]\\s*[A-Za-z]?\\d+`, 'i').test(citation);
-  }
-  return /\[[A-Z]+(?:\/[A-Z]+)?\]/i.test(citation);
-}
-
 function referenceLanguageTargets(count) {
   const total = clampReferenceCount(count);
   const chinese = Math.round(total * 0.7);
@@ -2803,9 +2794,10 @@ function prepareReferenceRecords() {
           documentType,
           source: library.source,
           year: library.year,
-          volume: journalDetails?.[1] || volumeIssue?.[1] || '',
-          issue: journalDetails?.[2] || volumeIssue?.[2] || '',
-          pages: pages.replace(/\s+/g, ''),
+          volume: library.volumeNotPublished ? '' : library.volume || journalDetails?.[1] || volumeIssue?.[1] || '',
+          issue: library.issue || journalDetails?.[2] || volumeIssue?.[2] || '',
+          pages: (library.pages || pages).replace(/\s+/g, ''),
+          volumeNotPublished: library.volumeNotPublished === true,
           institution: documentType === 'D' ? library.source : '',
           publisher: ['M', 'S'].includes(documentType) ? library.source : '',
           doi: /^10\./.test(library.identifier) ? library.identifier : '',

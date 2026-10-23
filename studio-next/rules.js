@@ -730,7 +730,7 @@ function missingReferenceMetadata(reference) {
   } else if (reference.documentType === 'J') {
     if (!reference.source) missing.push('期刊名');
     if (!reference.year) missing.push('年份');
-    if (!reference.volume) missing.push('卷号');
+    if (!reference.volume && !reference.volumeNotPublished) missing.push('卷号');
     if (!reference.issue) missing.push('期号');
     if (!reference.pages) missing.push('页码');
   } else if (reference.documentType === 'D') {
