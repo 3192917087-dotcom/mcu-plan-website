@@ -109,9 +109,11 @@ const SCHEME_SUPPORT_ONLY_START_PATTERN = /^(?:使用|采用|配置|增加|设�
 function normalizeSchemeFunctionText(value) {
   return sanitizeTechnicalText(typeof value === 'string' ? value : value?.name || value?.description || '')
     .replace(/HC\s*[-_ ]?\s*SR501/gi, 'TCRT5000')
+    .replace(/(?:不接入|不使用|未接入|不连接)(?:任何)?(?:云平台|云端|云服务)/gi, '')
+    .replace(/\s{2,}/g, ' ')
     .replace(/^\s*(?:功能|要求)\s*[:：]\s*/i, '')
     .replace(/^\s*\d+\s*[.、)）]\s*/, '')
-    .replace(/[。；;]+$/, '')
+    .replace(/[。；;，,]+$/, '')
     .trim();
 }
 
@@ -1162,7 +1164,7 @@ async function generateScheme(event) {
     const functionCount = project.scheme.countMode === 'custom'
       ? project.scheme.functionCount
       : 5 + Math.floor(Math.random() * 6);
-    const policy = buildSchemePolicy({ functionCount, requirements: project.scheme.requirements, preferences: project.scheme.preferences });
+    const policy = buildSchemePolicy({ title: project.scheme.title, functionCount, requirements: project.scheme.requirements, preferences: project.scheme.preferences });
     let structured = null;
     let previousResult = null;
     let validationIssues = [];

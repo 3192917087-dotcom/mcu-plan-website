@@ -24,8 +24,10 @@ function scheme(count = 8) {
 }
 const policy = buildSchemePolicy({ functionCount: 8, preferences });
 assert.deepEqual(schemeResultIssues(scheme(), policy), []);
-assert.ok(schemeResultIssues(scheme(7), policy).some(issue => issue.includes('恰好8条')));
-assert.ok(schemeResultIssues({ ...scheme(), functions: [...functions, '使用RTC进行定时运行'] }, policy).some(issue => issue.includes('恰好8条')));
+assert.deepEqual(schemeResultIssues(scheme(7), policy), []);
+assert.ok(schemeResultIssues({ ...scheme(), functions: [...functions, '使用RTC进行定时运行', '使用按键设置显示页面', '使用按键设置报警参数'] }, policy).some(issue => issue.includes('明显偏离')));
+const dormPolicy = buildSchemePolicy({ title: '基于单片机的寝室管理系统与设计', functionCount: 12, preferences });
+assert.ok(schemeResultIssues({ ...scheme(), functions: [...functions, '使用继电器控制温室灌溉水泵'] }, dormPolicy).some(issue => issue.includes('场景不匹配')));
 assert.equal(buildSchemePolicy({ functionCount: 20 }).functionCount, 20);
 assert.equal(buildSchemePolicy({ functionCount: 3 }).functionCount, 3);
 assert.equal(policy.cloudMode, 'none');
@@ -115,7 +117,7 @@ const messages = buildSchemeMessages({ title: '环境监测', functionCount: 8, 
 assert.deepEqual(JSON.parse(messages[1].content).resolvedConstraints, policy);
 assert.equal(JSON.parse(messages[1].content).previousResult.functions.length, 7);
 assert.ok(messages[0].content.includes('空选择表示“不使用云平台”'));
-assert.ok(messages[0].content.includes('functions必须恰好包含functionCount条'));
+assert.ok(messages[0].content.includes('数量是参考目标'));
 assert.ok(messages[0].content.includes('10 kΩ'));
 assert.ok(messages[0].content.includes('人体检测类项目的默认器件为“TCRT5000'));
 assert.ok(messages[0].content.includes('APP与云平台都未选择'));
@@ -149,16 +151,16 @@ async function runGeneration(responses, { count = 8, mode = 'custom', selected =
   return { context, requests, saves, notifications };
 }
 
-let run = await runGeneration([scheme(7), scheme(8)]);
+let run = await runGeneration([scheme(5), scheme(7)]);
 assert.equal(run.requests.length, 2);
-assert.equal(run.context.project.scheme.structured.functions.length, 8);
+assert.equal(run.context.project.scheme.structured.functions.length, 7);
 assert.equal(run.saves.length, 1);
 assert.ok(run.requests[1].previousResult);
 
 const withSupport = scheme(8); withSupport.functions[7] = '使用10 kΩ上拉电阻保证通信稳定';
 run = await runGeneration([withSupport, scheme(8)]);
-assert.equal(run.requests.length, 2);
-assert.equal(run.context.project.scheme.structured.functions.length, 8);
+assert.equal(run.requests.length, 1);
+assert.equal(run.context.project.scheme.structured.functions.length, 7);
 assert.ok(!run.context.project.scheme.structured.functions.some(text => text.includes('上拉')));
 
 run = await runGeneration([cloudScheme, scheme(8)]);
@@ -178,15 +180,15 @@ assert.equal(run.context.project.scheme.structured.functions.length, 3);
 assert.equal(run.requests.length, 2);
 const duplicated = scheme(8); duplicated.functions[7] = duplicated.functions[6];
 run = await runGeneration([duplicated, scheme(8)]);
-assert.equal(run.requests.length, 2);
-assert.equal(run.context.project.scheme.structured.functions.length, 8);
-run = await runGeneration([scheme(7)], { oldScheme: scheme(8) });
+assert.equal(run.requests.length, 1);
+assert.equal(run.context.project.scheme.structured.functions.length, 7);
+run = await runGeneration([scheme(5)], { oldScheme: scheme(8) });
 assert.equal(run.requests.length, 3);
 assert.equal(run.saves.length, 0);
 assert.equal(run.context.project.scheme.text, '原来的方案');
 assert.equal(run.context.project.scheme.structured.functions.length, 8);
 assert.equal(run.context.project.scheme.status, 'stale');
-assert.ok(run.notifications.some(item => item.kind === 'error' && item.message.includes('恰好8条')));
+assert.ok(run.notifications.some(item => item.kind === 'error' && item.message.includes('明显偏离')));
 
 run = await runGeneration([scheme(8)], { mode: 'random' });
 assert.ok(run.requests[0].functionCount >= 5 && run.requests[0].functionCount <= 10);
@@ -205,4 +207,4 @@ const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 assert.ok(/data-multi-select="appSoftware"[^]*?<strong data-multi-summary>不使用<\/strong>/.test(html));
 assert.ok(html.includes('value="点灯科技 Blinker"'));
 
-console.log(JSON.stringify({ status: 'ok', coverage: ['exact-count', 'support-exclusion', 'controller', 'display', 'cloud-opt-in', 'cloud-selection', 'app-selection', 'no-communication-default', 'internal-bus-preserved', 'esp32-controller-preserved', 'blinker', 'empty-selection-labels', 'requirements-priority', 'bounded-repair', 'preserve-old-scheme', 'button-recovery', 'random-count-stability'], paidApiCalls: 0 }));
+console.log(JSON.stringify({ status: 'ok', coverage: ['reference-count', 'scene-fit', 'support-exclusion', 'controller', 'display', 'cloud-opt-in', 'cloud-selection', 'app-selection', 'no-communication-default', 'internal-bus-preserved', 'esp32-controller-preserved', 'blinker', 'empty-selection-labels', 'requirements-priority', 'bounded-repair', 'preserve-old-scheme', 'button-recovery', 'random-count-stability'], paidApiCalls: 0 }));

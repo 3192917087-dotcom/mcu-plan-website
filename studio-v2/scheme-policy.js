@@ -63,7 +63,7 @@ function requestedModel(requirements, pattern, kind) {
   return selected;
 }
 
-export function buildSchemePolicy({ functionCount, preferences = {}, requirements = '' } = {}) {
+export function buildSchemePolicy({ title = '', functionCount, preferences = {}, requirements = '' } = {}) {
   const controller = requestedModel(requirements, CONTROLLER_MODEL, 'controller') || preferences.controller || 'auto';
   let display = requestedModel(requirements, DISPLAY_MODEL, 'display') || preferences.display || 'auto';
   let cloudPlatforms = distinct(preferences.cloudPlatforms);
@@ -117,8 +117,12 @@ export function buildSchemePolicy({ functionCount, preferences = {}, requirement
     } else if (positiveMention(clause, APP_USAGE) && appMode === 'none') appMode = 'generic';
   }
   const communicationAllowed = appMode !== 'none' || cloudMode !== 'none' || positiveMention(requirements, NETWORK_USAGE);
+  const targetCount = Math.max(3, Math.min(20, Math.trunc(Number(functionCount) || 8)));
   return {
-    functionCount: Math.max(3, Math.min(20, Math.trunc(Number(functionCount) || 8))),
+    functionCount: targetCount,
+    functionCountMin: Math.max(3, targetCount - 2),
+    functionCountMax: Math.min(20, targetCount + 2),
+    scene: scenePolicy(title),
     controller, display, cloudMode, cloudPlatforms,
     programmingSoftware: distinct(preferences.programmingSoftware),
     appSoftware, appMode, communicationAllowed,
@@ -144,6 +148,29 @@ function platformMatches(text, name) {
   return known ? positiveMention(text, known[1]) : compact(text).includes(compact(name));
 }
 
+function scenePolicy(title) {
+  const value = String(title || '');
+  if (/寝室|宿舍/.test(value)) {
+    return {
+      label: '寝室或宿舍管理',
+      forbidden: /温室|大棚|灌溉|农田|鱼缸|水泵|车辆|汽车|停车|宠物喂养|快递分拣|充电桩/,
+    };
+  }
+  if (/温室|大棚|农业|农田|灌溉/.test(value)) {
+    return {
+      label: '农业或温室管理',
+      forbidden: /车辆定位|停车缴费|宠物喂养|快递分拣|寝室门禁/,
+    };
+  }
+  if (/鱼缸|水族/.test(value)) {
+    return {
+      label: '水族或鱼缸管理',
+      forbidden: /车辆定位|停车缴费|温室灌溉|快递分拣|寝室门禁/,
+    };
+  }
+  return null;
+}
+
 export function schemeResultIssues(result, policy) {
   const issues = [];
   const devices = Array.isArray(result?.devices) ? result.devices : [];
@@ -152,7 +179,15 @@ export function schemeResultIssues(result, policy) {
   const functionText = functions.join('\n');
   const allText = `${deviceText}\n${functionText}`;
   if (!devices.length) issues.push('方案缺少器件清单');
-  if (functions.length !== policy.functionCount) issues.push(`需要恰好${policy.functionCount}条有效功能，当前只有${functions.length}条；不得用配套项或重复功能凑数`);
+  const functionMin = policy.functionCountMin || Math.max(3, policy.functionCount - 2);
+  const functionMax = policy.functionCountMax || Math.min(20, policy.functionCount + 2);
+  if (functions.length < functionMin || functions.length > functionMax) {
+    issues.push(`功能数量明显偏离参考值${policy.functionCount}，当前为${functions.length}条；应优先保留真实且符合场景的功能`);
+  }
+  if (policy.scene?.forbidden) {
+    const unrelated = functions.filter(item => policy.scene.forbidden.test(String(item || '')));
+    if (unrelated.length) issues.push(`存在与${policy.scene.label}场景不匹配的功能：${unrelated.join('；')}`);
+  }
   if (functions.some(text => DEVELOPMENT_ONLY.test(text))) issues.push('编译、烧录、程序编写等开发过程不能作为独立功能');
   if (policy.controller !== 'auto') {
     if (!devices.some(device => modelMatches(device.model, policy.controller))) issues.push(`主控必须使用${policy.controller}`);
