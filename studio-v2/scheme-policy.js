@@ -27,10 +27,19 @@ const APP_NAMES = [
 const APP_USAGE = /\bAPP\b|App\s*Inventor|Android\s*Studio|微信小程序|手机(?:端|应用|远程|查看|控制|直连|连接|交互)|移动端/i;
 const NETWORK_USAGE = /ESP[ -]?0?1S|ESP8266|HC[ -]?(?:05|06|08|12)\b|NRF24|SIM800|SIM900|SIM7600|EC20|EC200|W5500|ENC28J60|CC2530|SX127\d|SX126\d|Wi[ -]?Fi|无线(?:通信|传输|联网|控制|模块)|蓝牙|LoRa|ZigBee|NB[ -]?IoT|4G|5G|GSM|以太网|通信模块|联网|网络通信|远程(?:查看|控制|监测)|手机(?:端|应用|远程|查看|控制|直连|连接|交互)|移动端/i;
 const COMMUNICATION_MODEL = /ESP[ -]?0?1S|ESP8266|ESP32|HC[ -]?(?:05|06|08|12)\b|NRF24|SIM800|SIM900|SIM7600|EC20|EC200|W5500|ENC28J60|CC2530|SX127\d|SX126\d|蓝牙|Wi[ -]?Fi|LoRa|ZigBee|NB[ -]?IoT|4G|5G|GSM|以太网|通信模块|无线模块/i;
+const TRANSPORTS = [
+  ['bluetooth', /蓝牙|Bluetooth|HC[ -]?0?[568]\b|HM[ -]?10\b|JDY[ -]?\d+|AT[ -]?09\b/i],
+  ['wifi', /Wi[ -]?Fi|ESP[ -]?0?1S|ESP8266|无线局域网|设备热点/i],
+];
+const MODULE_RULES = [
+  { key: 'bluetooth', label: '蓝牙模块', category: '蓝牙(?:通信)?模块?', defaultModel: 'HC-05', models: /HC[ -]?0?[568]\b|HM[ -]?10\b|JDY[ -]?\d+\b|AT[ -]?09\b/i, usage: /蓝牙|Bluetooth|HC[ -]?0?[568]\b|HM[ -]?10\b|JDY[ -]?\d+\b|AT[ -]?09\b/i },
+  { key: 'voice', label: '语音控制模块', category: '(?:离线)?语音(?:识别|控制)?模块?', defaultModel: 'Asrpro', models: /ASR[ -]?PRO\b|LD3320\b|SU[ -]?0?[123]\b|CI[ -]?0?3T\b|LDV7\b|WTK6900\b/i, usage: /ASR[ -]?PRO|LD3320|SU[ -]?0?[123]\b|CI[ -]?0?3T\b|LDV7|语音(?:识别|控制|交互|模块)|离线语音/i },
+  { key: 'motorDriver', label: '电机驱动模块', category: '(?:电机|马达|步进电机)驱动(?:芯片|模块)?', defaultModel: 'TB6612', models: /TB6612(?:FNG)?\b|L298N?\b|L293D?\b|ULN2003\b|DRV8833\b|L9110S?\b|A4988\b|DRV8825\b/i, usage: /TB6612|L298|L293|ULN2003|DRV8833|L9110|A4988|DRV8825|(?:电机|马达|步进).*驱动|驱动.*(?:电机|马达|步进)/i },
+];
 
 function compact(value) { return String(value || '').replace(/[\s_（）()·-]/g, '').toLowerCase(); }
 function distinct(values) { return [...new Set((values || []).map(value => String(value).trim()).filter(Boolean))]; }
-function clauses(text) { return String(text || '').split(/[\n，,。；;]|(?:但是|但|而)(?=(?:使用|采用|用|改用|改为))/).map(value => value.trim()).filter(Boolean); }
+function clauses(text) { return String(text || '').split(/[\n，,。；;]|(?:但是|但|而)(?=(?:使用|采用|用|改用|改为|是))/).map(value => value.trim()).filter(Boolean); }
 function isNegated(clause, index) {
   return /(?:不要|不用|不使用|不采用|不选(?:择)?|不需要|不依赖|不接入|不连接|不经过|不借助|不能|禁止|避免|无需|而不是|不是)[^，,。；;\n]{0,12}$/.test(clause.slice(0, index));
 }
@@ -38,6 +47,63 @@ function isNegated(clause, index) {
 function positiveMention(text, pattern) {
   const scanner = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g');
   return clauses(text).some(clause => [...clause.matchAll(scanner)].some(match => !isNegated(clause, match.index)));
+}
+
+function modulePolicy(title, requirements) {
+  return Object.fromEntries(MODULE_RULES.map(rule => {
+    let specified = [];
+    for (const [text, isTitle] of [[title, true], [requirements, false]]) {
+      for (const clause of clauses(text)) {
+        if (/用于对比|作为候选|仅供参考|比较|对比/.test(clause)) continue;
+        const named = clause.match(new RegExp(`${rule.category}\\s*(?:型号)?\\s*(?:必须|固定)?\\s*(?:使用|采用|选用|用|为|是|改为|换成|指定|[:：])\\s*([A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)*)`, 'i'));
+        const matches = [...clause.matchAll(new RegExp(rule.models.source, 'gi'))].filter(match => !isNegated(clause, match.index)
+          && (isTitle || /(?:使用|采用|指定|选用|改用|改为|换成|用)[^，。；]{0,20}$/.test(clause.slice(0, match.index))
+            || compact(clause) === compact(match[0]) || /^\s*(?:模块)?(?:作为|用作)/.test(clause.slice(match.index + match[0].length))));
+        if (named && !isNegated(clause, named.index)) specified = [named[1]];
+        else if (matches.length) specified = distinct(matches.map(match => match[0]));
+      }
+    }
+    return [rule.key, { models: specified.length ? specified : [rule.defaultModel], explicit: specified.length > 0 }];
+  }));
+}
+
+function transportPolicy(title, requirements, selectedMode = 'auto') {
+  let disabled = selectedMode === 'none';
+  let required = selectedMode === 'auto'
+    ? TRANSPORTS.filter(([, pattern]) => positiveMention(title, pattern)).map(([name]) => name)
+    : disabled ? [] : [selectedMode];
+  let forbidden = disabled ? TRANSPORTS.map(([name]) => name) : [];
+  let specified = false;
+  for (const clause of clauses(requirements)) {
+    if (/用于对比|作为候选|仅供参考|比较|对比/.test(clause)) continue;
+    if (/(?:不要|不用|不使用|不需要|禁止|无需)\s*(?:任何|所有)?\s*(?:外部|无线|网络)?通信(?:功能|模块)?/.test(clause)) {
+      disabled = true;
+      required = [];
+      forbidden = TRANSPORTS.map(([name]) => name);
+      specified = false;
+      continue;
+    }
+    // 明确附加要求优先于“不使用通信”，但否定、对比提及不触发覆盖。
+    if (disabled && [NETWORK_USAGE, APP_USAGE, CLOUD_USAGE, ...CLOUD_NAMES.map(([, pattern]) => pattern)].some(pattern => positiveMention(clause, pattern))) {
+      disabled = false;
+      forbidden = [];
+    }
+    const positive = TRANSPORTS.filter(([, pattern]) => positiveMention(clause, pattern)).map(([name]) => name);
+    const negative = TRANSPORTS.filter(([, pattern]) => {
+      const matches = [...clause.matchAll(new RegExp(pattern.source, 'gi'))];
+      return matches.some(match => isNegated(clause, match.index));
+    }).map(([name]) => name);
+    if (positive.length) {
+      required = specified && !/改用|改为|换成|替换为/.test(clause) ? distinct([...required, ...positive]) : positive;
+      specified = true;
+      forbidden = forbidden.filter(name => !positive.includes(name));
+    }
+    if (negative.length) {
+      forbidden = distinct([...forbidden, ...negative]);
+      required = required.filter(name => !negative.includes(name));
+    }
+  }
+  return { required, forbidden, disabled };
 }
 
 function requestedModel(requirements, pattern, kind) {
@@ -103,7 +169,7 @@ export function buildSchemePolicy({ title = '', functionCount, preferences = {},
     }
   }
   let appSoftware = distinct(preferences.appSoftware);
-  let appMode = appSoftware.length ? 'selected' : 'none';
+  let appMode = appSoftware.length ? 'selected' : positiveMention(title, APP_USAGE) ? 'generic' : 'none';
   let explicitAppTools = false;
   for (const clause of clauses(requirements)) {
     if (/(?:不使用|不要|不用|无需|不需要|禁止)[^，,。；;\n]{0,8}(?:APP|手机应用|手机端|移动端|小程序)/i.test(clause)) {
@@ -116,7 +182,12 @@ export function buildSchemePolicy({ title = '', functionCount, preferences = {},
       explicitAppTools = true; appMode = 'selected';
     } else if (positiveMention(clause, APP_USAGE) && appMode === 'none') appMode = 'generic';
   }
-  const communicationAllowed = appMode !== 'none' || cloudMode !== 'none' || positiveMention(requirements, NETWORK_USAGE);
+  const communicationMode = ['auto', 'bluetooth', 'wifi', 'none'].includes(preferences.communicationMode) ? preferences.communicationMode : 'auto';
+  const communication = transportPolicy(title, requirements, communicationMode);
+  const modules = modulePolicy(title, requirements);
+  const communicationAllowed = !communication.disabled && (communication.required.length > 0 || appMode !== 'none' || cloudMode !== 'none' || positiveMention(requirements, NETWORK_USAGE) || positiveMention(title, NETWORK_USAGE));
+  const configurationIssues = communication.disabled && (appMode !== 'none' || cloudMode !== 'none')
+    ? ['“不使用通信”与APP或云平台配置冲突，请选择通信方式，或取消APP和云平台要求'] : [];
   const targetCount = Math.max(3, Math.min(20, Math.trunc(Number(functionCount) || 8)));
   return {
     functionCount: targetCount,
@@ -125,7 +196,7 @@ export function buildSchemePolicy({ title = '', functionCount, preferences = {},
     scene: scenePolicy(title),
     controller, display, cloudMode, cloudPlatforms,
     programmingSoftware: distinct(preferences.programmingSoftware),
-    appSoftware, appMode, communicationAllowed,
+    appSoftware, appMode, communicationMode, communicationAllowed, communication, modules, configurationIssues,
   };
 }
 
@@ -178,6 +249,34 @@ export function schemeResultIssues(result, policy) {
   const deviceText = devices.map(device => `${device.model || ''}（${device.role || ''}）`).join('\n');
   const functionText = functions.join('\n');
   const allText = `${deviceText}\n${functionText}`;
+  const communication = policy.communication || { required: [], forbidden: [] };
+  for (const [name, pattern] of TRANSPORTS) {
+    if (communication.required.includes(name) && !positiveMention(functionText, pattern)) issues.push(`用户要求${name === 'bluetooth' ? '蓝牙' : 'WiFi'}通信，功能必须使用对应通信方式，不能用其他链路替代`);
+    if (communication.forbidden.includes(name) && positiveMention(allText, pattern)) issues.push(`用户明确不使用${name === 'bluetooth' ? '蓝牙' : 'WiFi'}，不得加入对应模块或通信功能`);
+  }
+  if (communication.required.includes('bluetooth') && !communication.required.includes('wifi') && policy.cloudMode === 'none'
+    && positiveMention(allText, TRANSPORTS[1][1])) issues.push('蓝牙APP应通过蓝牙链路交互，不得擅自换成WiFi或添加WiFi模块');
+  if (communication.required.includes('wifi') && !communication.required.includes('bluetooth') && positiveMention(allText, TRANSPORTS[0][1])) issues.push('用户要求WiFi通信，不得擅自加入蓝牙链路');
+  if (!communication.required.length) {
+    const bluetoothDevice = devices.some(device => TRANSPORTS[0][1].test(`${device.model} ${device.role}`) && !/主控|单片机|开发板/.test(device.role || ''));
+    const wifiDevice = devices.some(device => TRANSPORTS[1][1].test(`${device.model} ${device.role}`) && !/主控|单片机|开发板/.test(device.role || ''));
+    if (bluetoothDevice && policy.cloudMode === 'none' && positiveMention(functionText, TRANSPORTS[1][1])) issues.push('器件采用蓝牙模块，APP交互功能不能改写为WiFi；请统一实际通信链路');
+    if (wifiDevice && positiveMention(functionText, TRANSPORTS[0][1])) issues.push('器件采用WiFi模块，APP交互功能不能改写为蓝牙；请统一实际通信链路');
+  }
+  const moduleMatches = (text, model) => new RegExp(`${model.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/[- ]/g, '[- ]?')}(?![A-Za-z0-9])`, 'i').test(text)
+    || (compact(model) === 'tb6612' && /TB6612FNG/i.test(text));
+  for (const rule of MODULE_RULES) {
+    const expected = policy.modules?.[rule.key];
+    if (!expected) continue;
+    const matchingDevices = devices.filter(device => rule.usage.test(`${device.model || ''} ${device.role || ''}`)
+      && !/主控|主控制器|单片机|开发板/.test(device.role || ''));
+    matchingDevices.forEach(device => {
+      if (!expected.models.some(model => moduleMatches(device.model || '', model))) issues.push(`${rule.label}${expected.explicit ? '已明确指定' : '默认固定使用'}${expected.models.join('、')}，不得自行使用${device.model}`);
+    });
+    const mentioned = [...functionText.matchAll(new RegExp(rule.models.source, 'gi'))].map(match => match[0]);
+    if (mentioned.some(model => !expected.models.some(expectedModel => moduleMatches(model, expectedModel)))) issues.push(`功能中的${rule.label}型号必须与${expected.models.join('、')}一致`);
+    if (expected.explicit && !matchingDevices.some(device => expected.models.some(model => moduleMatches(device.model || '', model)))) issues.push(`器件清单需要采用明确指定的${rule.label}${expected.models.join('、')}`);
+  }
   if (!devices.length) issues.push('方案缺少器件清单');
   const functionMin = policy.functionCountMin || Math.max(3, policy.functionCount - 2);
   const functionMax = policy.functionCountMax || Math.min(20, policy.functionCount + 2);
@@ -213,8 +312,8 @@ export function schemeResultIssues(result, policy) {
         : modelMatches(device.model, policy.controller);
       return !isMainController && COMMUNICATION_MODEL.test(`${device.model || ''} ${device.role || ''}`);
     });
-    if (extraModules.length) issues.push(`APP和云平台均未使用，不得加入额外通信模块：${extraModules.map(device => device.model).join('、')}`);
-    if (positiveMention(functionText, NETWORK_USAGE)) issues.push('APP和云平台均未使用，不得自动增加无线联网、手机交互或远程控制功能；应补充项目本地功能');
+    if (extraModules.length) issues.push(`当前配置不使用外部通信，不得加入额外通信模块：${extraModules.map(device => device.model).join('、')}`);
+    if (positiveMention(functionText, NETWORK_USAGE)) issues.push('当前配置不使用外部通信，不得自动增加无线联网、手机交互或远程控制功能；应补充项目本地功能');
   }
   if (policy.cloudMode === 'none') {
     if (positiveMention(allText, CLOUD_USAGE) || usedPlatforms.length) issues.push('未选择云平台且附加要求未明确需要云，不得加入云平台、云端上传或云端控制');

@@ -1,11 +1,13 @@
-import * as Store from './storage.js?v=20260826-1';
-import * as Prompts from './prompts.js?v=20261018-3';
+import * as Store from './storage.js?v=20261118-1';
+import { appendMaterialFiles, programFilePath } from './material-files.js?v=20261118-1';
+import { isSignalPeripheral, filterSignalMappings, signalMappedDevices } from './hardware-signals.js?v=20261118-2';
+import * as Prompts from './prompts.js?v=20261118-4';
 import { OUTLINE_POLICY_VERSION, parseReferenceOutline, referenceAdoptionIssues, validateOutlineStructure, chapterRoles, hasChapterRole, findRoleChapter, selectionChapter, activeChapterRecords, applyPlannedOutline, chapterProgressLabel, insertChapterSupplement, normalizeReferenceUsage, completePartialIntroduction, effectiveReferenceText, ensurePcbOutline, pcbDesignPolicy, synchronizePaperOrganization, organizationCoverageIssues } from './outline-policy.js?v=20261018-3';
 import { REFERENCE_IMPORT_VERSION, readReferenceFiles, buildReferenceInterpretationMessages, validateReferenceInterpretation, referenceReviewState, confirmReferenceInterpretation, referenceEditorText, updateReferenceEditorText } from './reference-import.js?v=20261019-2';
-import { devicePlanGroups, matchesDevice, paperMaterialPreflight } from './paper-preflight.js?v=20261017-2';
-import { buildSchemePolicy, schemeResultIssues } from './scheme-policy.js?v=20261011-2';
+import { devicePlanGroups, matchesDevice, paperMaterialPreflight } from './paper-preflight.js?v=20261118-2';
+import { buildSchemePolicy, schemeResultIssues } from './scheme-policy.js?v=20261118-4';
 import { requestAi, resolveAiProfile, taskFromLabel } from './ai-runtime.js?v=20261017-1';
-import { schemaForTask, AI_SCHEMAS } from './ai-schemas.js?v=20261018-2';
+import { schemaForTask, AI_SCHEMAS } from './ai-schemas.js?v=20261118-1';
 import { inputStamp, briefInput, buildKimiBriefMessages, buildConfirmedWritingBrief, validateKimiBrief, withKimiContext, buildKimiPatchMessages, buildKimiAuditMessages, applyKimiPatch } from './kimi-workflow.js?v=20261018-3';
 import { allPins, compatiblePins, validateMappings } from './pin-data.js?v=20260830-1';
 import { REFERENCE_LIBRARY, REFERENCE_LIBRARY_META, referencePublicationReady } from './reference-catalog.js';
@@ -20,6 +22,14 @@ import {
 
 const PAGE_CONFIG = globalThis.MCU_PAGE_CONFIG || {};
 const APP_TITLE = '雄鸡工作室｜单片机方案与论文';
+const APP_VERSION = '20261118-4';
+const materialImportTasks = new Set();
+const savedProjectSnapshots = new WeakMap();
+let projectTransition = false;
+let saveState = 'saved';
+let saveRevision = 0;
+let lastBuildCheck = 0;
+let materialUiProjectId = '';
 const API_SETTINGS_KEY = 'mcu-paper-studio-v2.api-settings';
 const REFERENCE_TOOL_KEY = 'mcu-paper-studio-v2.reference-tool';
 const MOTIVATION_KEY = 'mcu-paper-studio-v2.daily-motivation-v2';
@@ -394,7 +404,7 @@ function createBlankProject(name = '未命名项目', start = 'paper') {
   const title = name === '未命名项目' ? '' : name;
   const outline = [];
   return {
-    schemaVersion: 28,
+    schemaVersion: 29,
     id: makeId('project'),
     name,
     title,
@@ -408,7 +418,7 @@ function createBlankProject(name = '未命名项目', start = 'paper') {
       requirements: '',
       countMode: 'random',
       functionCount: 8,
-      preferences: { controller: 'auto', display: 'auto', programmingSoftware: [], appSoftware: [], cloudPlatforms: [] },
+      preferences: { controller: 'auto', display: 'auto', communicationMode: 'auto', programmingSoftware: [], appSoftware: [], cloudPlatforms: [] },
       structured: null,
       text: '',
       generatedAt: '',
@@ -419,12 +429,12 @@ function createBlankProject(name = '未命名项目', start = 'paper') {
         schemeSourceId: '', schemeRawText: '', schemeFilename: '', devicesText: '', functionsText: '', connectionsText: '', codeText: '', referencesText: '',
         testInfo: '', toolsText: '', autoDevelopmentTools: [], photoNotes: '', sourceNotes: '', filenames: [], codeFiles: [],
         sourceDocumentFilename: '', sourceDocumentText: '', sourceBackgroundText: '',
-        schematicFilename: '', schematicText: '', outlineReferenceText: '', outlineReferenceFilename: '', targetBodyChars: MIN_BODY_CHARS,
+        schematicFilename: '', schematicText: '', schematicFiles: [], projectTopology: 'auto', outlineReferenceText: '', outlineReferenceFilename: '', targetBodyChars: MIN_BODY_CHARS,
         useReferencesInPaper: true, referenceRecommendationCount: 15,
         referenceRecommendationIds: [], referenceRecommendationReasons: {}, referenceRecommendationSource: '', referenceRecommendationSummary: '', referenceRecommendationAt: '',
       },
       factSheet: {
-        controller: '', devices: [], functions: [], mappings: [], powerNotes: [], fixedFacts: [], conflicts: [], conflictsAcknowledged: false, analyzedAt: '', confirmedAt: '',
+        controller: '', boards: [], devices: [], functions: [], mappings: [], powerNotes: [], fixedFacts: [], conflicts: [], conflictsAcknowledged: false, analyzedAt: '', confirmedAt: '',
       },
       outlineTemplate: Prompts.DEFAULT_OUTLINE_ID,
       outline,
@@ -463,6 +473,16 @@ function normalizeProject(source, options = {}) {
     normalized.paper = { ...base.paper, ...(clone(source.paper) || {}) };
     normalized.paper.materials = { ...base.paper.materials, ...(clone(source.paper?.materials) || {}) };
     normalized.paper.factSheet = { ...base.paper.factSheet, ...(clone(source.paper?.factSheet) || {}) };
+    normalized.paper.materials.schematicFiles = Array.isArray(source.paper?.materials?.schematicFiles)
+      ? normalized.paper.materials.schematicFiles.map(item => ({ name: String(item?.name || '').trim(), originalPath: String(item?.originalPath || item?.name || ''), text: String(item?.text || ''), pageCount: Math.max(1, Number(item?.pageCount) || 1) })).filter(item => item.name && item.text)
+      : normalized.paper.materials.schematicFilename ? [{ name: normalized.paper.materials.schematicFilename, text: String(normalized.paper.materials.schematicText || ''), pageCount: 1 }] : [];
+    normalized.paper.materials.projectTopology = ['auto', 'single', 'multi'].includes(normalized.paper.materials.projectTopology) ? normalized.paper.materials.projectTopology : 'auto';
+    normalized.paper.factSheet.boards = Array.isArray(normalized.paper.factSheet.boards) ? normalized.paper.factSheet.boards.map((board, index) => ({
+      id: String(board?.id || `board-${index + 1}`), name: String(board?.name || `板卡${index + 1}`), role: String(board?.role || '功能板'), controller: sanitizeTechnicalText(board?.controller || ''),
+      schematicFilenames: Array.isArray(board?.schematicFilenames) ? board.schematicFilenames.map(String) : [], programPaths: Array.isArray(board?.programPaths) ? board.programPaths.map(String) : [],
+      deviceModels: Array.isArray(board?.deviceModels) ? board.deviceModels.map(sanitizeTechnicalText) : [], functionNames: Array.isArray(board?.functionNames) ? board.functionNames.map(sanitizeTechnicalText) : [],
+      communication: Array.isArray(board?.communication) ? board.communication.map(sanitizeTechnicalText) : [], deviceIds: Array.isArray(board?.deviceIds) ? board.deviceIds.map(String) : [], functionIds: Array.isArray(board?.functionIds) ? board.functionIds.map(String) : [], notes: String(board?.notes || ''),
+    })) : [];
     normalized.paper.outlinePlanning = { ...base.paper.outlinePlanning, ...(clone(source.paper?.outlinePlanning) || {}) };
     normalized.paper.generation = { ...freshGeneration(), ...(clone(source.paper?.generation) || {}) };
     const loadedQuality = clone(source.paper?.quality) || {};
@@ -505,13 +525,19 @@ function normalizeProject(source, options = {}) {
     }
     normalized.scheme = { ...base.scheme, ...(clone(source.scheme) || {}) };
     normalized.scheme.preferences = { ...base.scheme.preferences, ...(clone(source.scheme?.preferences) || {}) };
+    if (!['auto', 'bluetooth', 'wifi', 'none'].includes(normalized.scheme.preferences.communicationMode)) normalized.scheme.preferences.communicationMode = 'auto';
     normalized.paper.materials.devicesText = sanitizeTechnicalText(normalized.paper.materials.devicesText);
     normalized.paper.materials.functionsText = sanitizeTechnicalText(normalized.paper.materials.functionsText);
     normalized.paper.materials.schemeRawText = sanitizeTechnicalText(normalized.paper.materials.schemeRawText);
     normalized.paper.factSheet.controller = sanitizeTechnicalText(normalized.paper.factSheet.controller);
     normalized.paper.factSheet.devices = (normalized.paper.factSheet.devices || []).map(item => ({ ...item, model: sanitizeTechnicalText(item.model), role: sanitizeTechnicalText(item.role) }));
     normalized.paper.factSheet.functions = (normalized.paper.factSheet.functions || []).map(item => ({ ...item, name: sanitizeTechnicalText(item.name), deviceModels: (item.deviceModels || []).map(sanitizeTechnicalText) }));
-    normalized.paper.factSheet.mappings = (normalized.paper.factSheet.mappings || []).map(item => ({ ...item, device: sanitizeTechnicalText(item.device) }));
+    normalized.paper.factSheet.mappings = (normalized.paper.factSheet.mappings || []).map(item => ({ ...item, device: sanitizeTechnicalText(item.device), boardId: String(item?.boardId || '') }));
+    if (normalized.paper.factSheet.boards.length === 1) {
+      const onlyBoardId = normalized.paper.factSheet.boards[0].id;
+      normalized.paper.factSheet.mappings = normalized.paper.factSheet.mappings.map(item => ({ ...item, boardId: item.boardId || onlyBoardId }));
+    }
+    normalized.paper.factSheet.mappings = filterSignalMappings(normalized.paper.factSheet.mappings, normalized.paper.factSheet.devices);
     if (normalized.scheme.structured) {
       normalized.scheme.structured.title = sanitizeTechnicalText(normalized.scheme.structured.title);
       normalized.scheme.structured.devices = (normalized.scheme.structured.devices || []).map(item => ({ ...item, model: normalizeSchemeModelText(item.model), role: sanitizeTechnicalText(item.role) }));
@@ -536,13 +562,15 @@ function normalizeProject(source, options = {}) {
     normalized.paper.materials.codeFiles = Array.isArray(normalized.paper.materials.codeFiles)
       ? normalized.paper.materials.codeFiles.map(item => ({
         name: String(item?.name || '').trim(), path: String(item?.path || item?.name || '').trim(),
+        originalPath: String(item?.originalPath || item?.path || item?.name || '').trim(),
+        group: String(item?.group || '').trim(),
         extension: String(item?.extension || '').trim().toLowerCase(), size: Math.max(0, Number(item?.size) || 0), content: String(item?.content || ''),
       })).filter(item => item.name && item.content)
       : [];
     normalized.paper.materials.filenames = normalized.paper.materials.codeFiles.length
       ? normalized.paper.materials.codeFiles.map(item => item.path || item.name)
       : Array.isArray(normalized.paper.materials.filenames) ? normalized.paper.materials.filenames : [];
-    normalized.schemaVersion = 27;
+    normalized.schemaVersion = 29;
     normalized.updatedAt = nowIso();
     normalized.createdAt = duplicate || imported ? nowIso() : normalized.createdAt || nowIso();
     if (normalized.paper.generation.status === 'running') {
@@ -626,12 +654,30 @@ function saveApiSettings(settings) {
 
 async function persistProject({ immediate = false } = {}) {
   if (!project) return;
+  const targetProject = project;
+  const revision = ++saveRevision;
+  updateSaveStatus('pending');
   const operation = async () => {
-    const saved = await Store.saveProject(project);
-    project.updatedAt = saved.updatedAt;
-    const index = projects.findIndex(item => item.id === project.id);
-    if (index >= 0) projects[index] = clone(project);
-    else projects.unshift(clone(project));
+    const snapshot = clone(targetProject);
+    try {
+      // Focus changes and project switches flush pending edits, but must not
+      // create a new revision when this page has not changed the project.
+      if (savedProjectSnapshots.get(targetProject) === JSON.stringify(snapshot)) {
+        if (revision === saveRevision && project === targetProject) updateSaveStatus('saved');
+        return;
+      }
+      const saved = await Store.saveProject(snapshot);
+      targetProject.updatedAt = saved.updatedAt;
+      targetProject.storageRevision = saved.storageRevision;
+      savedProjectSnapshots.set(targetProject, JSON.stringify(saved));
+      const index = projects.findIndex(item => item.id === targetProject.id);
+      if (index >= 0) projects[index] = clone(targetProject);
+      else projects.unshift(clone(targetProject));
+      if (revision === saveRevision && project === targetProject) updateSaveStatus('saved');
+    } catch (error) {
+      if (project === targetProject) updateSaveStatus('error', error.message);
+      throw error;
+    }
   };
   if (immediate) {
     clearTimeout(saveTimer);
@@ -643,6 +689,42 @@ async function persistProject({ immediate = false } = {}) {
   saveTimer = setTimeout(() => {
     saveQueue = saveQueue.then(operation, operation).catch(error => toast(error.message || '自动保存失败', 'error'));
   }, 420);
+}
+
+function updateSaveStatus(state = saveState, message = '') {
+  saveState = state;
+  const node = $('project-save-status');
+  if (!node) return;
+  node.textContent = state === 'pending' ? '正在保存…' : state === 'error' ? (message || '保存失败，资料仍在本页，请重试或导出备份') : '已保存到当前浏览器';
+  node.dataset.state = state;
+  node.title = `本地版本 ${APP_VERSION}；项目仅保存在当前浏览器，可在项目页导出备份`;
+  $('btn-retry-save').hidden = state !== 'error';
+  $('btn-backup-unsaved').hidden = state !== 'error';
+}
+
+function projectWorkBlocked() {
+  if (projectTransition) return '正在切换或保存项目，请稍候';
+  if (materialImportTasks.size) return '资料正在读取，请等待完成后再操作';
+  if (requestController) return requestTask === 'paper-generation' ? '论文正在生成，请先暂停生成再切换或修改资料' : '当前任务正在处理，请等待完成后再切换或修改资料';
+  return '';
+}
+
+async function checkAppVersion({ force = false } = {}) {
+  if (location.protocol === 'file:' || (!force && Date.now() - lastBuildCheck < 60000)) return;
+  lastBuildCheck = Date.now();
+  try {
+    const response = await fetch(`build-info.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) return;
+    const info = await response.json();
+    $('update-notice').hidden = !info.version || info.version === APP_VERSION;
+  } catch { /* Version checks must never interrupt local editing. */ }
+}
+
+async function saveAndReload() {
+  const blocked = projectWorkBlocked();
+  if (blocked) return toast(blocked, 'info');
+  try { await persistProject({ immediate: true }); location.reload(); }
+  catch (error) { toast(error.message || '保存失败，请先导出项目备份', 'error'); }
 }
 
 function bumpFactRevision(reason = '资料已修改') {
@@ -695,7 +777,8 @@ async function init() {
       if (legacy) {
         const migrated = normalizeProject(legacy, { imported: true });
         migrated.name = legacy.title || '旧版迁移项目';
-        await Store.saveProject(migrated);
+        const savedMigration = await Store.saveProject(migrated);
+        migrated.storageRevision = savedMigration.storageRevision;
         Store.clearLegacyProject();
         projects = [migrated];
         Store.setActiveProjectId(migrated.id);
@@ -706,6 +789,7 @@ async function init() {
     project = projects.find(item => item.id === activeId) || projects[0] || null;
     if (project) {
       project = normalizeProject(project);
+      savedProjectSnapshots.set(project, JSON.stringify(project));
       Store.setActiveProjectId(project.id);
       paperStep = project.paper.step || 'materials';
     }
@@ -716,6 +800,7 @@ async function init() {
     scheduleDailyMotivationRefresh();
     void checkActiveApiConnection({ silent: true });
     void refreshDailyMotivation();
+    void checkAppVersion({ force: true });
   } catch (error) {
     toast(error.message || '项目数据库初始化失败', 'error');
     console.error(error);
@@ -795,9 +880,25 @@ function setRoute(route, options = {}) {
 }
 
 async function activateProject(id, route = currentRoute === 'projects' ? 'paper' : currentRoute) {
-  const selected = projects.find(item => item.id === id) || await Store.getProject(id);
+  const blocked = projectWorkBlocked();
+  if (blocked || projectTransition) {
+    renderProjectSwitcher();
+    if (blocked) toast(blocked, 'info');
+    return;
+  }
+  projectTransition = true;
+  let selected;
+  try {
+    await persistProject({ immediate: true });
+    selected = await Store.getProject(id);
+  } catch (error) {
+    toast(error.message || '保存未完成，暂未切换项目', 'error');
+    renderProjectSwitcher();
+    return;
+  } finally { projectTransition = false; }
   if (!selected) return;
   project = normalizeProject(selected);
+  savedProjectSnapshots.set(project, JSON.stringify(project));
   Store.setActiveProjectId(project.id);
   paperStep = project.paper.step || 'materials';
   schemeStep = project.scheme?.status === 'ready' ? 'result' : 'input';
@@ -806,6 +907,8 @@ async function activateProject(id, route = currentRoute === 'projects' ? 'paper'
 }
 
 function openNewProjectDialog(start = 'paper') {
+  const blocked = projectWorkBlocked();
+  if (blocked) return toast(blocked, 'info');
   const dialog = $('new-project-dialog');
   $('new-project-name').value = '';
   const radio = qs(`input[name="new-project-start"][value="${start}"]`);
@@ -816,54 +919,74 @@ function openNewProjectDialog(start = 'paper') {
 
 async function createProjectFromDialog(event) {
   event.preventDefault();
+  const blocked = projectWorkBlocked();
+  if (blocked || projectTransition) return blocked ? toast(blocked, 'info') : undefined;
   const name = $('new-project-name').value.trim() || '未命名项目';
   const start = qs('input[name="new-project-start"]:checked')?.value || 'paper';
-  project = createBlankProject(name, start);
-  projects.unshift(clone(project));
-  Store.setActiveProjectId(project.id);
-  await persistProject({ immediate: true });
-  $('new-project-dialog').close();
-  paperStep = 'materials';
-  schemeStep = 'input';
-  renderAll();
-  setRoute(start);
-  toast('新项目已建立，旧项目仍保留在项目库', 'success');
+  projectTransition = true;
+  try {
+    await persistProject({ immediate: true });
+    const created = await Store.saveProject(createBlankProject(name, start));
+    project = normalizeProject(created);
+    savedProjectSnapshots.set(project, JSON.stringify(project));
+    projects.unshift(clone(project));
+    Store.setActiveProjectId(project.id);
+    $('new-project-dialog').close();
+    paperStep = 'materials';
+    schemeStep = 'input';
+    renderAll();
+    setRoute(start);
+    toast('新项目已建立，旧项目仍保留在项目库', 'success');
+  } catch (error) {
+    toast(error.message || '新建失败，原项目仍保留在本页', 'error');
+  } finally { projectTransition = false; }
 }
 
 async function handleProjectAction(button) {
   const card = button.closest('[data-project-id]');
   const id = card?.dataset.projectId;
   const action = button.dataset.projectAction;
-  const target = projects.find(item => item.id === id);
-  if (!target) return;
+  if (!projects.some(item => item.id === id)) return;
   if (action === 'open') {
     await activateProject(id, button.dataset.openRoute || 'paper');
     return;
   }
   if (action === 'export') {
-    Store.downloadProjectBackup(target);
+    Store.downloadProjectBackup(project?.id === id ? project : projects.find(item => item.id === id));
     toast('项目备份已下载', 'success');
     return;
   }
-  if (action === 'duplicate') {
-    const copy = await Store.duplicateProject(target, normalizeProject);
-    projects.unshift(copy);
+  const blocked = projectWorkBlocked();
+  if (blocked) return toast(blocked, 'info');
+  let copy;
+  projectTransition = true;
+  try {
+    await persistProject({ immediate: true });
+    const target = await Store.getProject(id);
+    if (!target) throw new Error('项目已被删除，请刷新项目列表');
+    if (action === 'duplicate') {
+      copy = await Store.duplicateProject(target, normalizeProject);
+      projects.unshift(copy);
+    }
+    if (action === 'delete') {
+      if (!confirm(`确定删除“${target.name || target.title}”吗？建议先导出备份。`)) return;
+      await Store.deleteProject(id);
+      // Read back after deletion instead of reviving cached projects.
+      projects = (await Store.listProjects()).filter(item => item.id !== id);
+      if (!projects.length) Store.clearLegacyProject();
+      if (project?.id === id) {
+        project = projects[0] ? normalizeProject(projects[0]) : null;
+        if (project) savedProjectSnapshots.set(project, JSON.stringify(project));
+        Store.setActiveProjectId(project?.id || '');
+      }
+      renderAll();
+      toast('项目已删除', 'success');
+    }
+  } catch (error) { toast(error.message || '项目操作失败，请先导出备份', 'error'); }
+  finally { projectTransition = false; }
+  if (copy) {
     await activateProject(copy.id, copy.start || 'paper');
     toast('项目副本已建立', 'success');
-    return;
-  }
-  if (action === 'delete') {
-    if (!confirm(`确定删除“${target.name || target.title}”吗？建议先导出备份。`)) return;
-    await Store.deleteProject(id);
-    // 以数据库回读结果为准，避免旧版迁移项目或多个标签页造成列表残留。
-    projects = (await Store.listProjects()).filter(item => item.id !== id);
-    if (!projects.length) Store.clearLegacyProject();
-    if (project?.id === id) {
-      project = projects[0] ? normalizeProject(projects[0]) : null;
-      Store.setActiveProjectId(project?.id || '');
-    }
-    renderAll();
-    toast('项目已删除', 'success');
   }
 }
 
@@ -871,12 +994,20 @@ async function importProject(event) {
   const file = event.target.files?.[0];
   event.target.value = '';
   if (!file) return;
+  const blocked = projectWorkBlocked();
+  if (blocked) return toast(blocked, 'info');
+  let imported;
+  projectTransition = true;
   try {
-    const imported = await Store.importProjectFile(file, normalizeProject);
+    await persistProject({ immediate: true });
+    imported = await Store.importProjectFile(file, normalizeProject);
     projects.unshift(imported);
+  } catch (error) { toast(error.message || '项目导入失败', 'error'); }
+  finally { projectTransition = false; }
+  if (imported) {
     await activateProject(imported.id, imported.start || 'paper');
     toast('项目已导入', 'success');
-  } catch (error) { toast(error.message || '项目导入失败', 'error'); }
+  }
 }
 
 function classifyApiFailure(message, status = 0) {
@@ -1075,6 +1206,7 @@ function schemePreferencesFromForm() {
   return {
     controller: $('scheme-controller')?.value || 'auto',
     display: $('scheme-display')?.value || 'auto',
+    communicationMode: $('scheme-communication')?.value || 'auto',
     programmingSoftware: selectedMultiValues('programmingSoftware'),
     appSoftware: selectedMultiValues('appSoftware'),
     cloudPlatforms: selectedMultiValues('cloudPlatforms'),
@@ -1138,6 +1270,7 @@ function renderScheme() {
   const preferences = { controller: 'auto', display: 'auto', programmingSoftware: [], appSoftware: [], cloudPlatforms: [], ...(project.scheme.preferences || {}) };
   $('scheme-controller').value = preferences.controller || 'auto';
   $('scheme-display').value = preferences.display || 'auto';
+  $('scheme-communication').value = ['auto', 'bluetooth', 'wifi', 'none'].includes(preferences.communicationMode) ? preferences.communicationMode : 'auto';
   qsa('[data-multi-select]').forEach(details => {
     const values = new Set(preferences[details.dataset.multiSelect] || []);
     qsa('input[type="checkbox"]', details).forEach(input => { input.checked = values.has(input.value); });
@@ -1149,6 +1282,7 @@ function renderScheme() {
 
 async function generateScheme(event) {
   event?.preventDefault();
+  if (materialImportTasks.size) return toast('资料正在读取，请等待完成后再生成', 'info');
   if (requestController) return toast('当前还有任务正在运行', 'info');
   captureScheme();
   if (!project.scheme.title) return toast('请先填写项目题目', 'error');
@@ -1165,6 +1299,7 @@ async function generateScheme(event) {
       ? project.scheme.functionCount
       : 5 + Math.floor(Math.random() * 6);
     const policy = buildSchemePolicy({ title: project.scheme.title, functionCount, requirements: project.scheme.requirements, preferences: project.scheme.preferences });
+    if (policy.configurationIssues.length) throw new Error(policy.configurationIssues.join('；'));
     let structured = null;
     let previousResult = null;
     let validationIssues = [];
@@ -1278,7 +1413,7 @@ function resetHardwareAnalysis(reason = '器件资料已修改') {
   if (facts.analyzedAt || facts.confirmedAt) bumpFactRevision(reason);
   project.paper.factSheet = {
     ...facts,
-    controller: '', devices: [], functions: [], mappings: [], powerNotes: [], fixedFacts: [], conflicts: [],
+    controller: '', boards: [], devices: [], functions: [], mappings: [], powerNotes: [], fixedFacts: [], conflicts: [],
     conflictsAcknowledged: false, analyzedAt: '', confirmedAt: '',
   };
 }
@@ -1312,6 +1447,10 @@ async function readSchemeSourceFile(event) {
   const file = event.target.files?.[0];
   event.target.value = '';
   if (!file || !project) return;
+  const blocked = projectWorkBlocked();
+  if (blocked) return toast(blocked, 'info');
+  const targetProject = project;
+  materialImportTasks.add('scheme');
   const extension = file.name.split('.').pop()?.toLowerCase();
   try {
     let text = '';
@@ -1323,6 +1462,7 @@ async function readSchemeSourceFile(event) {
     else throw new Error('请使用DOCX、TXT或MD文件；旧版DOC请先在WPS中另存为DOCX');
     text = sanitizeTechnicalText(text).trim();
     if (!text) throw new Error('文件中没有读取到可分析的方案文字');
+    if (project !== targetProject) return;
     project.paper.materials.schemeRawText = text.slice(0, 100000);
     project.paper.materials.schemeFilename = file.name;
     $('paper-scheme-text').value = project.paper.materials.schemeRawText;
@@ -1330,8 +1470,8 @@ async function readSchemeSourceFile(event) {
     await persistProject({ immediate: true });
     toast('方案文件已读取，点击“AI分析并填入资料”', 'success');
   } catch (error) {
-    toast(error.message || '方案文件读取失败', 'error');
-  }
+    if (project === targetProject) toast(error.message || '方案文件读取失败', 'error');
+  } finally { materialImportTasks.delete('scheme'); }
 }
 
 function captureSchemeSourceText() {
@@ -1396,7 +1536,7 @@ async function analyzeImportedScheme() {
 function capturePaperMaterials({ invalidate = true } = {}) {
   if (!project) return;
   const materials = project.paper.materials;
-  const previousHardware = JSON.stringify({ title: project.title, devicesText: materials.devicesText, functionsText: materials.functionsText, codeText: materials.codeText, sourceNotes: materials.sourceNotes, sourceDocumentText: materials.sourceDocumentText });
+  const previousHardware = JSON.stringify({ title: project.title, devicesText: materials.devicesText, functionsText: materials.functionsText, codeText: materials.codeText, sourceNotes: materials.sourceNotes, sourceDocumentText: materials.sourceDocumentText, projectTopology: materials.projectTopology || 'auto' });
   const previousTargetBodyChars = Number(materials.targetBodyChars) || MIN_BODY_CHARS;
   const previousTestInformation = JSON.stringify([materials.testInfo || '', materials.toolsText || '', materials.photoNotes || '']);
   const previousReferences = JSON.stringify({ text: materials.referencesText || '', use: materials.useReferencesInPaper !== false, count: clampReferenceCount(materials.referenceRecommendationCount) });
@@ -1410,11 +1550,12 @@ function capturePaperMaterials({ invalidate = true } = {}) {
   materials.toolsText = $('paper-tools')?.value.trim() || '';
   materials.photoNotes = $('paper-photo-notes')?.value.trim() || '';
   materials.sourceNotes = $('paper-source-notes')?.value.trim() || '';
+  materials.projectTopology = ['auto', 'single', 'multi'].includes($('paper-topology')?.value) ? $('paper-topology').value : (materials.projectTopology || 'auto');
   const outlineReferenceChanged=updateReferenceEditorText(materials,$('paper-outline-reference')?.value || '');
   materials.targetBodyChars = Math.max(MIN_BODY_CHARS, Math.min(40000, Number($('paper-target-chars')?.value) || MIN_BODY_CHARS));
   if (outlineReferenceChanged) renderOutlineImportStatus({updateEditor:false});
   updateProjectNameFromTitle();
-  const nextHardware = JSON.stringify({ title: project.title, devicesText: materials.devicesText, functionsText: materials.functionsText, codeText: materials.codeText, sourceNotes: materials.sourceNotes, sourceDocumentText: materials.sourceDocumentText });
+  const nextHardware = JSON.stringify({ title: project.title, devicesText: materials.devicesText, functionsText: materials.functionsText, codeText: materials.codeText, sourceNotes: materials.sourceNotes, sourceDocumentText: materials.sourceDocumentText, projectTopology: materials.projectTopology || 'auto' });
   const nextReferences = JSON.stringify({ text: materials.referencesText || '', use: materials.useReferencesInPaper !== false, count: materials.referenceRecommendationCount });
   if (invalidate && previousHardware !== nextHardware) resetHardwareAnalysis('器件资料已修改');
   else if (invalidate && outlineReferenceChanged) invalidateOutlinePlan('参考目录已修改');
@@ -1466,6 +1607,10 @@ function setPaperStep(step, { scroll = false } = {}) {
 
 function renderPaper() {
   if (!project) return;
+  if (materialUiProjectId !== project.id) {
+    materialUiProjectId = project.id;
+    $('code-file-search').value = '';
+  }
   const materials = project.paper.materials;
   renderSchemeImportOptions();
   $('paper-title-input').value = project.title || '';
@@ -1480,19 +1625,22 @@ function renderPaper() {
   $('paper-photo-notes').value = materials.photoNotes || '';
   $('paper-source-notes').value = materials.sourceNotes || '';
   $('paper-outline-reference').value = referenceEditorText(materials);
+  $('paper-topology').value = ['auto', 'single', 'multi'].includes(materials.projectTopology) ? materials.projectTopology : 'auto';
   $('paper-target-chars').value = String(Math.max(MIN_BODY_CHARS, Math.min(40000, Number(materials.targetBodyChars) || MIN_BODY_CHARS)));
   $('paper-scheme-text').value = materials.schemeRawText || '';
   $('scheme-file-summary').textContent = materials.schemeFilename ? `已读取：${materials.schemeFilename}` : materials.schemeRawText ? '已粘贴方案文本' : '支持 DOCX、TXT、MD';
   const displayedCodeFiles = materials.codeFiles?.length ? materials.codeFiles : (materials.filenames || []);
   $('code-file-summary').textContent = displayedCodeFiles.length ? `已选 ${displayedCodeFiles.length} 个文件，可继续追加` : '尚未选择，可分多次追加';
   renderCodeFileList(displayedCodeFiles);
+  setMaterialImportStatus('program', '');
+  setMaterialImportStatus('schematic', '');
   $('source-file-summary').textContent = materials.sourceDocumentFilename
     ? `已读取：${materials.sourceDocumentFilename}（${String(materials.sourceDocumentText || '').length}字，${materials.sourceBackgroundText ? '已提取背景方向' : '分析时仅提取背景方向'}）`
     : '支持 DOCX、TXT、MD；旧版DOC请先用WPS另存为DOCX';
   $('btn-clear-source-file').disabled = !materials.sourceDocumentFilename;
-  $('schematic-file-summary').textContent = materials.schematicFilename
-    ? `已读取：${materials.schematicFilename}${materials.schematicText ? `（${materials.schematicText.length}字）` : ''}`
-    : '尚未选择';
+  renderSchematicFileList();
+  renderMaterialSummary();
+  updateSaveStatus();
   renderOutlineImportStatus();
   renderPins();
   renderGeneration();
@@ -1654,50 +1802,83 @@ function rebuildProgramCodeText(materials) {
 }
 
 async function readCodeFiles(event) {
-  const selected = [...(event.target.files || [])];
-  event.target.value = '';
+  const input = event.target;
+  const selected = [...(input.files || [])];
+  input.value = '';
   if (!selected.length || !project) return;
+  const blocked = projectWorkBlocked();
+  if (blocked) return toast(blocked, 'info');
+  const group = String(input.dataset?.programGroup || '').trim();
   const supported = selected.filter(supportedProgramFile);
   const oversized = supported.filter(file => file.size > MAX_PROGRAM_FILE_BYTES);
   const readable = supported.filter(file => file.size <= MAX_PROGRAM_FILE_BYTES);
   if (!readable.length) return toast(oversized.length ? '所选程序文件过大，单个文件请控制在2 MB以内' : '没有找到支持的文本程序文件', 'error');
-  const materials = project.paper.materials;
-  const records = new Map((materials.codeFiles || []).map(item => [String(item.path || item.name).toLowerCase(), item]));
-  for (const file of readable) {
-    const path = file.webkitRelativePath || file.name;
-    records.set(path.toLowerCase(), {
-      name: file.name,
-      path,
-      extension: programFileExtension(file.name),
-      size: file.size,
-      content: await file.text(),
-    });
+  const targetProject = project;
+  const records = [], failures = [];
+  materialImportTasks.add('program');
+  input.disabled = true;
+  try {
+    for (const [index, file] of readable.entries()) {
+      if (project === targetProject) $('code-file-summary').textContent = `正在读取 ${index + 1}/${readable.length}：${file.name}`;
+      try {
+        const content = await file.text();
+        if (!content.trim()) throw new Error('文件内容为空');
+        records.push({ name: file.name, path: programFilePath(file, group), group,
+          extension: programFileExtension(file.name), size: file.size, content });
+      } catch (error) { failures.push(`${file.name}：${error.message || '读取失败'}`); }
+    }
+    if (project !== targetProject) return;
+    const materials = targetProject.paper.materials;
+    const merged = appendMaterialFiles(materials.codeFiles || [], records);
+    if (merged.added) {
+      materials.codeFiles = merged.files;
+      rebuildProgramCodeText(materials);
+      resetHardwareAnalysis('程序资料已修改，请重新分析器件');
+      await persistProject({ immediate: true });
+    }
+    if (project !== targetProject) return;
+    const skipped = selected.length - readable.length;
+    const message = `新增 ${merged.added} 个程序文件，共 ${merged.files.length} 个${merged.duplicates ? `；跳过 ${merged.duplicates} 个重复文件` : ''}${merged.renamed ? `；${merged.renamed} 个同名文件已分别保留` : ''}${skipped ? `；跳过 ${skipped} 个不支持或过大的文件` : ''}`;
+    setMaterialImportStatus('program', failures.length ? `${message}；读取失败：${failures.join('；')}` : message, failures.length ? 'error' : 'success');
+    toast(failures.length ? `${message}；读取失败：${failures.join('；')}` : message, failures.length ? 'error' : 'success');
+  } catch (error) {
+    if (project === targetProject) {
+      setMaterialImportStatus('program', `${error.message || '程序文件读取失败'}；本页资料已保留`, 'error');
+      toast(error.message || '程序文件读取失败', 'error');
+    }
+  } finally {
+    materialImportTasks.delete('program');
+    input.disabled = false;
+    if (project === targetProject) {
+      const files = targetProject.paper.materials.codeFiles || [];
+      $('code-file-summary').textContent = files.length ? `已选 ${files.length} 个文件，可继续追加` : '尚未选择，可分多次追加';
+      renderCodeFileList(files);
+      renderMaterialSummary();
+    }
   }
-  materials.codeFiles = [...records.values()];
-  rebuildProgramCodeText(materials);
-  if (project.paper.factSheet.analyzedAt) bumpFactRevision('程序资料已修改');
-  await persistProject({ immediate: true });
-  $('code-file-summary').textContent = `已选 ${materials.codeFiles.length} 个文件，可继续追加`;
-  renderCodeFileList(materials.codeFiles);
-  const skipped = selected.length - readable.length;
-  toast(`已加入 ${readable.length} 个程序文件${skipped ? `，跳过 ${skipped} 个不支持或过大的文件` : ''}`, 'success');
 }
 
 function removeCodeFile(path) {
   if (!project) return;
+  const blocked = projectWorkBlocked();
+  if (blocked) return toast(blocked, 'info');
   const materials = project.paper.materials;
   materials.codeFiles = (materials.codeFiles || []).filter(item => (item.path || item.name) !== path);
   rebuildProgramCodeText(materials);
-  if (project.paper.factSheet.analyzedAt) bumpFactRevision('程序资料已修改');
+  resetHardwareAnalysis('程序资料已修改，请重新分析器件');
   $('code-file-summary').textContent = materials.codeFiles.length ? `已选 ${materials.codeFiles.length} 个文件，可继续追加` : '尚未选择，可分多次追加';
   renderCodeFileList(materials.codeFiles);
+  renderMaterialSummary();
   persistProject();
 }
 
 function renderCodeFileList(codeFiles = []) {
   const target = $('code-file-list');
   if (!target) return;
-  const records = codeFiles.map(item => typeof item === 'string' ? { name: item, path: item, size: 0 } : item).filter(item => item?.name || item?.path);
+  const query = String($('code-file-search')?.value || '').trim().toLowerCase();
+  const allRecords = codeFiles.map(item => typeof item === 'string' ? { name: item, path: item, size: 0 } : item).filter(item => item?.name || item?.path);
+  const records = allRecords.filter(item => String(item.path || item.name).toLowerCase().includes(query));
+  if (allRecords.length && !records.length) { target.innerHTML = '<span>未找到匹配文件，已添加的其他文件仍然保留。</span>'; return; }
   if (!records.length) { target.innerHTML = ''; return; }
   target.innerHTML = `<strong>已选文件（仅这些文件会交给AI分析）</strong>${records.map(item => {
     const path = String(item.path || item.name);
@@ -1706,10 +1887,34 @@ function renderCodeFileList(codeFiles = []) {
   }).join('')}`;
 }
 
+function setMaterialImportStatus(kind, message, state = 'success') {
+  const node = $(kind === 'program' ? 'code-import-status' : 'schematic-import-status');
+  node.textContent = message;
+  node.dataset.state = state;
+  node.hidden = !message;
+}
+
+function renderMaterialSummary() {
+  if (!project) return;
+  const materials = project.paper.materials;
+  const parts = [];
+  if (materials.codeFiles?.length) parts.push(`程序 ${materials.codeFiles.length} 份`);
+  const schematics = schematicFileRecords(materials);
+  if (schematics.length) parts.push(`原理图 ${schematics.length} 份`);
+  if (materials.sourceDocumentFilename) parts.push('背景资料');
+  if (effectiveReferenceText(materials)) parts.push('参考目录');
+  if (materials.referencesText?.trim()) parts.push('参考文献');
+  $('paper-materials-summary').textContent = parts.length ? `已提供：${parts.join(' · ')}` : '程序、原理图、参考目录等，按需提供';
+}
+
 async function readSourceDocumentFile(event) {
   const file = event.target.files?.[0];
   event.target.value = '';
   if (!file || !project) return;
+  const blocked = projectWorkBlocked();
+  if (blocked) return toast(blocked, 'info');
+  const targetProject = project;
+  materialImportTasks.add('background');
   const extension = programFileExtension(file.name);
   try {
     let text = '';
@@ -1721,6 +1926,7 @@ async function readSourceDocumentFile(event) {
     else throw new Error('请使用DOCX、TXT或MD文件；旧版DOC请先在WPS中另存为DOCX');
     text = String(text || '').replace(/\u0000/g, '').trim();
     if (!text) throw new Error('文件中没有读取到可分析的文字');
+    if (project !== targetProject) return;
     const materials = project.paper.materials;
     materials.sourceDocumentFilename = file.name;
     materials.sourceDocumentText = text.slice(0, 100000);
@@ -1731,13 +1937,17 @@ async function readSourceDocumentFile(event) {
     await persistProject({ immediate: true });
     toast('背景资料已读取，分析器件时只提取课题背景和研究方向', 'success');
   } catch (error) {
-    $('source-file-summary').textContent = '读取失败，请检查文件格式';
+    if (project !== targetProject) return;
+    $('source-file-summary').textContent = project.paper.materials.sourceDocumentFilename
+      ? `本次读取失败；已保留：${project.paper.materials.sourceDocumentFilename}` : '读取失败，请检查文件格式';
     toast(error.message || '背景资料读取失败', 'error');
-  }
+  } finally { materialImportTasks.delete('background'); }
 }
 
 function clearSourceDocument() {
   if (!project) return;
+  const blocked = projectWorkBlocked();
+  if (blocked) return toast(blocked, 'info');
   const materials = project.paper.materials;
   materials.sourceDocumentFilename = '';
   materials.sourceDocumentText = '';
@@ -1808,42 +2018,102 @@ async function extractPdfTextFallback(buffer) {
   return pageTexts.join('\n').trim();
 }
 
-async function readSchematicFile(event) {
-  const file = event.target.files?.[0];
-  event.target.value = '';
-  if (!file || !project) return;
-  if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') return toast('请选择PDF原理图文件', 'error');
-  try {
-    const buffer = await file.arrayBuffer();
-    let extracted = '';
-    let pageCount = 1;
-    if (globalThis.pdfjsLib?.getDocument) {
-      const loadingTask = globalThis.pdfjsLib.getDocument({ data: new Uint8Array(buffer), disableWorker: true });
-      const pdf = await loadingTask.promise;
-      pageCount = pdf.numPages;
-      const pages = [];
-      for (let index = 1; index <= Math.min(pdf.numPages, 30); index += 1) {
-        const page = await pdf.getPage(index);
-        const content = await page.getTextContent();
-        const text = content.items.map(item => item.str || '').join(' ').replace(/\s+/g, ' ').trim();
-        if (text) pages.push(`第${index}页：${text}`);
-      }
-      extracted = pages.join('\n').trim();
-    } else {
-      extracted = await extractPdfTextFallback(buffer);
+async function extractSchematicRecord(file) {
+  const buffer = await file.arrayBuffer();
+  let extracted = '';
+  let pageCount = 1;
+  if (globalThis.pdfjsLib?.getDocument) {
+    const loadingTask = globalThis.pdfjsLib.getDocument({ data: new Uint8Array(buffer), disableWorker: true });
+    const pdf = await loadingTask.promise;
+    pageCount = pdf.numPages;
+    const pages = [];
+    for (let index = 1; index <= Math.min(pdf.numPages, 30); index += 1) {
+      const page = await pdf.getPage(index);
+      const content = await page.getTextContent();
+      const text = content.items.map(item => item.str || '').join(' ').replace(/\s+/g, ' ').trim();
+      if (text) pages.push(`第${index}页：${text}`);
     }
-    if (!extracted) throw new Error('PDF没有提取到可读文字，可能是扫描图；请先OCR或粘贴原理图文字');
-    const materials = project.paper.materials;
-    materials.schematicFilename = file.name;
-    materials.schematicText = extracted.slice(0, 100000);
-    $('schematic-file-summary').textContent = `已读取：${file.name}（${materials.schematicText.length}字）`;
-    resetHardwareAnalysis('原理图资料已更新');
-    await persistProject({ immediate: true });
-    toast(`已提取 ${pageCount} 页原理图文字，下一步会交给AI核对器件和引脚`, 'success');
-  } catch (error) {
-    $('schematic-file-summary').textContent = '读取失败，请检查PDF';
-    toast(error.message || 'PDF原理图读取失败', 'error');
+    extracted = pages.join('\n').trim();
+  } else {
+    extracted = await extractPdfTextFallback(buffer);
   }
+  if (!extracted) throw new Error(`${file.name}没有提取到可读文字，可能是扫描图`);
+  return { name: file.name, text: extracted.slice(0, 100000), pageCount };
+}
+
+async function readSchematicFile(event) {
+  const input = event.target;
+  const files = [...(input.files || [])];
+  input.value = '';
+  if (!files.length || !project) return;
+  const blocked = projectWorkBlocked();
+  if (blocked) return toast(blocked, 'info');
+  const pdfFiles = files.filter(file => /\.pdf$/i.test(file.name) || file.type === 'application/pdf');
+  if (!pdfFiles.length) return toast('请选择PDF原理图文件', 'error');
+  const targetProject = project;
+  const records = [], failures = [];
+  materialImportTasks.add('schematic');
+  input.disabled = true;
+  try {
+    for (const [index, file] of pdfFiles.entries()) {
+      if (project === targetProject) $('schematic-file-summary').textContent = `正在读取 ${index + 1}/${pdfFiles.length}：${file.name}`;
+      try { records.push(await extractSchematicRecord(file)); }
+      catch (error) { failures.push(`${file.name}：${error.message || '读取失败'}`); }
+    }
+    if (project !== targetProject) return;
+    const materials = targetProject.paper.materials;
+    const merged = appendMaterialFiles(schematicFileRecords(materials), records, { keyField: 'name', contentField: 'text' });
+    if (merged.added) {
+      materials.schematicFiles = merged.files;
+      rebuildSchematicText(materials);
+      resetHardwareAnalysis('原理图资料已更新');
+      await persistProject({ immediate: true });
+    }
+    if (project !== targetProject) return;
+    const message = `新增 ${merged.added} 份原理图，共 ${merged.files.length} 份${merged.duplicates ? `；跳过 ${merged.duplicates} 份重复文件` : ''}${merged.renamed ? `；${merged.renamed} 份同名文件已分别保留` : ''}`;
+    setMaterialImportStatus('schematic', failures.length ? `${message}；读取失败：${failures.join('；')}` : message, failures.length ? 'error' : 'success');
+    toast(failures.length ? `${message}；读取失败：${failures.join('；')}` : message, failures.length ? 'error' : 'success');
+  } catch (error) {
+    if (project === targetProject) {
+      setMaterialImportStatus('schematic', `${error.message || 'PDF原理图读取失败'}；本页资料已保留`, 'error');
+      toast(error.message || 'PDF原理图读取失败', 'error');
+    }
+  } finally {
+    materialImportTasks.delete('schematic');
+    input.disabled = false;
+    if (project === targetProject) { renderSchematicFileList(); renderMaterialSummary(); }
+  }
+}
+
+function schematicFileRecords(materials) {
+  if (materials.schematicFiles?.length) return materials.schematicFiles;
+  return materials.schematicFilename && materials.schematicText
+    ? [{ name: materials.schematicFilename, text: materials.schematicText, pageCount: 1 }] : [];
+}
+
+function rebuildSchematicText(materials) {
+  const records = materials.schematicFiles || [];
+  materials.schematicFilename = records.map(item => item.name).join('、');
+  materials.schematicText = records.map(item => `【原理图文件：${item.name}】\n${item.text}`).join('\n\n').slice(0, 180000);
+}
+
+function renderSchematicFileList() {
+  const records = schematicFileRecords(project.paper.materials);
+  $('schematic-file-summary').textContent = records.length ? `已读取 ${records.length} 份原理图，可继续追加` : '尚未选择，可分多次追加';
+  $('schematic-file-list').innerHTML = records.map(item => `<span class="selected-file-item"><span>${escapeHtml(item.name)} · ${item.pageCount || 1} 页</span><button class="selected-file-remove" type="button" data-remove-schematic-file="${escapeHtml(item.name)}" aria-label="移除${escapeHtml(item.name)}">移除</button></span>`).join('');
+}
+
+function removeSchematicFile(name) {
+  if (!project) return;
+  const blocked = projectWorkBlocked();
+  if (blocked) return toast(blocked, 'info');
+  const materials = project.paper.materials;
+  materials.schematicFiles = schematicFileRecords(materials).filter(item => item.name !== name);
+  rebuildSchematicText(materials);
+  resetHardwareAnalysis('原理图资料已修改');
+  renderSchematicFileList();
+  renderMaterialSummary();
+  persistProject();
 }
 
 function deviceFromLine(value, index = 0) {
@@ -1856,7 +2126,7 @@ function deviceFromLine(value, index = 0) {
   };
 }
 
-function mappingKey(item) { return `${String(item.device || '').toLowerCase()}|${String(item.signal || '').toLowerCase()}`; }
+function mappingKey(item) { return `${String(item.boardId || '').toLowerCase()}|${String(item.device || '').toLowerCase()}|${String(item.signal || '').toLowerCase()}`; }
 
 function is51Controller(controller = '') {
   return /(?:STC|AT89|89C5|51\s*单片机)/i.test(String(controller));
@@ -1877,6 +2147,49 @@ function defaultDevelopmentTools(controller = '', codeFiles = []) {
   if (/RENESAS|RA\d|RX\d/.test(value)) return ['e² studio'];
   if (/AVR|ATMEGA|ATTINY/.test(value)) return ['Microchip Studio'];
   return [];
+}
+
+function normalizeBoardProfiles(resultBoards, materials, devices = [], functions = [], fallbackController = '') {
+  const sourceFiles = Array.isArray(materials.schematicFiles) ? materials.schematicFiles.map(item => item.name) : (materials.schematicFilename ? [materials.schematicFilename] : []);
+  const programPaths = (materials.codeFiles || []).map(item => item.path || item.name).filter(Boolean);
+  const raw = Array.isArray(resultBoards) ? resultBoards : [];
+  const usedIds = new Set();
+  const boards = raw.map((board, index) => {
+    const requestedId = String(board?.id || `board-${index + 1}`).trim() || `board-${index + 1}`;
+    let id = requestedId;
+    let suffix = 2;
+    while (usedIds.has(id)) id = `${requestedId}-${suffix++}`;
+    usedIds.add(id);
+    return {
+    id, name: String(board?.name || `板卡${index + 1}`), role: String(board?.role || (index ? '从板' : '主板')),
+    controller: sanitizeTechnicalText(String(board?.controller || (index ? '' : fallbackController)).trim()),
+    schematicFilenames: unique(Array.isArray(board?.schematicFilenames) ? board.schematicFilenames.map(String) : []),
+    programPaths: unique(Array.isArray(board?.programPaths) ? board.programPaths.map(String) : []),
+    deviceModels: unique(Array.isArray(board?.deviceModels) ? board.deviceModels.map(sanitizeTechnicalText) : []),
+    functionNames: unique(Array.isArray(board?.functionNames) ? board.functionNames.map(sanitizeTechnicalText) : []),
+    communication: unique(Array.isArray(board?.communication) ? board.communication.map(sanitizeTechnicalText) : []),
+    notes: sanitizeTechnicalText(String(board?.notes || '').trim()),
+    };
+  }).filter(board => board.controller || board.deviceModels.length || board.schematicFilenames.length || board.programPaths.length);
+  if (!boards.length) boards.push({ id: 'board-main', name: '主板', role: '主控板', controller: fallbackController, schematicFilenames: sourceFiles, programPaths, deviceModels: [fallbackController].filter(Boolean), functionNames: functions.map(item => item.name).slice(0, 20), communication: [], notes: '' });
+  const knownIds = new Set(boards.map(board => board.id));
+  const fallback = boards[0];
+  devices.forEach(device => {
+    if (!device.boardId) {
+      const match = boards.find(board => board.deviceModels.some(model => model.toLowerCase() === String(device.model || '').toLowerCase()));
+      device.boardId = match?.id || (String(device.model || '').toLowerCase() === String(fallback.controller || '').toLowerCase() ? fallback.id : '');
+    }
+    if (device.boardId && !knownIds.has(device.boardId)) device.boardId = fallback.id;
+  });
+  functions.forEach(func => {
+    func.boardIds = unique((Array.isArray(func.boardIds) ? func.boardIds : []).filter(id => knownIds.has(id)));
+    if (!func.boardIds.length) {
+      const names = new Set((func.deviceModels || []).map(value => String(value).toLowerCase()));
+      func.boardIds = boards.filter(board => board.deviceModels.some(model => names.has(String(model).toLowerCase()))).map(board => board.id);
+      if (!func.boardIds.length) func.boardIds = [fallback.id];
+    }
+  });
+  return boards;
 }
 
 function mergeDevelopmentTools(existingText = '', tools = [], previousAutoTools = []) {
@@ -1905,23 +2218,23 @@ function fallbackMappings(controller, devices = []) {
   const mappings = [];
   const signalsFor = device => {
     const source = `${device.interfaceType || ''} ${device.model || ''} ${device.role || ''}`;
-    if (/I2C|OLED|SHT3|BH1750/i.test(source)) return ['SCL', 'SDA'];
+    if (/I2C|OLED|SHT3|BH1750|INA2\d\d/i.test(source) && !/SPI/i.test(source)) return ['SCL', 'SDA'];
     if (/UART|串口|ESP-01S|蓝牙|GPS|GSM|4G/i.test(source)) return ['TX', 'RX'];
     if (/SPI|TFT|RFID|LoRa|NRF24/i.test(source)) return ['SCK', 'MISO', 'MOSI', 'CS'];
     if (/1-Wire|单总线|DHT|DS18/i.test(source)) return ['DATA'];
     if (/ADC|模拟|MQ-|光敏|土壤/i.test(source)) return ['AO'];
     return ['CTRL'];
   };
-  devices.filter(device => !/主控|单片机|电源|稳压|晶振|复位|下载|调试/.test(`${device.role || ''} ${device.model || ''}`)).forEach(device => {
+  devices.filter(isSignalPeripheral).forEach(device => {
     const signals = signalsFor(device);
-    const interfaceType = String(device.interfaceType || (/OLED/i.test(device.model) ? 'I2C' : 'GPIO'));
+    const interfaceType = String(device.interfaceType || (signals.includes('SCL') ? 'I2C' : signals.includes('TX') ? 'UART' : signals.includes('SCK') ? 'SPI' : signals.includes('AO') ? 'ADC' : 'GPIO'));
     signals.forEach(signal => {
       const choices = compatiblePins(controller, signal, interfaceType);
       const sharedBus = /I2C/i.test(interfaceType);
       const pin = sharedBus && mappings.some(item => item.signal === signal && item.busGroup === 'I2C1')
         ? mappings.find(item => item.signal === signal && item.busGroup === 'I2C1').pin
         : choices.find(choice => !used.has(choice)) || choices[0] || '待确认';
-      if (!sharedBus && pin !== '待确认') used.add(pin);
+      if (pin !== '待确认') used.add(pin);
       mappings.push({ id: makeId('mapping'), device: device.model, interfaceType, signal, pin, alternatives: choices.slice(1, 5), busGroup: sharedBus ? 'I2C1' : '', shareAllowed: sharedBus, source: 'ai' });
     });
   });
@@ -1951,6 +2264,8 @@ function hardwareDefaults(controller, powerNotes = [], fixedFacts = []) {
 
 async function analyzeHardware(event) {
   event?.preventDefault();
+  if (projectTransition) return toast('正在切换项目，请稍候', 'info');
+  if (materialImportTasks.size) return toast('资料正在读取，请等待完成后再分析', 'info');
   if (requestController) return toast('当前还有任务正在运行', 'info');
   capturePaperMaterials({ invalidate: true });
   if (!project.title) {
@@ -1966,8 +2281,8 @@ async function analyzeHardware(event) {
   if (submit) { submit.disabled = true; submit.setAttribute('aria-busy', 'true'); submit.textContent = '正在分析器件'; }
   if (reanalyze) reanalyze.disabled = true;
   if (inlineStatus) { inlineStatus.textContent = '正在识别器件、通信方式和可用引脚，空结果会自动重试'; inlineStatus.className = 'inline-task-status is-busy'; }
-  project.paper.factSheet.analyzedAt = '';
   $('pin-status').textContent = '正在分析';
+  const analysisRevision = project.factRevision;
   try {
     const materials = project.paper.materials;
     const raw = await callAi(Prompts.buildHardwareMessages({
@@ -1979,39 +2294,55 @@ async function analyzeHardware(event) {
       otherNotes: materials.sourceNotes || '未提供',
       supplementalDocumentFilename: materials.sourceDocumentFilename || '',
       supplementalDocumentText: String(materials.sourceDocumentText || '').slice(0, 80000),
-      selectedProgramFiles: (materials.codeFiles || []).map(item => ({ name: item.name, path: item.path, extension: item.extension, size: item.size })),
+      selectedProgramFiles: (materials.codeFiles || []).map(item => ({ name: item.name, path: item.path, group: item.group || '', extension: item.extension, size: item.size })),
+      projectTopology: materials.projectTopology || 'auto',
+      schematicFiles: (materials.schematicFiles || []).map(item => ({ name: item.name, pageCount: item.pageCount, text: String(item.text || '').slice(0, 100000) })),
       schematicFilename: materials.schematicFilename || '',
       schematicText: String(materials.schematicText || '').slice(0, 100000),
     }), { reasoning: false, maxTokens: 7000, jsonMode: true, signal: requestController.signal, requestLabel: '器件与引脚分析', timeoutMs: 100000 });
     const result = await parseAiJson(raw, { signal: requestController.signal, requestLabel: '器件与引脚分析', maxTokens: 7000 });
+    if (project.factRevision !== analysisRevision) throw new Error('分析期间资料已修改，请按最新资料重新分析');
+    if (!Array.isArray(result?.devices) || !result.devices.length || (!lines(materials.functionsText).length && !result.functions?.length)) throw new Error('AI未返回完整的器件或功能资料，请重新分析；原有分析结果已保留');
     const aiDevices = (Array.isArray(result.devices) ? result.devices : []).map((item, index) => ({
       id: item.id || `device-ai-${index + 1}`,
       model: sanitizeTechnicalText(String(item.model || item.name || '').trim()),
       role: sanitizeTechnicalText(String(item.role || item.purpose || '').trim()),
       interfaceType: String(item.interfaceType || item.interface || '').trim(),
+      boardId: String(item.boardId || '').trim(),
     })).filter(item => item.model);
     const userDevices = lines(materials.devicesText).map(deviceFromLine).filter(item => item.model);
     const devices = [...userDevices];
     aiDevices.forEach(item => {
-      const existing = devices.find(device => device.model.toLowerCase() === item.model.toLowerCase());
-      if (existing) Object.assign(existing, { role: existing.role || item.role, interfaceType: existing.interfaceType || item.interfaceType });
+      let existing = devices.find(device => device.model.toLowerCase() === item.model.toLowerCase() && (!item.boardId || !device.boardId || device.boardId === item.boardId));
+      if (existing && item.boardId && existing.boardId && existing.boardId !== item.boardId) existing = null;
+      if (existing) Object.assign(existing, { role: existing.role || item.role, interfaceType: existing.interfaceType || item.interfaceType, boardId: existing.boardId || item.boardId || '' });
       else devices.push(item);
     });
     const aiFunctions = (Array.isArray(result.functions) ? result.functions : []).map((item, index) => ({
       id: item.id || `function-ai-${index + 1}`,
       name: sanitizeTechnicalText(String(typeof item === 'string' ? item : item.name || item.description || '').trim()),
       deviceModels: Array.isArray(item.deviceModels) ? item.deviceModels.map(String) : [],
+      boardIds: Array.isArray(item.boardIds) ? item.boardIds.map(String) : [],
     })).filter(item => item.name);
     const userFunctionLines = lines(materials.functionsText);
     // 用户填写内容是事实源。只有用户未提供功能时才采用AI建议，避免同义功能被追加成两份。
     const functions = userFunctionLines.length
-      ? userFunctionLines.map((name, index) => ({ id: `function-user-${index + 1}`, name, deviceModels: [] }))
+      ? userFunctionLines.map((name, index) => {
+        const normalizedName = name.replace(/^使用/, '').toLowerCase();
+        const matched = aiFunctions.find(item => {
+          const candidate = item.name.replace(/^使用/, '').toLowerCase();
+          return candidate === normalizedName || candidate.includes(normalizedName) || normalizedName.includes(candidate);
+        });
+        return { id: `function-user-${index + 1}`, name, deviceModels: matched?.deviceModels || [], boardIds: matched?.boardIds || [] };
+      })
       : aiFunctions;
+    if (!devices.length || !functions.length) throw new Error('AI未返回有效的器件或功能资料，请重新分析；原有分析结果已保留');
     const controller = sanitizeTechnicalText(String(result.controller || inferController(project.title, devices)).trim());
+    let boards = normalizeBoardProfiles(result.boards, materials, devices, functions, controller);
     const aiDevelopmentTools = Array.isArray(result.developmentTools)
       ? result.developmentTools
       : String(result.developmentTools || '').split(/[、，,;；\n]/);
-    const requiredDevelopmentTools = defaultDevelopmentTools(controller, materials.codeFiles);
+    const requiredDevelopmentTools = unique(boards.flatMap(board => defaultDevelopmentTools(board.controller || controller, materials.codeFiles)));
     const developmentTools = requiredDevelopmentTools.length ? requiredDevelopmentTools : unique(aiDevelopmentTools);
     const mergedTools = mergeDevelopmentTools(materials.toolsText, developmentTools, materials.autoDevelopmentTools || []);
     materials.toolsText = mergedTools.text;
@@ -2019,36 +2350,54 @@ async function analyzeHardware(event) {
     const backgroundNotes = sanitizeTechnicalText(String(result.backgroundNotes || '').trim());
     if (materials.sourceDocumentText) materials.sourceBackgroundText = backgroundNotes;
     if (!devices.some(item => item.model.toLowerCase() === controller.toLowerCase())) devices.unshift({ id: makeId('device'), model: controller, role: is51Controller(controller) ? '主控单片机' : '主控最小系统开发板', interfaceType: 'GPIO' });
+    boards = normalizeBoardProfiles(boards, materials, devices, functions, controller);
     const previousMappings = new Map((project.paper.factSheet.mappings || []).filter(item => item.source === 'user').map(item => [mappingKey(item), item]));
-    const schematicPinText = String(materials.schematicText || '').toUpperCase();
-    const schematicPins = new Set(schematicPinText.match(/\b(?:P[A-G]\d{1,2}|GPIO\d{1,2}|P\d\.\d|GP\d{1,2}|D\d{1,2}|A[0-5])\b/g) || []);
-    let mappings = (Array.isArray(result.mappings) ? result.mappings : []).map((item, index) => {
+    const pinPattern = /\b(?:P[A-G]\d{1,2}|GPIO\d{1,2}|P\d\.\d|GP\d{1,2}|D\d{1,2}|A[0-5])\b/g;
+    const allSchematicPins = new Set(String(materials.schematicText || '').toUpperCase().match(pinPattern) || []);
+    const schematicPinsByBoard = new Map(boards.map(board => {
+      const names = new Set(board.schematicFilenames || []);
+      const text = (materials.schematicFiles || []).filter(file => names.has(file.name)).map(file => file.text || '').join('\n').toUpperCase();
+      return [board.id, new Set(text.match(pinPattern) || [])];
+    }));
+    let mappings = filterSignalMappings(Array.isArray(result.mappings) ? result.mappings : [], devices).map((item, index) => {
       const device = String(item.device || item.deviceModel || '').trim();
+      const requestedBoardId = String(item.boardId || '').trim();
+      const deviceBoard = devices.find(record => record.model.toLowerCase() === device.toLowerCase())?.boardId;
+      const boardId = boards.some(board => board.id === requestedBoardId) ? requestedBoardId : (deviceBoard || boards[0]?.id || 'board-main');
+      const board = boards.find(record => record.id === boardId) || boards[0];
+      const boardController = board?.controller || controller;
       const interfaceType = String(item.interfaceType || item.interface || 'GPIO').trim();
       const signal = String(item.signal || item.connection || 'CTRL').trim().toUpperCase();
       const suggested = String(item.pin || '').trim().toUpperCase();
       const alternatives = unique(Array.isArray(item.alternatives) ? item.alternatives.map(pin => String(pin).toUpperCase()) : []);
-      const allowed = compatiblePins(controller, signal, interfaceType);
-      const controllerPins = allPins(controller).map(pin => String(pin).toUpperCase());
+      const allowed = compatiblePins(boardController, signal, interfaceType);
+      // 多板项目按各板主控取脚；单板兼容原有 allPins(controller) 逻辑。
+      const controllerPins = allPins(boardController).map(pin => String(pin).toUpperCase()); // allPins(controller)
       // AI或原理图明确给出的真实GPIO优先保留；能力表只用于排序建议，不能把真实连接替换掉。
-      const proposed = allowed.includes(suggested)
+      const proposed = !suggested || /待确认|待分配|未知|TBD|^[-?]+$/i.test(suggested)
+        ? '待确认'
+        : allowed.includes(suggested)
         ? suggested
         : controllerPins.includes(suggested)
           ? suggested
           : alternatives.find(pin => allowed.includes(pin)) || alternatives.find(pin => controllerPins.includes(pin)) || allowed[0] || suggested || '待确认';
       const mapping = {
         id: item.id || `mapping-${index + 1}-${Math.random().toString(36).slice(2, 7)}`,
-        device, interfaceType, signal, pin: proposed, alternatives,
-        busGroup: String(item.busGroup || '').trim(), shareAllowed: Boolean(item.shareAllowed), source: schematicPins.has(proposed) ? 'schematic' : 'ai',
+        device, boardId, interfaceType, signal, pin: proposed, alternatives,
+        busGroup: String(item.busGroup || '').trim(), shareAllowed: Boolean(item.shareAllowed), source: (schematicPinsByBoard.get(boardId)?.has(proposed) || (!schematicPinsByBoard.get(boardId)?.size && allSchematicPins.has(proposed))) ? 'schematic' : 'ai',
       };
       const userMapping = previousMappings.get(mappingKey(mapping));
       return userMapping ? { ...mapping, pin: userMapping.pin, source: 'user' } : mapping;
     }).filter(item => item.device && item.signal);
-    if (!mappings.length && devices.length > 1) mappings = fallbackMappings(controller, devices);
+    if (!mappings.length && devices.length > 1 && !(Array.isArray(result.mappings) && result.mappings.length) && !materials.schematicText?.trim()) {
+      mappings = boards.flatMap(board => fallbackMappings(board.controller || controller, devices.filter(device => !device.boardId || device.boardId === board.id)).map(mapping => ({ ...mapping, boardId: board.id })));
+    }
+    mappings = filterSignalMappings(mappings, devices);
     const defaults = hardwareDefaults(controller, Array.isArray(result.powerNotes) ? result.powerNotes : [], Array.isArray(result.fixedFacts) ? result.fixedFacts : []);
     project.factRevision = `facts-${Date.now()}`;
     project.paper.factSheet = {
       controller,
+      boards,
       devices,
       functions,
       mappings,
@@ -2067,6 +2416,7 @@ async function analyzeHardware(event) {
     project.paper.artifacts = [];
     activeChapterRecords(project.paper).forEach(chapter => { if (chapter?.content) chapter.status = 'stale'; });
     if (activeChapterRecords(project.paper).some(chapter => chapter?.content)) project.paper.generation.status = 'stale';
+    project.paper.step = 'pins';
     await persistProject({ immediate: true });
     paperStep = 'pins';
     renderPaper();
@@ -2086,26 +2436,33 @@ async function analyzeHardware(event) {
 }
 
 function pinChoices(mapping) {
-  const compatible = compatiblePins(project.paper.factSheet.controller, mapping.signal, mapping.interfaceType);
+  const board = (project.paper.factSheet.boards || []).find(item => item.id === mapping.boardId);
+  const compatible = compatiblePins(board?.controller || project.paper.factSheet.controller, mapping.signal, mapping.interfaceType);
   return unique(['待确认', ...compatible, ...(mapping.alternatives || []), mapping.pin]);
 }
 
 function combinedPinIssues() {
   const factSheet = project?.paper?.factSheet;
   if (!factSheet) return [];
-  return validateMappings(factSheet.controller, factSheet.mappings || []);
+  const boards = factSheet.boards || [];
+  const mappings = filterSignalMappings(factSheet.mappings || [], factSheet.devices || []);
+  if (!boards.length) return validateMappings(factSheet.controller, mappings);
+  return boards.flatMap(board => validateMappings(board.controller || factSheet.controller, mappings.filter(mapping => mapping.boardId === board.id)));
 }
 
 function renderPins() {
   if (!project) return;
   const facts = project.paper.factSheet;
-  const mappings = facts.mappings || [];
+  const mappings = filterSignalMappings(facts.mappings || [], facts.devices || []);
   const issues = combinedPinIssues();
   const issuesById = new Map();
   issues.forEach(issue => { if (!issuesById.has(issue.id)) issuesById.set(issue.id, []); issuesById.get(issue.id).push(issue); });
   $('pin-status').textContent = !facts.analyzedAt ? '等待分析' : issues.length ? `${issues.length}项待处理` : facts.confirmedAt ? '已确认' : '等待确认';
   $('pin-status').className = `status-badge ${issues.length ? 'is-danger' : facts.confirmedAt ? 'is-success' : ''}`;
-  $('hardware-fact-strip').innerHTML = `<div class="fact-cell"><span>主控</span><strong>${escapeHtml(facts.controller || '等待分析')}</strong></div><div class="fact-cell"><span>器件</span><strong>${facts.devices?.length || 0}项</strong></div><div class="fact-cell"><span>功能</span><strong>${facts.functions?.length || 0}项</strong></div>`;
+  $('hardware-fact-strip').innerHTML = `<div class="fact-cell"><span>主控</span><strong>${escapeHtml(facts.controller || '等待分析')}</strong></div><div class="fact-cell"><span>信号外设</span><strong>${signalMappedDevices(facts.devices || [], mappings).length}项</strong></div><div class="fact-cell"><span>功能</span><strong>${facts.functions?.length || 0}项</strong></div>`;
+  const boardSummary = $('board-summary');
+  const boards = facts.boards || [];
+  boardSummary.innerHTML = boards.length > 1 ? boards.map(board => `<div class="board-summary-card"><strong>${escapeHtml(board.name)} · ${escapeHtml(board.role)}</strong><small>主控：${escapeHtml(board.controller || '待确认')}；原理图：${escapeHtml(board.schematicFilenames.join('、') || '待确认')}；程序：${escapeHtml(board.programPaths.join('、') || '待确认')}${board.communication.length ? `；板间/对外通信：${escapeHtml(board.communication.join('、'))}` : ''}</small></div>`).join('') : '';
   const conflictBox = $('pin-conflict-summary');
   const messages = unique([...issues.map(issue => issue.message), ...(facts.conflicts || [])]);
   conflictBox.hidden = !messages.length;
@@ -2114,9 +2471,13 @@ function renderPins() {
   }
   $('pin-mapping-body').innerHTML = mappings.length ? mappings.map(mapping => {
     const rowIssues = issuesById.get(mapping.id) || [];
+    const board = boards.find(item => item.id === mapping.boardId);
+    const deviceLabel = board && boards.length > 1
+      ? `<strong>${escapeHtml(mapping.device)}</strong><small class="pin-board-label">${escapeHtml(board.name)} · ${escapeHtml(board.role)}</small>`
+      : `<strong>${escapeHtml(mapping.device)}</strong>`;
     const options = pinChoices(mapping).map(pin => `<option value="${escapeHtml(pin)}" ${pin === mapping.pin ? 'selected' : ''}>${escapeHtml(pin)}</option>`).join('');
-    return `<tr data-mapping-id="${escapeHtml(mapping.id)}" class="${rowIssues.length ? 'has-issue' : ''}"><td><strong>${escapeHtml(mapping.device)}</strong></td><td>${escapeHtml(mapping.interfaceType)}</td><td>${escapeHtml(mapping.signal)}</td><td><select data-mapping-pin aria-label="${escapeHtml(mapping.device)} ${escapeHtml(mapping.signal)} 引脚">${options}</select></td><td class="pin-status-cell"><span class="mapping-state ${rowIssues.length ? 'is-error' : ''}" title="${escapeHtml(rowIssues.map(issue => issue.message).join('；'))}">${rowIssues.length ? '需处理' : mapping.source === 'user' ? '用户确认' : mapping.source === 'schematic' ? '原理图识别' : 'AI建议'}</span></td><td><button class="mapping-delete" type="button" data-delete-mapping aria-label="删除${escapeHtml(mapping.device)} ${escapeHtml(mapping.signal)}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg></button></td></tr>`;
-  }).join('') : '<tr><td colspan="6">尚未生成引脚建议，请返回资料页进行分析。</td></tr>';
+    return `<tr data-mapping-id="${escapeHtml(mapping.id)}" class="${rowIssues.length ? 'has-issue' : ''}"><td>${deviceLabel}</td><td>${escapeHtml(mapping.interfaceType)}</td><td>${escapeHtml(mapping.signal)}</td><td><select data-mapping-pin aria-label="${escapeHtml(mapping.device)} ${escapeHtml(mapping.signal)} 引脚">${options}</select></td><td class="pin-status-cell"><span class="mapping-state ${rowIssues.length ? 'is-error' : ''}" title="${escapeHtml(rowIssues.map(issue => issue.message).join('；'))}">${rowIssues.length ? '需处理' : mapping.source === 'user' ? '用户确认' : mapping.source === 'schematic' ? '原理图识别' : 'AI建议'}</span></td><td><button class="mapping-delete" type="button" data-delete-mapping aria-label="删除${escapeHtml(mapping.device)} ${escapeHtml(mapping.signal)}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg></button></td></tr>`;
+  }).join('') : `<tr><td colspan="6">${facts.analyzedAt ? '未识别到主控信号连接；仅供电电路不需分配GPIO。有外设时请补充资料或添加连接。' : '尚未生成引脚建议，请返回资料页进行分析。'}</td></tr>`;
   $('hardware-notes').innerHTML = [...(facts.powerNotes || []), ...(facts.fixedFacts || [])].length
     ? `<ul>${[...(facts.powerNotes || []), ...(facts.fixedFacts || [])].map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
     : '<p>分析后会显示供电、共地和固定通信说明。</p>';
@@ -2128,6 +2489,8 @@ function markMappingEdited() {
 }
 
 function updateMappingPin(select) {
+  const blocked = projectWorkBlocked();
+  if (blocked) { renderPins(); return toast(blocked, 'info'); }
   const row = select.closest('[data-mapping-id]');
   const mapping = project.paper.factSheet.mappings.find(item => item.id === row?.dataset.mappingId);
   if (!mapping) return;
@@ -2139,6 +2502,8 @@ function updateMappingPin(select) {
 }
 
 function deleteMapping(button) {
+  const blocked = projectWorkBlocked();
+  if (blocked) return toast(blocked, 'info');
   const id = button.closest('[data-mapping-id]')?.dataset.mappingId;
   if (!id) return;
   markMappingEdited();
@@ -2148,7 +2513,13 @@ function deleteMapping(button) {
 }
 
 function openMappingDialog() {
+  const blocked = projectWorkBlocked();
+  if (blocked) return toast(blocked, 'info');
   $('mapping-device').value = '';
+  const boardSelect = $('mapping-board');
+  const boards = project?.paper?.factSheet?.boards || [];
+  boardSelect.innerHTML = (boards.length ? boards : [{ id: '', name: '主板', role: '' }]).map((board, index) => `<option value="${escapeHtml(board.id || '')}">${escapeHtml(board.name || `板卡${index + 1}`)}${board.role ? ` · ${escapeHtml(board.role)}` : ''}</option>`).join('');
+  boardSelect.value = boards[0]?.id || '';
   $('mapping-interface').value = 'GPIO';
   $('mapping-signal').value = '';
   $('mapping-dialog').showModal();
@@ -2156,13 +2527,18 @@ function openMappingDialog() {
 
 function addMapping(event) {
   event.preventDefault();
+  const blocked = projectWorkBlocked();
+  if (blocked) return toast(blocked, 'info');
   const device = $('mapping-device').value.trim();
   const interfaceType = $('mapping-interface').value;
   const signal = $('mapping-signal').value.trim().toUpperCase();
+  const boardId = $('mapping-board').value || project.paper.factSheet.boards?.[0]?.id || '';
   if (!device || !signal) return;
+  if (!filterSignalMappings([{ device, signal, interfaceType, boardId }], project.paper.factSheet.devices).length) return toast('此项属于供电或辅助电路，不需要分配主控信号引脚', 'info');
   markMappingEdited();
-  const allowed = compatiblePins(project.paper.factSheet.controller, signal, interfaceType);
-  project.paper.factSheet.mappings.push({ id: makeId('mapping'), device, interfaceType, signal, pin: allowed[0] || '待确认', alternatives: [], busGroup: '', shareAllowed: false, source: 'user' });
+  const board = project.paper.factSheet.boards?.find(item => item.id === boardId);
+  const allowed = compatiblePins(board?.controller || project.paper.factSheet.controller, signal, interfaceType);
+  project.paper.factSheet.mappings.push({ id: makeId('mapping'), boardId, device, interfaceType, signal, pin: allowed[0] || '待确认', alternatives: [], busGroup: '', shareAllowed: false, source: 'user' });
   if (!project.paper.factSheet.devices.some(item => item.model.toLowerCase() === device.toLowerCase())) project.paper.factSheet.devices.push({ id: makeId('device'), model: device, role: '外设', interfaceType });
   $('mapping-dialog').close();
   persistProject();
@@ -3864,6 +4240,7 @@ function renderQuality(quality = currentQualityReport()) {
 }
 
 async function generatePaper() {
+  if (materialImportTasks.size) return toast('资料正在读取，请等待完成后再生成论文', 'info');
   if (requestController) return toast('当前还有任务正在运行', 'info');
   const preflight = preflightPaperGeneration();
   if (preflight.issues.length) {
@@ -4097,6 +4474,12 @@ function bindEvents() {
   });
 
   $('active-project-select').addEventListener('change', event => activateProject(event.target.value));
+  $('btn-retry-save').addEventListener('click', async () => {
+    try { await persistProject({ immediate: true }); }
+    catch (error) { toast(error.message || '保存失败，可在项目页导出备份', 'error'); }
+  });
+  $('btn-backup-unsaved').addEventListener('click', () => { if (project) Store.downloadProjectBackup(project); });
+  $('btn-update-app').addEventListener('click', saveAndReload);
   $('project-import-file').addEventListener('change', importProject);
   $('new-project-form').addEventListener('submit', createProjectFromDialog);
   $('api-connection-status').addEventListener('click', openSettings);
@@ -4130,8 +4513,9 @@ function bindEvents() {
   $('btn-cancel-outline-reference').addEventListener('click',()=>{if(requestTask==='outline-import') requestController?.abort(new DOMException('已取消','AbortError'));});
   $('btn-analyze-scheme-source').addEventListener('click', analyzeImportedScheme);
   $('paper-materials-form').addEventListener('input', event => {
-    if (['paper-code-folder', 'paper-source-file', 'paper-scheme-source', 'paper-scheme-file', 'paper-outline-file', 'paper-scheme-text'].includes(event.target.id)) return;
+    if (event.target.type === 'file' || ['code-file-search', 'paper-scheme-source', 'paper-scheme-text'].includes(event.target.id)) return;
     capturePaperMaterials({ invalidate: true });
+    renderMaterialSummary();
     if (['paper-references', 'paper-use-references', 'paper-reference-count'].includes(event.target.id)) renderReferenceTool();
   });
   $('btn-recommend-references').addEventListener('click', () => recommendReferences());
@@ -4157,6 +4541,7 @@ function bindEvents() {
   $('btn-standalone-clear-results').addEventListener('click', clearStandaloneReferenceResults);
   $('btn-copy-standalone-references').addEventListener('click', copyStandaloneReferences);
   $('paper-code-folder').addEventListener('change', readCodeFiles);
+  $('code-file-search').addEventListener('input', () => renderCodeFileList(project?.paper?.materials?.codeFiles || []));
   $('code-file-list').addEventListener('click', event => {
     const button = event.target.closest('[data-remove-code-file]');
     if (button) removeCodeFile(button.dataset.removeCodeFile);
@@ -4164,6 +4549,10 @@ function bindEvents() {
   $('paper-source-file').addEventListener('change', readSourceDocumentFile);
   $('btn-clear-source-file').addEventListener('click', clearSourceDocument);
   $('paper-schematic-file').addEventListener('change', readSchematicFile);
+  $('schematic-file-list').addEventListener('click', event => {
+    const button = event.target.closest('[data-remove-schematic-file]');
+    if (button) removeSchematicFile(button.dataset.removeSchematicFile);
+  });
   $('btn-reanalyze-pins').addEventListener('click', analyzeHardware);
   $('pin-mapping-body').addEventListener('change', event => { if (event.target.matches('[data-mapping-pin]')) updateMappingPin(event.target); });
   $('pin-mapping-body').addEventListener('click', event => { const button = event.target.closest('[data-delete-mapping]'); if (button) deleteMapping(button); });
@@ -4181,10 +4570,16 @@ function bindEvents() {
   $('btn-download-draft-top').addEventListener('click', () => exportPaper());
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden' && project) persistProject({ immediate: true });
+    if (document.visibilityState === 'hidden' && project) void persistProject({ immediate: true }).catch(error => toast(error.message || '保存失败', 'error'));
     if (document.visibilityState === 'visible' && motivationRefreshDue()) void refreshDailyMotivation({ force: true });
+    if (document.visibilityState === 'visible') void checkAppVersion();
   });
-  window.addEventListener('focus', () => { if (motivationRefreshDue()) void refreshDailyMotivation({ force: true }); });
+  window.addEventListener('focus', () => { if (motivationRefreshDue()) void refreshDailyMotivation({ force: true }); void checkAppVersion(); });
+  window.addEventListener('beforeunload', event => {
+    if (!materialImportTasks.size && !requestController && saveState === 'saved') return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
   window.addEventListener('hashchange', () => {
     const route = location.hash.replace('#', '');
     if (['projects', 'scheme', 'paper', 'tools'].includes(route)) setRoute(route);

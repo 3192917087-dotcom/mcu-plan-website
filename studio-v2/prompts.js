@@ -469,6 +469,10 @@ export function buildSchemeMessages({ title, requirements, functionCount, prefer
 
 器件格式必须为“准确型号  （简短作用）”，例如“STM32F103C8T6  （主控）”“DHT11  （温湿度传感器）”“0.96寸OLED  （屏幕）”。禁止写成96寸OLED。需要独立WiFi模块时默认且只使用ESP-01S，不得输出ESP8266；如果主控本身已具备WiFi，则不要重复堆叠无线模块。功能格式必须为“使用某器件或技术实现某项功能”，每项功能在原有功能名称后补充一小句实现逻辑，说明主控如何处理或控制结果；不要拆成“功能目标、输入、输出、异常处理”等额外栏目。器件与功能必须闭合，不加入与题目无关的堆料。
 
+通信方式与APP开发工具是两个不同约束：App Inventor或Android Studio既不代表WiFi，也不代表蓝牙。通信方式下拉选择独立生效，优先级为附加要求 > 通信方式选择 > 题目中的通信描述 > 按场景自动判断，以resolvedConstraints.communication为最终解析结果。选择蓝牙时使用蓝牙链路，需要独立模块则用HC-05，不得改成ESP-01S或WiFi；选择WiFi时使用WiFi链路，需要独立模块则用ESP-01S，不得改成蓝牙。指定通信方式并不等于选择了APP或云平台，二者未选且未明确要求时不追加APP或云服务，可描述对应的本地终端通信用途。选择不使用通信且communication.disabled为true时，不添加任何外部通信模块或联网功能，主控与外设之间的I2C、SPI、UART不受影响。两种通信均明确需要时分清各自用途；蓝牙与云平台同时需要时，可由独立联网链路完成云端上传，但APP本地蓝牙控制仍保持蓝牙。自动选择且项目确需外部通信时根据实际场景选用一种合理链路，全文一致，不要一会蓝牙一会WiFi，不凭空增加双通信。
+
+新增方案中的模块固定默认型号：蓝牙模块用“HC-05”；独立语音控制模块用“Asrpro语音模块”；电机驱动用“TB6612驱动模块”。不得自行改为HC-06、LD3320、SU-03、L298N等其他型号。用户题目或附加要求明确指定其他具体型号时，以resolvedConstraints.modules中的明确型号为准；对比、候选或否定提及不算指定。器件清单与每条功能的型号及通信方式必须一致；只有实际需要相应功能时才添加这些模块，不为了默认型号额外添加功能。按实际驱动能力设计，不能让TB6612直接驱动不匹配的负载；用户指定其他电机驱动时保留其实际驱动方式。
+
 功能边界是硬性规则：functions只能写系统最终提供给用户或外部对象的可观察功能，例如采集、检测、监测、显示、远程查看、数据上传、阈值控制、报警、记录、查询、设置、调节、识别、手动切换和联动控制。不得把工程配套、连接条件或元件作用当成功能，包括10 kΩ上拉/下拉电阻、电阻、电容、晶振、稳压、电源供电、共地、复位按键、下载/烧录/调试接口、排针、杜邦线、焊接、PCB和“保证通信稳定”等表述。它们只能在器件作用或附加要求中出现；如果某项只有这些内容，直接省略，不要为了凑够数量把它列入functions。不要输出重复或仅换词的功能。
 
 默认硬件约定：除51单片机项目外，主控按常用最小系统开发板选用；开发板使用5V DC输入，并通过板载稳压获得3.3V；需要上拉电阻时统一使用10 kΩ。未指定彩屏而项目确需TFT时使用1.8寸TFT，不使用2.8寸TFT。用户附加要求明确给出其他做法时，以用户要求为准。
@@ -481,13 +485,13 @@ export function buildSchemeMessages({ title, requirements, functionCount, prefer
 
 用户附加要求与下拉选择都属于用户约束；若两者冲突，附加要求优先。主控或屏幕选择为“自动选择”时才由你决定。指定主控必须原型号保留并实际承担控制，不能只在器件列表里列出所选型号却让另一个型号执行功能；不得擅自替换或增加主控。指定屏幕必须按所选屏幕实现显示；屏幕选择为“不使用屏幕”时禁止加入屏幕器件或屏幕显示功能。
 
-云平台空选择表示“不使用云平台”，绝不是“自动选择”。没有选择云平台且附加要求没有明确要求云服务时，即使题目包含WiFi、手机APP、远程查看，也不得自行增加OneNET、阿里云IoT、巴法云、点灯科技Blinker、私有物联网服务器、其他云品牌或泛称的云端服务。WiFi与APP不等于云平台。仅当已选择APP或附加要求明确需要手机/无线通信时，才用局域网直连、设备热点或其他无需云的可行方式；不得把局域网方式冒充跨地域公网远程控制。已选择云平台时，必须在真实的数据上传、远程查看或指令控制功能中说明所选平台用途，不得换成别家或另外增加平台。附加要求明确指定云平台时优先采用；只要求云服务而未指定品牌时，使用泛称“云平台”，不擅自挑品牌。云平台不是实体器件，不混入器件清单。选择“点灯科技 Blinker”时可采用平台官方客户端完成数据显示和设备控制，无需自行开发APP；主控已有联网能力时不额外增加ESP-01S。云平台和APP的未选状态属于内部约束，客户方案只描述实际采用的通信方式，不要专门输出“未使用云平台”或类似否定说明。
+云平台空选择表示“不使用云平台”，绝不是“自动选择”。没有选择云平台且附加要求没有明确要求云服务时，即使题目包含WiFi、手机APP、远程查看，也不得自行增加OneNET、阿里云IoT、巴法云、点灯科技Blinker、私有物联网服务器、其他云品牌或泛称的云端服务。WiFi与APP不等于云平台。resolvedConstraints.communicationAllowed为true且未使用云平台时，采用蓝牙直连、局域网直连、设备热点或其他符合所选链路的可行方式；不得把局域网方式冒充跨地域公网远程控制。已选择云平台时，必须在真实的数据上传、远程查看或指令控制功能中说明所选平台用途，不得换成别家或另外增加平台。附加要求明确指定云平台时优先采用；只要求云服务而未指定品牌时，使用泛称“云平台”，不擅自挑品牌。云平台不是实体器件，不混入器件清单。选择“点灯科技 Blinker”时可采用平台官方客户端完成数据显示和设备控制，无需自行开发APP；主控已有联网能力时不额外增加ESP-01S。云平台和APP的未选状态属于内部约束，客户方案只描述实际采用的通信方式，不要专门输出“未使用云平台”或类似否定说明。
 
-APP设计软件的空选择同样表示“不使用”，不是让你自动选择APP设计工具。APP与云平台都未选择，并且附加要求没有明确要求APP、云服务或外部通信时，禁止加入ESP-01S、蓝牙、LoRa、4G、以太网等额外通信模块，禁止自动追加手机查看、联网、无线传输或远程控制功能。功能数量不足应补充贴合题目的本地检测、显示、报警、操作或控制行为，不得靠通信功能凑数。若所选主控为ESP32等自带WiFi的芯片，可以正常保留该主控，但不要自动启用其联网功能。此规则不禁止传感器与主控之间的I2C、SPI、UART等内部接口。附加要求明确要求外部通信时仍优先执行。
+APP设计软件的空选择同样表示“不使用”，不是让你自动选择APP设计工具。APP与云平台都未选择、通信方式为自动选择，并且题目及附加要求没有明确要求APP、云服务或外部通信时，禁止加入ESP-01S、蓝牙、LoRa、4G、以太网等额外通信模块，禁止自动追加手机查看、联网、无线传输或远程控制功能。以resolvedConstraints.communicationAllowed判定是否允许外部通信；为false时只能补充项目本地功能。功能数量不足应补充贴合题目的本地检测、显示、报警、操作或控制行为，不得靠通信功能凑数。若所选主控为ESP32等自带WiFi的芯片，可以正常保留该主控，但不要自动启用其联网功能。此规则不禁止传感器与主控之间的I2C、SPI、UART等内部接口。附加要求明确要求外部通信时仍优先执行。
 
-编程软件是开发实现约束，选择了Keil 5、STM32CubeMX、IAR或Arduino IDE时，应据此保证主控和实现路径可用；没有选择时按主控合理确定。编译、烧录、程序编写、工程配置不能成为面向用户的功能，编程软件也不能当作器件。已选择APP设计软件时，必须在对应的手机或小程序交互功能中体现所选工具，例如“使用MIT App Inventor制作手机端，通过ESP-01S直连实现状态查看和设备控制”，不能忽略已选软件，不能为了APP自行追加云平台。未选择APP设计软件时不自行加入App Inventor、Android Studio或自制微信小程序；已选择云平台可使用该平台现成的官方客户端或网页。软件名称不要混入器件清单。
+编程软件是开发实现约束，选择了Keil 5、STM32CubeMX、IAR或Arduino IDE时，应据此保证主控和实现路径可用；没有选择时按主控合理确定。编译、烧录、程序编写、工程配置不能成为面向用户的功能，编程软件也不能当作器件。已选择APP设计软件时，必须在对应的手机或小程序交互功能中体现所选工具，例如蓝牙方案写“使用MIT App Inventor制作手机端，通过HC-05蓝牙模块查看状态和下发控制指令”；WiFi方案则使用其实际WiFi链路。不能忽略已选软件，不能为了APP自行追加云平台。未选择APP设计软件时不自行加入App Inventor、Android Studio或自制微信小程序；已选择云平台可使用该平台现成的官方客户端或网页。软件名称不要混入器件清单。
 
-resolvedConstraints是对用户配置及明确附加要求整理后的约束，逐项检查其中的主控、屏幕、云平台和功能数量。若附加要求存在它未识别的明确冲突，不要含糊掩盖，也不能无依据地覆盖用户配置。
+resolvedConstraints是对用户配置及明确附加要求整理后的约束，逐项检查其中的主控、屏幕、通信方式、APP、云平台和功能数量。若附加要求存在它未识别的明确冲突，不要含糊掩盖，也不能无依据地覆盖用户配置。
 
 ${qualityGuard ? `上一次结果校验反馈：${qualityGuard}。请优先修正这些问题后再返回完整JSON。` : ''}
 
@@ -518,16 +522,20 @@ export function buildHardwareMessages(materials) {
       role: 'system',
       content: `你是单片机项目硬件事实整理工程师。用户填写内容优先，不能擅自替换。资料只有题目时给出一套常见、真实、适合本科制作的建议；资料部分缺失时只补缺失项。用户不需要预先填写硬件连接关系，你必须先根据器件型号识别通信方式和所需信号，再依据主控资源生成供用户下拉确认的引脚建议。必须识别准确主控型号、外设型号、接口类型和每个接口需要的信号。不要把VCC、GND放入GPIO分配，但必须在powerNotes中说明供电电压和共地关系。需要独立WiFi模块时使用ESP-01S，禁止输出ESP8266；人体检测类项目默认使用TCRT5000（人体红外传感器），不得自行输出HC-SR501或LD2410；屏幕未明确指定且确需彩屏时使用1.8寸TFT，不使用2.8寸TFT。不要声称项目无法完成。
 
+器件与引脚只列与主控有实际数据、控制、采样或状态信号连接的外设。devices可以保留完整硬件事实，但mappings不得加入单纯供电、稳压、滤波、上拉电阻、晶振、主控复位、下载接口、PCB、APP或云平台；这些内容写入powerNotes或fixedFacts。AMS1117、7805等稳压器不得虚构CTRL脚，更不能把VCC、GND、VIN、VOUT、3.3V、5V等端子改成GPIO。电压/电流传感器接ADC或I2C应正常保留；只有资料明确存在的电源EN使能、PG/CHRG状态等主控信号才可列映射。无法确认时记录待核对原因，不凭空生成控制脚。
+
 开发软件必须结合识别出的主控型号和所选程序文件后缀给出：STM32固定为Keil 5和STM32CubeMX；STC、AT89等51单片机固定为Keil 5；Arduino UNO和ESP32固定为Arduino IDE；其他主控根据其官方或主流工具链选择，不得沿用错误平台的软件。developmentTools只放编译、配置、下载或程序开发软件，不放万用表、示波器等硬件工具。
 
 supplementalDocumentText是用户上传的任务书或开题报告。它只能用于提取课题背景、行业需求、研究方向和明确的设计约束，并压缩写入backgroundNotes；不得从该文档提取、补充或覆盖器件清单、功能要求、引脚和测试结果。功能事实以userFunctions及导入方案为准；二者为空时才根据题目给出合理基础功能，也不能把任务书中的功能段落直接当成已确认方案。
+
+复杂项目识别：projectTopology为multi，或资料明确存在主板/从板、主控/从控、节点/网关及独立程序职责时，必须拆分boards。自动判断时，多张PDF或多个文件夹只是线索：同一块板可以有多份原理图，一个程序工程也常有Core、Drivers、User等目录，不能据此强行拆板。projectTopology为single时按用户确认的单板结构处理，发现真实多板矛盾则写conflicts供核对。程序的group及路径中的主板/从板等标签作为归属依据。每块板独立建立id、name、role、controller、schematicFilenames、programPaths、deviceModels、functionNames和communication；不能把两块板的器件、引脚或程序混为一个主控。根据文件名和程序路径进行归属，无法确定时写入notes或conflicts并标记待确认，不要猜测。跨板UART、I2C、SPI、CAN、RS485、无线链路等必须单独写入communication，并在mappings中使用对应boardId，说明发送板、接收板和信号。返回结果时boards必须存在；单板也返回一个board-main档案，普通项目保持原有写作路径。
 
 如果schematicText来自PDF原理图，先把其中明确出现的型号、网络名和引脚当作最高优先级事实；只对文本中确实出现的连接生成mapping。PDF文字可能把标签挤在一起，无法确定连接时使用“待确认”并在conflicts说明，不要猜测。STM32F103C8T6的I2C2默认脚为PB10=SCL、PB11=SDA，I2C1常用PB6/PB7或重映射PB8/PB9，不能因为PB10/PB11属于串口复用而漏掉它们。
 
 默认硬件事实必须写入powerNotes或fixedFacts：除STC、AT89等51单片机外，主控视为最小系统开发板；开发板使用5V DC输入，板载稳压得到3.3V，5V外设接5V电源轨，系统所有模块共地；凡使用上拉电阻均统一为10 kΩ。默认使用PCB承载或接口连接板，默认制图软件是嘉立创专业版，与最小系统开发板并不冲突。只有用户明确提供不同事实时才按用户事实覆盖这些默认项。
 
 I2C设备列SCL、SDA；UART设备列TX、RX；SPI设备列SCK、MISO、MOSI及每个设备独立CS；模拟传感器列AO/ADC；普通控制列CTRL；有实际需要时列INT、RST、EN。推荐引脚必须考虑主控的准确具体型号、芯片封装、开发板实际引出脚和常见复用关系，不能把STM32F103的端口套用到其他STM32系列，也不能把Arduino、ESP32或51单片机的命名混用。若具体型号不明确，宁可把pin设为“待确认”并在conflicts说明，也不能编造不存在的引脚。I2C等总线可合理共享，并用同一busGroup标识。只返回JSON：
-{"controller":"准确主控型号","developmentTools":["与主控对应的软件"],"backgroundNotes":"仅从任务书或开题报告提取的背景方向，未上传则为空","devices":[{"model":"型号","role":"作用","interfaceType":"GPIO/I2C/UART/SPI/ADC/1-Wire等"}],"functions":[{"name":"功能","deviceModels":["关联器件"]}],"mappings":[{"device":"器件型号","interfaceType":"接口","signal":"SCL等","pin":"PB6","alternatives":["PB8"],"busGroup":"I2C1或空","shareAllowed":true}],"powerNotes":["供电与共地说明"],"fixedFacts":["确定的通信常识"],"conflicts":["仅用户资料明确矛盾时填写"]}`,
+{"controller":"准确主控型号","developmentTools":["与主控对应的软件"],"backgroundNotes":"仅从任务书或开题报告提取的背景方向，未上传则为空","boards":[{"id":"board-main","name":"主板","role":"主控板","controller":"准确主控型号","schematicFilenames":["主板.pdf"],"programPaths":["主板工程/main.c"],"deviceModels":["主控及本板器件"],"functionNames":["本板功能"],"communication":["与从板的UART或其他链路；无则为空"],"notes":"无法确认的归属写这里"}],"devices":[{"model":"型号","role":"作用","interfaceType":"GPIO/I2C/UART/SPI/ADC/1-Wire等","boardId":"board-main"}],"functions":[{"id":"function-1","name":"功能","deviceModels":["关联器件"],"boardIds":["board-main"]}],"mappings":[{"id":"mapping-1","boardId":"board-main","device":"器件型号","interfaceType":"接口","signal":"SCL等","pin":"PB6","alternatives":["PB8"],"busGroup":"I2C1或空","shareAllowed":true}],"powerNotes":["供电与共地说明"],"fixedFacts":["确定的通信常识"],"conflicts":["仅用户资料明确矛盾时填写"]}`,
     },
     {
       role: 'system',
@@ -604,7 +612,7 @@ referenceUnits每项必须且只能有一条referenceUsage：referenceId原样�
     task: repairing ? '修复上一版目录结构，完整返回修复后的JSON' : '按参考框架生成唯一一版完整目录',
     title,
     targetBodyCharacters: Math.max(MIN_BODY_CHARS, Math.min(40000, Number(targetBodyChars) || MIN_BODY_CHARS)),
-    confirmedFacts: { controller: facts?.controller, devices: facts?.devices || [], functions: facts?.functions || [], fixedFacts: facts?.fixedFacts || [] },
+    confirmedFacts: { controller: facts?.controller, boards: facts?.boards || [], devices: facts?.devices || [], functions: facts?.functions || [], fixedFacts: facts?.fixedFacts || [] },
     userReferenceOutline: reference.rawText || '未提供，依据当前项目独立组织结构',
     referenceUnits: reference.units,
     referenceStructure: {mode:reference.mode,chapters:reference.chapters,chapterCount:reference.chapterCount,minimumChapterCount:reference.minimumChapterCount,allChaptersHaveSummary:reference.allChaptersHaveSummary,unnumberedConclusion:reference.unnumberedConclusion},
@@ -668,6 +676,7 @@ export function buildChapterMessages({ project, chapter, outline, artifacts, com
 通用铁律：
 1. 用户确认资料最高优先级；不得改换主控、器件、引脚、接口、功能。
 1.1 全文不得出现ESP8266；独立WiFi模块统一写ESP-01S。
+1.2 只有当confirmedFacts.boards中至少有两块板卡时，正文才必须按板卡分别说明主控、程序职责、器件连接、板间通信和各自功能；主板与从板不能合并成一个程序或一张引脚表。单板项目即使携带一个board-main兼容档案，也保持原有单板写法。
 2. 遵守章节职责，选型、硬件连接、程序逻辑、测试内容不得跨章重复。同一事实只在最合适的位置详细写一次，其他位置最多用一句承担衔接，不得换词复述。completedChapterDigest中已经出现的参数、原理、步骤、结论和图表不得再次详细展开。不得重复已经写过的二级或三级标题；相邻小节不能使用相同的段落开头、论证顺序或结论句式。若两个小节职责接近，应合并为一个完整论证，不要复制一套内容后换标题。
 3. 标题必须单独成行且不使用Markdown井号。二级标题严格写成“x.x 标题”，三级标题严格写成“x.x.x 标题”。必须完整保留requiredSections给出的标题并按顺序写作；不得自行增加三级标题。三级标题只承担目录已经确认的分类，不按每个器件、功能或测试项目继续细拆，同类内容在同一标题下用自然段组织。
 4. 不插入源代码，不用具体函数名作为主体介绍。
@@ -690,6 +699,7 @@ export function buildChapterMessages({ project, chapter, outline, artifacts, com
     pcbPolicy:pcbDesignPolicy(facts,project.paper.materials),
     confirmedFacts: {
       controller: facts.controller,
+      boards: facts.boards || [],
       devices: devicePlanGroups(facts.devices || [], facts.controller),
       functions: facts.functions,
       pinMappings: facts.mappings,

@@ -133,7 +133,7 @@ async function runGeneration(responses, { count = 8, mode = 'custom', selected =
   const status = {};
   const context = vm.createContext({
     project: { title: '环境监测', scheme: { title: '环境监测', requirements, countMode: mode, functionCount: count, preferences: selected, structured: oldScheme, text: oldScheme ? '原来的方案' : '', status: oldScheme ? 'ready' : 'empty' } },
-    requestController: null, requestTask: '', schemeStep: 'input', AbortController,
+    requestController: null, requestTask: '', schemeStep: 'input', AbortController, materialImportTasks: new Set(),
     buildSchemePolicy, schemeResultIssues, Prompts: { buildSchemeMessages },
     captureScheme() {}, renderSchemePreview() {}, renderScheme() {}, nowIso: () => '2026-10-11',
     qs: () => submit, $: () => status,
@@ -207,4 +207,26 @@ const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 assert.ok(/data-multi-select="appSoftware"[^]*?<strong data-multi-summary>不使用<\/strong>/.test(html));
 assert.ok(html.includes('value="点灯科技 Blinker"'));
 
-console.log(JSON.stringify({ status: 'ok', coverage: ['reference-count', 'scene-fit', 'support-exclusion', 'controller', 'display', 'cloud-opt-in', 'cloud-selection', 'app-selection', 'no-communication-default', 'internal-bus-preserved', 'esp32-controller-preserved', 'blinker', 'empty-selection-labels', 'requirements-priority', 'bounded-repair', 'preserve-old-scheme', 'button-recovery', 'random-count-stability'], paidApiCalls: 0 }));
+const bluetoothScheme = {...scheme(), devices:[...scheme().devices,{model:'HC-05',role:'蓝牙模块'}], functions:[...functions.slice(0,7),'使用HC-05通过蓝牙APP查询环境状态并控制风扇']};
+const wrongWifiScheme = {...scheme(),devices:[...scheme().devices,{model:'ESP-01S',role:'WiFi模块'}],functions:[...functions.slice(0,7),'使用ESP-01S通过WiFi APP查询环境状态并控制风扇']};
+run = await runGeneration([wrongWifiScheme, bluetoothScheme],{requirements:'手机APP采用蓝牙通信'});
+assert.equal(run.requests.length,2,'a WiFi response to a Bluetooth request must be repaired before saving');
+assert.equal(run.saves.length,1);
+assert.ok(run.context.project.scheme.structured.devices.some(d=>d.model==='HC-05'));
+run = await runGeneration([wrongWifiScheme,bluetoothScheme],{requirements:'需要手机APP',selected:{...preferences,communicationMode:'bluetooth'}});
+assert.equal(run.requests.length,2,'dropdown Bluetooth request repairs an incorrect WiFi result');
+assert.deepEqual(run.requests[0].resolvedConstraints.communication.required,['bluetooth']);
+run = await runGeneration([bluetoothScheme,wrongWifiScheme],{requirements:'需要手机APP',selected:{...preferences,communicationMode:'wifi'}});
+assert.equal(run.requests.length,2,'dropdown WiFi request repairs an incorrect Bluetooth result');
+assert.deepEqual(run.requests[0].resolvedConstraints.communication.required,['wifi']);
+run = await runGeneration([scheme()],{selected:{...preferences,communicationMode:'none',appSoftware:['MIT App Inventor']},oldScheme:scheme()});
+assert.equal(run.requests.length,0,'conflicting settings are caught before a paid API call');
+assert.equal(run.saves.length,0);
+assert.equal(run.context.project.scheme.text,'原来的方案');
+assert.ok(run.notifications.some(item=>item.kind==='error' && item.message.includes('通信')));
+const wrongVoiceScheme = {...scheme(),devices:[...scheme().devices,{model:'LD3320',role:'语音模块'}],functions:[...functions.slice(0,7),'使用LD3320识别语音指令并控制风扇']};
+const correctVoiceScheme = {...scheme(),devices:[...scheme().devices,{model:'Asrpro语音模块',role:'语音识别'}],functions:[...functions.slice(0,7),'使用Asrpro语音模块识别语音指令并控制风扇']};
+run = await runGeneration([wrongVoiceScheme,correctVoiceScheme]);
+assert.equal(run.requests.length,2,'a default module mismatch is repaired in both devices and features');
+assert.equal(run.saves.length,1);
+console.log(JSON.stringify({ status: 'ok', coverage: ['reference-count', 'scene-fit', 'support-exclusion', 'controller', 'display', 'cloud-opt-in', 'cloud-selection', 'app-selection', 'no-communication-default', 'internal-bus-preserved', 'esp32-controller-preserved', 'blinker', 'empty-selection-labels', 'requirements-priority', 'bounded-repair', 'preserve-old-scheme', 'button-recovery', 'random-count-stability','bluetooth-vs-wifi-repair','fixed-module-repair'], paidApiCalls: 0 }));

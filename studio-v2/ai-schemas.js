@@ -11,9 +11,10 @@ export const AI_SCHEMAS = Object.freeze({
   import: object({ title: text, devices: array(device), functions: texts, sourceNotes: text }),
   hardware: object({
     controller: text, developmentTools: texts, backgroundNotes: text,
-    devices: array(object({ model: text, role: text, interfaceType: text })),
-    functions: array(object({ name: text, deviceModels: texts })),
-    mappings: array(object({ device: text, interfaceType: text, signal: text, pin: text, alternatives: texts, busGroup: text, shareAllowed: { type: 'boolean' } })),
+    boards: array(object({ id: text, name: text, role: text, controller: text, schematicFilenames: texts, programPaths: texts, deviceModels: texts, functionNames: texts, communication: texts, notes: text })),
+    devices: array(object({ model: text, role: text, interfaceType: text, boardId: text })),
+    functions: array(object({ id: text, name: text, deviceModels: texts, boardIds: texts })),
+    mappings: array(object({ id: text, boardId: text, device: text, interfaceType: text, signal: text, pin: text, alternatives: texts, busGroup: text, shareAllowed: { type: 'boolean' } })),
     powerNotes: texts, fixedFacts: texts, conflicts: texts,
   }),
   references: object({ selected: array(object({ id: text, reason: text })), summary: text }),

@@ -6,11 +6,12 @@
   <meta name="theme-color" content="#f6f8f7">
   <title>雄鸡工作室｜单片机方案与论文</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="styles.css?v=20261022-1">
+  <link rel="stylesheet" href="styles.css?v=20261118-2">
 </head>
 <body>
   <a class="skip-link" href="#workspace-main">跳到主要内容</a>
   <div class="app-shell">
+    <div class="update-notice" id="update-notice" role="status" hidden><span>新版本已就绪，更新后可使用最新修复。</span><button class="button button-secondary" id="btn-update-app" type="button">保存并更新页面</button></div>
     <header class="topbar">
       <button class="brand" type="button" data-route="projects" aria-label="返回项目库">
         <span class="brand-mark" aria-hidden="true">
@@ -144,10 +145,11 @@
                   <label class="count-field" id="scheme-count-wrap" hidden><span class="sr-only">功能数量</span><input id="scheme-count" type="number" min="3" max="20" value="8"></label>
                 </fieldset>
                 <section class="scheme-preferences" aria-labelledby="scheme-preferences-title">
-                  <div class="section-title compact-section-title"><span>可选约束</span><h2 id="scheme-preferences-title">指定项目常用配置</h2><p>APP和云平台均未选时不添加通信模块，附加要求优先。</p></div>
+                  <div class="section-title compact-section-title"><span>可选约束</span><h2 id="scheme-preferences-title">指定项目常用配置</h2><p>通信方式可单独指定，附加要求优先。</p></div>
                   <div class="preference-grid">
                     <label class="field" for="scheme-controller"><span>主控</span><select id="scheme-controller"><option value="auto">自动选择</option><option>STM32F103C8T6</option><option>STM32F407ZGT6</option><option>STC89C52RC</option><option>AT89C52</option><option>ESP32</option></select></label>
                     <label class="field" for="scheme-display"><span>屏幕</span><select id="scheme-display"><option value="auto">自动选择</option><option value="none">不使用屏幕</option><option>0.96寸OLED</option><option>LCD1602</option><option>1.8寸TFT</option><option>数码管</option></select></label>
+                    <label class="field" for="scheme-communication"><span>通信方式</span><select id="scheme-communication"><option value="auto">自动选择</option><option value="bluetooth">蓝牙</option><option value="wifi">WiFi</option><option value="none">不使用通信</option></select></label>
                     <details class="multi-select" data-multi-select="programmingSoftware"><summary><span>编程软件</span><strong data-multi-summary>自动选择</strong></summary><div class="multi-select-panel"><label><input type="checkbox" value="Keil 5">Keil 5</label><label><input type="checkbox" value="STM32CubeMX">STM32CubeMX</label><label><input type="checkbox" value="IAR">IAR</label><label><input type="checkbox" value="Arduino IDE">Arduino IDE</label></div></details>
                     <details class="multi-select" data-multi-select="appSoftware"><summary><span>APP设计软件</span><strong data-multi-summary>不使用</strong></summary><div class="multi-select-panel"><label><input type="checkbox" value="MIT App Inventor">MIT App Inventor</label><label><input type="checkbox" value="Android Studio">Android Studio</label><label><input type="checkbox" value="微信小程序">微信小程序</label></div></details>
                     <details class="multi-select" data-multi-select="cloudPlatforms"><summary><span>云平台</span><strong data-multi-summary>不使用</strong></summary><div class="multi-select-panel"><label><input type="checkbox" value="OneNET">OneNET</label><label><input type="checkbox" value="阿里云IoT">阿里云IoT</label><label><input type="checkbox" value="巴法云">巴法云</label><label><input type="checkbox" value="点灯科技 Blinker">点灯科技 Blinker</label><label><input type="checkbox" value="私有物联网服务器">私有物联网服务器</label></div></details>
@@ -185,7 +187,7 @@
           <div class="workspace-content paper-content">
             <div class="page-head paper-head">
               <div><p class="eyebrow">论文写作</p><h1 id="paper-title">准备论文资料</h1><p id="paper-step-description">题目必填，其他资料按实际情况提供。</p></div>
-              <button class="button button-secondary draft-download" id="btn-download-draft-top" type="button" disabled>下载当前稿</button>
+              <div class="head-actions"><span class="save-status" id="project-save-status" role="status">资料自动保存在当前浏览器</span><button class="button button-secondary" id="btn-retry-save" type="button" hidden>重试保存</button><button class="button button-secondary" id="btn-backup-unsaved" type="button" hidden>导出本页备份</button><button class="button button-secondary draft-download" id="btn-download-draft-top" type="button" disabled>下载当前稿</button></div>
             </div>
 
             <section class="step-panel is-active" data-paper-panel="materials">
@@ -229,12 +231,14 @@
                 </div>
 
                 <details class="advanced-section" id="paper-advanced-section">
-                  <summary><span>补充资料</span><small>程序、参考文献、测试、照片和学校要求</small><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg></summary>
+                  <summary><span>补充资料</span><small id="paper-materials-summary">程序、原理图、参考目录等，按需提供</small><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg></summary>
                   <div class="advanced-content field-grid">
                     <div class="field field-wide">
-                      <span>程序文件 <small>可在文件夹中按需多选，支持常见单片机、Arduino、ESP32及汇编工程</small></span>
+                      <span>程序文件 <small>从一个文件夹添加后，可再次打开其他文件夹继续添加</small></span>
                       <label class="file-drop" for="paper-code-folder"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/><path d="M12 10v6M9 13h6"/></svg><strong>选择需要分析的程序文件</strong><small id="code-file-summary">尚未选择，可分多次追加</small></label>
                       <input class="sr-only" id="paper-code-folder" type="file" multiple accept=".c,.h,.cc,.cpp,.cxx,.hh,.hpp,.hxx,.ino,.pde,.s,.asm,.a51,.src,.inc,.py,.ld,.lds,.ioc,.cfg,.conf,.ini,.json,.yaml,.yml,.toml,.dts,.overlay,.kconfig,.mk,.cmake,.txt,.uvprojx,.uvoptx,.ewp,text/plain">
+                      <div class="material-actions"><label class="sr-only" for="code-file-search">查找已添加的程序文件</label><input id="code-file-search" type="search" placeholder="查找已添加的文件" aria-controls="code-file-list"></div>
+                      <p class="material-import-status" id="code-import-status" role="status" hidden></p>
                       <div id="code-file-list" class="selected-file-list" aria-live="polite"></div>
                     </div>
                     <div class="field field-wide">
@@ -245,9 +249,20 @@
                     </div>
                     <div class="field field-wide">
                       <span>PDF原理图 <small>先提取可读文字，再由AI整理器件和引脚；扫描图需先转为可复制文字</small></span>
-                      <label class="file-drop file-drop-compact" for="paper-schematic-file"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v5h5M9 13h6M9 17h6"/></svg><strong>选择PDF原理图</strong><small id="schematic-file-summary">尚未选择</small></label>
-                      <input class="sr-only" id="paper-schematic-file" type="file" accept="application/pdf,.pdf">
+                      <label class="file-drop file-drop-compact" for="paper-schematic-file"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v5h5M9 13h6M9 17h6"/></svg><strong>添加PDF原理图（可多选）</strong><small id="schematic-file-summary">尚未选择，可分多次追加</small></label>
+                      <input class="sr-only" id="paper-schematic-file" type="file" multiple accept="application/pdf,.pdf">
+                      <p class="material-import-status" id="schematic-import-status" role="status" hidden></p>
+                      <div id="schematic-file-list" class="selected-file-list" aria-live="polite"></div>
                       <textarea class="sr-only" id="paper-schematic-text" aria-label="原理图提取文字"></textarea>
+                    </div>
+                    <div class="field field-wide board-topology-field">
+                      <label for="paper-topology"><span>项目结构 <small>普通题目保持自动；多张原理图或多套程序可选择多板项目</small></span></label>
+                      <select id="paper-topology">
+                        <option value="auto">AI自动判断</option>
+                        <option value="single">单板项目</option>
+                        <option value="multi">多板项目（主板/从板等）</option>
+                      </select>
+                      <small>AI会依据原理图文件名、主控型号、程序路径和通信关系归类；分析后可在下一步核对每块板。</small>
                     </div>
                     <div class="field field-wide outline-reference-field">
                       <label for="paper-outline-reference">参考目录 <small>可选，保留学校目录的章节安排和内容方向</small></label>
@@ -299,6 +314,7 @@
                 <button class="button button-secondary" id="btn-reanalyze-pins" type="button">重新分析</button>
               </div>
               <div class="fact-strip" id="hardware-fact-strip"></div>
+              <div class="board-summary" id="board-summary" aria-live="polite"></div>
               <div class="conflict-summary" id="pin-conflict-summary" hidden></div>
               <div class="pin-table-wrap"><table class="pin-table"><thead><tr><th>器件</th><th>接口</th><th>信号</th><th>引脚</th><th>状态</th><th><span class="sr-only">操作</span></th></tr></thead><tbody id="pin-mapping-body"></tbody></table></div>
               <button class="inline-add" id="btn-add-mapping" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>添加遗漏的器件或信号</button>
@@ -351,10 +367,11 @@
   <dialog class="dialog" id="mapping-dialog" aria-labelledby="mapping-title">
     <form method="dialog" id="mapping-form">
       <header><div><p class="eyebrow">补充连接</p><h2 id="mapping-title">添加器件信号</h2></div><button class="icon-button" type="button" data-close-dialog aria-label="关闭"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-      <div class="field-grid"><label class="field"><span>器件型号</span><input id="mapping-device" required></label><label class="field"><span>接口类型</span><select id="mapping-interface"><option>GPIO</option><option>I2C</option><option>UART</option><option>SPI</option><option>ADC</option><option>1-Wire</option><option>PWM</option></select></label><label class="field field-wide"><span>信号名称</span><input id="mapping-signal" required placeholder="例如：SCL、DATA、CTRL"></label></div>
+      <div class="field-grid"><label class="field"><span>器件型号</span><input id="mapping-device" required></label><label class="field"><span>所属板卡 <small>多板项目必选</small></span><select id="mapping-board"><option value="">主板</option></select></label><label class="field"><span>接口类型</span><select id="mapping-interface"><option>GPIO</option><option>I2C</option><option>UART</option><option>SPI</option><option>ADC</option><option>1-Wire</option><option>PWM</option></select></label><label class="field field-wide"><span>信号名称</span><input id="mapping-signal" required placeholder="例如：SCL、DATA、CTRL"></label></div>
       <footer><button class="button button-secondary" type="button" data-close-dialog>取消</button><button class="button button-primary" type="submit">添加</button></footer>
     </form>
   </dialog>
+
 
   <dialog class="dialog settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
     <form method="dialog" id="settings-form">
@@ -385,6 +402,6 @@
   <script>if (globalThis.pdfjsLib) globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';</script>
   <script src="vendor/docx.umd.js"></script>
   <script src="docx-export.js?v=20260901-3"></script>
-  <script type="module" src="app.js?v=20261027-1"></script>
+  <script type="module" src="app.js?v=20261118-4"></script>
 </body>
 </html>

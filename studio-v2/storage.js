@@ -53,7 +53,7 @@ export async function listProjects() {
     const transaction = db.transaction(PROJECT_STORE, 'readonly');
     const request = transaction.objectStore(PROJECT_STORE).getAll();
     request.onsuccess = () => {
-      const projects = Array.isArray(request.result) ? request.result : [];
+      const projects = Array.isArray(request.result) ? request.result.map(item => ({ ...item, storageRevision: item.storageRevision || item.updatedAt || '' })) : [];
       projects.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
       resolve(projects);
     };
@@ -67,7 +67,7 @@ export async function getProject(id) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(PROJECT_STORE, 'readonly');
     const request = transaction.objectStore(PROJECT_STORE).get(id);
-    request.onsuccess = () => resolve(request.result || null);
+    request.onsuccess = () => resolve(request.result ? { ...request.result, storageRevision: request.result.storageRevision || request.result.updatedAt || '' } : null);
     request.onerror = () => reject(request.error || new Error('项目读取失败'));
   });
 }
@@ -76,7 +76,34 @@ export async function saveProject(project) {
   if (!project?.id) throw new Error('项目编号缺失，无法保存');
   const snapshot = structuredClone(project);
   snapshot.updatedAt = new Date().toISOString();
-  await transact('readwrite', store => store.put(snapshot));
+  const expectedRevision = project.storageRevision || '';
+  snapshot.storageRevision = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const db = await openDatabase();
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction(PROJECT_STORE, 'readwrite');
+    const store = transaction.objectStore(PROJECT_STORE);
+    let failure;
+    const request = store.get(snapshot.id);
+    request.onsuccess = () => {
+      const current = request.result;
+      if (current && (current.storageRevision || current.updatedAt || '') !== expectedRevision) {
+        failure = new Error('此项目已在另一页面更新，已阻止覆盖。请先导出本页备份，再刷新读取最新项目');
+        failure.code = 'PROJECT_SAVE_CONFLICT';
+        transaction.abort();
+        return;
+      }
+      if (!current && expectedRevision) {
+        failure = new Error('此项目已被删除，已保留本页内容。请导出本页备份后作为新项目导入');
+        transaction.abort();
+        return;
+      }
+      try { store.put(snapshot); }
+      catch (error) { failure = error; transaction.abort(); }
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(failure || transaction.error || new Error('项目保存失败'));
+    transaction.onabort = () => reject(failure || transaction.error || new Error('项目保存失败'));
+  });
   return snapshot;
 }
 
@@ -128,14 +155,16 @@ export async function importProjectFile(file, normalizeProject) {
   const source = raw?.project || raw;
   if (!source || typeof source !== 'object') throw new Error('项目备份内容无效');
   const project = normalizeProject(source, { imported: true });
-  await saveProject(project);
+  delete project.storageRevision;
+  const saved = await saveProject(project);
   setActiveProjectId(project.id);
-  return project;
+  return saved;
 }
 
 export async function duplicateProject(source, normalizeProject) {
   const copy = normalizeProject(structuredClone(source), { duplicate: true });
-  await saveProject(copy);
+  delete copy.storageRevision;
+  const saved = await saveProject(copy);
   setActiveProjectId(copy.id);
-  return copy;
+  return saved;
 }

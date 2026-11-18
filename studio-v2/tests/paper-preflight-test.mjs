@@ -46,7 +46,7 @@ function fixture() {
 }
 const unique = values => [...new Set(values.map(String).filter(Boolean))];
 function sandbox(project) {
-  const ctx = vm.createContext({ project, Prompts, devicePlanGroups, matchesDevice, paperMaterialPreflight, findRoleChapter, hasChapterRole, selectionChapter,effectiveReferenceText,
+  const ctx = vm.createContext({ project, materialImportTasks: new Set(), Prompts, devicePlanGroups, matchesDevice, paperMaterialPreflight, findRoleChapter, hasChapterRole, selectionChapter,effectiveReferenceText,
     FIGURE_ARTIFACT_TYPES, TABLE_ARTIFACT_TYPES, unique, nowIso: () => 'test-time',
     combinedPinIssues: () => validateMappings(project.paper.factSheet.controller, project.paper.factSheet.mappings),
     desiredBodyChars: () => 15000 });
